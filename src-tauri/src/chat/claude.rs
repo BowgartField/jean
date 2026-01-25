@@ -1,5 +1,11 @@
+use std::collections::HashMap;
+
 use tauri::{Emitter, Manager};
 
+use super::background::{
+    new_background_tailers, parse_background_task_result, spawn_background_tailer,
+    stop_all_background_tailers,
+};
 use super::types::{ContentBlock, ThinkingLevel, ToolCall, UsageData};
 use crate::projects::github_issues::{
     get_github_contexts_dir, get_worktree_issue_refs, get_worktree_pr_refs,
@@ -568,6 +574,10 @@ pub fn tail_claude_output(
     let mut cancelled = false;
     let mut usage: Option<UsageData> = None;
 
+    // Track pending background Tasks (tool_use_id -> ()) for spawning tailers on tool_result
+    let mut pending_background_tasks: HashMap<String, ()> = HashMap::new();
+    let background_tailers = new_background_tailers();
+
     // Timeout configuration:
     // - Startup timeout: Wait up to 120 seconds for first Claude output (API connection time)
     // - Dead process timeout: After receiving output, wait 2 seconds for more if process seems dead
@@ -741,6 +751,21 @@ pub fn tail_claude_output(
                                                 usage: None, // No usage for partial responses
                                             });
                                         }
+
+                                        // Track background Task tools for spawning tailers
+                                        if name == "Task" {
+                                            if let Some(run_bg) = input
+                                                .get("run_in_background")
+                                                .and_then(|v| v.as_bool())
+                                            {
+                                                if run_bg {
+                                                    log::debug!(
+                                                        "Detected background Task tool: {id}"
+                                                    );
+                                                    pending_background_tasks.insert(id.clone(), ());
+                                                }
+                                            }
+                                        }
                                     }
                                     "thinking" => {
                                         if let Some(thinking) =
@@ -779,8 +804,52 @@ pub fn tail_claude_output(
                                         .get("tool_use_id")
                                         .and_then(|v| v.as_str())
                                         .unwrap_or("");
-                                    let output =
-                                        block.get("content").and_then(|v| v.as_str()).unwrap_or("");
+                                    // Content can be a string OR an array of content blocks
+                                    let output = block
+                                        .get("content")
+                                        .map(|v| {
+                                            if let Some(s) = v.as_str() {
+                                                s.to_string()
+                                            } else if let Some(arr) = v.as_array() {
+                                                // Extract text from content blocks
+                                                arr.iter()
+                                                    .filter_map(|item| {
+                                                        if item.get("type").and_then(|t| t.as_str())
+                                                            == Some("text")
+                                                        {
+                                                            item.get("text")
+                                                                .and_then(|t| t.as_str())
+                                                                .map(|s| s.to_string())
+                                                        } else {
+                                                            None
+                                                        }
+                                                    })
+                                                    .collect::<Vec<_>>()
+                                                    .join("\n")
+                                            } else {
+                                                String::new()
+                                            }
+                                        })
+                                        .unwrap_or_default();
+
+                                    // Check if this is a background Task result
+                                    if pending_background_tasks.remove(tool_id).is_some() {
+                                        if let Some(output_file) =
+                                            parse_background_task_result(&output)
+                                        {
+                                            log::debug!(
+                                                "Spawning background tailer for Task {tool_id}, file: {output_file:?}"
+                                            );
+                                            spawn_background_tailer(
+                                                app.clone(),
+                                                session_id.to_string(),
+                                                worktree_id.to_string(),
+                                                tool_id.to_string(),
+                                                output_file,
+                                                background_tailers.clone(),
+                                            );
+                                        }
+                                    }
 
                                     // Update matching tool call's output
                                     if let Some(tc) =
@@ -948,7 +1017,7 @@ pub fn tail_claude_output(
             // Log progress every 10 seconds during startup (only log once per 10-second mark)
             // Use subsec_millis to only log in the first 100ms of each 10-second window
             let secs = elapsed.as_secs();
-            if secs > 0 && secs % 10 == 0 && elapsed.subsec_millis() < 100 {
+            if secs > 0 && secs.is_multiple_of(10) && elapsed.subsec_millis() < 100 {
                 log::trace!(
                     "Waiting for Claude output... {secs}s elapsed, process_alive: {process_alive}"
                 );
@@ -957,6 +1026,34 @@ pub fn tail_claude_output(
 
         // Sleep before next poll
         std::thread::sleep(POLL_INTERVAL);
+    }
+
+    // Wait for background tailers to finish (they stop on their own when agents complete)
+    // Check every 500ms, with a max wait of 10 minutes for long-running agents
+    let max_background_wait = std::time::Duration::from_secs(600);
+    let background_poll = std::time::Duration::from_millis(500);
+    let background_start = std::time::Instant::now();
+
+    loop {
+        let tailers_empty = background_tailers.lock().map(|t| t.is_empty()).unwrap_or(true);
+        if tailers_empty {
+            break;
+        }
+
+        if background_start.elapsed() > max_background_wait {
+            log::warn!("Background tailers timeout, stopping remaining tailers");
+            stop_all_background_tailers(&background_tailers);
+            break;
+        }
+
+        // Log progress every 30 seconds
+        let elapsed = background_start.elapsed().as_secs();
+        if elapsed > 0 && elapsed % 30 == 0 {
+            let count = background_tailers.lock().map(|t| t.len()).unwrap_or(0);
+            log::trace!("Waiting for {count} background tailers... {elapsed}s elapsed");
+        }
+
+        std::thread::sleep(background_poll);
     }
 
     // Emit done event only if not cancelled

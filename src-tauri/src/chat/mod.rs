@@ -1,3 +1,4 @@
+mod background;
 mod claude;
 mod commands;
 pub mod detached;
