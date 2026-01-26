@@ -1,0 +1,73 @@
+use tauri::AppHandle;
+
+use super::api::fetch_usage_limits;
+use super::credentials::has_oauth_credentials;
+use super::types::{SessionUsage, UsageLimits};
+use crate::chat::storage::{load_metadata, load_sessions};
+
+/// Get Claude usage limits (5-hour and 7-day windows)
+///
+/// Returns current utilization percentages and reset times.
+/// Uses a 60-second cache to avoid excessive API calls.
+#[tauri::command]
+pub async fn get_claude_usage_limits() -> Result<UsageLimits, String> {
+    // Check if credentials are available first
+    if !has_oauth_credentials().await {
+        return Ok(UsageLimits::default());
+    }
+
+    fetch_usage_limits().await
+}
+
+/// Get session usage summary (tokens, cost, context percentage)
+///
+/// Aggregates usage data from all runs in the specified session.
+#[tauri::command]
+pub async fn get_session_usage(
+    app: AppHandle,
+    worktree_id: String,
+    worktree_path: String,
+    session_id: String,
+) -> Result<SessionUsage, String> {
+    // Load sessions to verify session exists
+    let sessions = load_sessions(&app, &worktree_path, &worktree_id)?;
+    let _session = sessions
+        .find_session(&session_id)
+        .ok_or_else(|| format!("Session not found: {session_id}"))?;
+
+    // Load session metadata to get run info
+    let metadata = load_metadata(&app, &session_id)?;
+
+    let (input_tokens, output_tokens, cache_read, cache_creation) = match metadata {
+        Some(meta) => {
+            // Aggregate usage from all runs
+            meta.runs.iter().filter_map(|run| run.usage.as_ref()).fold(
+                (0u64, 0u64, 0u64, 0u64),
+                |(inp, out, read, create), u| {
+                    (
+                        inp + u.input_tokens,
+                        out + u.output_tokens,
+                        read + u.cache_read_input_tokens,
+                        create + u.cache_creation_input_tokens,
+                    )
+                },
+            )
+        }
+        None => (0, 0, 0, 0),
+    };
+
+    Ok(SessionUsage::from_tokens(
+        input_tokens,
+        output_tokens,
+        cache_read,
+        cache_creation,
+    ))
+}
+
+/// Check if OAuth credentials are available
+///
+/// Useful for UI to know whether to show limits section.
+#[tauri::command]
+pub async fn has_claude_credentials() -> bool {
+    has_oauth_credentials().await
+}

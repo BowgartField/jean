@@ -93,6 +93,7 @@ describe('preferences service', () => {
         parallel_execution_prompt_enabled: false,
         magic_prompts: DEFAULT_MAGIC_PROMPTS,
         file_edit_mode: 'external',
+        show_usage_status_bar: true,
       }
       vi.mocked(invoke).mockResolvedValueOnce(mockPreferences)
 
@@ -164,6 +165,7 @@ describe('preferences service', () => {
         parallel_execution_prompt_enabled: false,
         magic_prompts: DEFAULT_MAGIC_PROMPTS,
         file_edit_mode: 'external',
+        show_usage_status_bar: true,
       }
       vi.mocked(invoke).mockResolvedValueOnce(prefsWithOldBinding)
 
@@ -210,6 +212,7 @@ describe('preferences service', () => {
         parallel_execution_prompt_enabled: false,
         magic_prompts: DEFAULT_MAGIC_PROMPTS,
         file_edit_mode: 'external',
+        show_usage_status_bar: true,
       }
 
       const { result } = renderHook(() => useSavePreferences(), {
@@ -254,6 +257,7 @@ describe('preferences service', () => {
         parallel_execution_prompt_enabled: false,
         magic_prompts: DEFAULT_MAGIC_PROMPTS,
         file_edit_mode: 'external',
+        show_usage_status_bar: true,
       }
 
       const { result } = renderHook(() => useSavePreferences(), {
@@ -298,6 +302,7 @@ describe('preferences service', () => {
         parallel_execution_prompt_enabled: false,
         magic_prompts: DEFAULT_MAGIC_PROMPTS,
         file_edit_mode: 'external',
+        show_usage_status_bar: true,
       }
 
       const { result } = renderHook(() => useSavePreferences(), {
@@ -342,6 +347,7 @@ describe('preferences service', () => {
         parallel_execution_prompt_enabled: false,
         magic_prompts: DEFAULT_MAGIC_PROMPTS,
         file_edit_mode: 'external',
+        show_usage_status_bar: true,
       }
 
       const { result } = renderHook(() => useSavePreferences(), {

@@ -463,6 +463,23 @@ export const GeneralPane: React.FC = () => {
             />
           </InlineField>
 
+          <InlineField
+            label="Usage status bar"
+            description="Show cost, context and rate limits in toolbar"
+          >
+            <Switch
+              checked={preferences?.show_usage_status_bar ?? true}
+              onCheckedChange={checked => {
+                if (preferences) {
+                  savePreferences.mutate({
+                    ...preferences,
+                    show_usage_status_bar: checked,
+                  })
+                }
+              }}
+            />
+          </InlineField>
+
           <InlineField label="Editor" description="App to open worktrees in">
             <Select
               value={preferences?.editor ?? 'vscode'}

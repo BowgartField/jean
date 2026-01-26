@@ -9,6 +9,7 @@ use tauri::{AppHandle, Emitter, Manager};
 mod background_tasks;
 mod chat;
 mod claude_cli;
+mod claude_usage;
 mod gh_cli;
 mod platform;
 mod projects;
@@ -118,6 +119,8 @@ pub struct AppPreferences {
     pub magic_prompts: MagicPrompts, // Customizable prompts for AI-powered features
     #[serde(default = "default_file_edit_mode")]
     pub file_edit_mode: String, // How to edit files: inline (CodeMirror) or external (VS Code, etc.)
+    #[serde(default = "default_show_usage_status_bar")]
+    pub show_usage_status_bar: bool, // Show Claude usage status bar (cost, context, limits)
 }
 
 fn default_auto_branch_naming() -> bool {
@@ -202,6 +205,10 @@ fn default_syntax_theme_light() -> String {
 
 fn default_file_edit_mode() -> String {
     "external".to_string() // Default to external editor (VS Code, etc.)
+}
+
+fn default_show_usage_status_bar() -> bool {
+    true // Show usage status bar by default
 }
 
 fn default_disable_thinking_in_non_plan_modes() -> bool {
@@ -439,6 +446,7 @@ impl Default for AppPreferences {
             parallel_execution_prompt_enabled: default_parallel_execution_prompt_enabled(),
             magic_prompts: MagicPrompts::default(),
             file_edit_mode: default_file_edit_mode(),
+            show_usage_status_bar: default_show_usage_status_bar(),
         }
     }
 }
@@ -1287,6 +1295,10 @@ pub fn run() {
             background_tasks::commands::set_remote_poll_interval,
             background_tasks::commands::get_remote_poll_interval,
             background_tasks::commands::trigger_immediate_remote_poll,
+            // Claude usage commands
+            claude_usage::commands::get_claude_usage_limits,
+            claude_usage::commands::get_session_usage,
+            claude_usage::commands::has_claude_credentials,
         ])
         .build(tauri::generate_context!())
         .expect("error building tauri application")
