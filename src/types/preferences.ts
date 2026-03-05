@@ -20,6 +20,30 @@ export const notificationSoundOptions: {
 ]
 
 // =============================================================================
+// Window Effects (macOS vibrancy)
+// =============================================================================
+
+export type WindowEffect =
+  | 'sidebar'
+  | 'hudWindow'
+  | 'windowBackground'
+  | 'fullScreenUI'
+  | 'headerView'
+  | 'contentBackground'
+
+export const windowEffectOptions: {
+  value: WindowEffect
+  label: string
+}[] = [
+  { value: 'sidebar', label: 'Sidebar' },
+  { value: 'hudWindow', label: 'HUD Window' },
+  { value: 'windowBackground', label: 'Window Background' },
+  { value: 'fullScreenUI', label: 'Full Screen UI' },
+  { value: 'headerView', label: 'Header View' },
+  { value: 'contentBackground', label: 'Content Background' },
+]
+
+// =============================================================================
 // Magic Prompts - Customizable prompts for AI-powered features
 // =============================================================================
 
@@ -748,8 +772,7 @@ function makeBackendsPreset(backend: string): MagicPromptBackends {
   }
 }
 
-export const CLAUDE_DEFAULT_MAGIC_PROMPT_BACKENDS =
-  makeBackendsPreset('claude')
+export const CLAUDE_DEFAULT_MAGIC_PROMPT_BACKENDS = makeBackendsPreset('claude')
 export const CODEX_DEFAULT_MAGIC_PROMPT_BACKENDS = makeBackendsPreset('codex')
 export const OPENCODE_DEFAULT_MAGIC_PROMPT_BACKENDS =
   makeBackendsPreset('opencode')
@@ -848,6 +871,7 @@ export interface AppPreferences {
   build_thinking_level: string | null // Thinking level override for build mode, null = use session thinking level
   yolo_thinking_level: string | null // Thinking level override for yolo mode, null = use session thinking level
   linear_api_key: string | null // Global Linear personal API key (inherited by all projects)
+  window_effect: WindowEffect // macOS window vibrancy effect
 }
 
 export type CanvasLayout = 'grid' | 'list'
@@ -1342,4 +1366,5 @@ export const defaultPreferences: AppPreferences = {
   build_thinking_level: null, // Default: use session thinking level
   yolo_thinking_level: null, // Default: use session thinking level
   linear_api_key: null, // Default: no global Linear API key
+  window_effect: 'sidebar', // Default: sidebar (compatible with tiling WMs)
 }

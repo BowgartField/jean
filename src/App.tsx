@@ -22,12 +22,16 @@ import ErrorBoundary from './components/ErrorBoundary'
 import { useClaudeCliStatus, useClaudeCliAuth } from './services/claude-cli'
 import { useCodexCliStatus, useCodexCliAuth } from './services/codex-cli'
 import { useGhCliStatus, useGhCliAuth } from './services/gh-cli'
-import { useOpencodeCliStatus, useOpencodeCliAuth } from './services/opencode-cli'
+import {
+  useOpencodeCliStatus,
+  useOpencodeCliAuth,
+} from './services/opencode-cli'
 import { useUIStore } from './store/ui-store'
 import type { AppPreferences } from './types/preferences'
 import { useChatStore } from './store/chat-store'
 import { useFontSettings } from './hooks/use-font-settings'
 import { useZoom } from './hooks/use-zoom'
+import { useWindowEffect } from './hooks/use-window-effect'
 import { useImmediateSessionStateSave } from './hooks/useImmediateSessionStateSave'
 import { useCliVersionCheck } from './hooks/useCliVersionCheck'
 import { useQueueProcessor } from './hooks/useQueueProcessor'
@@ -300,6 +304,9 @@ function App() {
   // Apply zoom level from preferences + keyboard shortcuts
   useZoom()
 
+  // Apply window vibrancy effect from preferences (macOS)
+  useWindowEffect()
+
   // Save reviewing/waiting state immediately (no debounce) to ensure persistence on reload
   useImmediateSessionStateSave()
 
@@ -450,7 +457,9 @@ function App() {
           store.setOnboardingManuallyTriggered(false)
         } else {
           const manuallyTriggered = store.onboardingManuallyTriggered
-          const prefs = queryClient.getQueryData<AppPreferences>(['preferences'])
+          const prefs = queryClient.getQueryData<AppPreferences>([
+            'preferences',
+          ])
           if (manuallyTriggered || (prefs && !prefs.has_seen_feature_tour)) {
             store.setOnboardingManuallyTriggered(false)
             setTimeout(() => {
@@ -525,7 +534,8 @@ function App() {
         // On fresh startup sendingSessionIds should be empty, but if the store
         // was somehow persisted or restored, ensure only truly resumable sessions
         // are marked as sending.
-        const { sendingSessionIds, removeSendingSession } = useChatStore.getState()
+        const { sendingSessionIds, removeSendingSession } =
+          useChatStore.getState()
         const resumableIds = new Set(resumable.map(r => r.session_id))
         for (const sessionId of Object.keys(sendingSessionIds)) {
           if (!resumableIds.has(sessionId)) {
@@ -545,10 +555,12 @@ function App() {
             // Mark session as sending and restore execution mode for streaming UI
             useChatStore.getState().addSendingSession(session.session_id)
             if (session.execution_mode) {
-              useChatStore.getState().setExecutingMode(
-                session.session_id,
-                session.execution_mode as 'plan' | 'build' | 'yolo'
-              )
+              useChatStore
+                .getState()
+                .setExecutingMode(
+                  session.session_id,
+                  session.execution_mode as 'plan' | 'build' | 'yolo'
+                )
             }
             // Resume the session (this will start tailing the output file)
             invoke('resume_session', {

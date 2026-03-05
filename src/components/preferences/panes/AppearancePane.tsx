@@ -18,6 +18,7 @@ import {
   syntaxThemeDarkOptions,
   syntaxThemeLightOptions,
   fileEditModeOptions,
+  windowEffectOptions,
   FONT_SIZE_DEFAULT,
   ZOOM_LEVEL_DEFAULT,
   uiFontScaleTicks,
@@ -27,6 +28,7 @@ import {
   type ChatFont,
   type SyntaxTheme,
   type FileEditMode,
+  type WindowEffect,
 } from '@/types/preferences'
 import { isMacOS } from '@/lib/platform'
 
@@ -156,6 +158,15 @@ export const AppearancePane: React.FC = () => {
     [savePreferences, preferences]
   )
 
+  const handleWindowEffectChange = useCallback(
+    (value: WindowEffect) => {
+      if (preferences) {
+        savePreferences.mutate({ ...preferences, window_effect: value })
+      }
+    },
+    [savePreferences, preferences]
+  )
+
   return (
     <div className="space-y-6">
       <SettingsSection title="Theme">
@@ -235,6 +246,36 @@ export const AppearancePane: React.FC = () => {
           </InlineField>
         </div>
       </SettingsSection>
+
+      {isMacOS && (
+        <SettingsSection title="Window">
+          <div className="space-y-4">
+            <InlineField
+              label="Vibrancy effect"
+              description="macOS window background material"
+            >
+              <Select
+                value={preferences?.window_effect ?? 'sidebar'}
+                onValueChange={value =>
+                  handleWindowEffectChange(value as WindowEffect)
+                }
+                disabled={savePreferences.isPending}
+              >
+                <SelectTrigger className="w-52">
+                  <SelectValue placeholder="Select effect" />
+                </SelectTrigger>
+                <SelectContent>
+                  {windowEffectOptions.map(option => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </InlineField>
+          </div>
+        </SettingsSection>
+      )}
 
       <SettingsSection title="Fonts">
         <div className="space-y-4">

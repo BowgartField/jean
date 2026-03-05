@@ -210,6 +210,8 @@ pub struct AppPreferences {
     pub yolo_thinking_level: Option<String>, // Thinking level override for yolo mode, None = use session thinking level
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub linear_api_key: Option<String>, // Global Linear personal API key (inherited by all projects)
+    #[serde(default = "default_window_effect")]
+    pub window_effect: String, // macOS window vibrancy effect: sidebar, hudWindow, windowBackground, etc.
 }
 
 fn default_true() -> Option<bool> {
@@ -384,6 +386,10 @@ fn default_codex_max_agent_threads() -> u32 {
 
 fn default_zoom_level() -> u32 {
     90 // 90% = slightly smaller default
+}
+
+fn default_window_effect() -> String {
+    "sidebar".to_string()
 }
 
 fn default_allow_web_tools_in_plan_mode() -> bool {
@@ -1078,6 +1084,7 @@ impl Default for AppPreferences {
             build_thinking_level: None,
             yolo_thinking_level: None,
             linear_api_key: None,
+            window_effect: default_window_effect(),
         }
     }
 }

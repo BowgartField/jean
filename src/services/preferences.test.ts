@@ -148,6 +148,7 @@ describe('preferences service', () => {
         build_thinking_level: null,
         yolo_thinking_level: null,
         linear_api_key: null,
+        window_effect: 'sidebar',
       }
       vi.mocked(invoke).mockResolvedValueOnce(mockPreferences)
 
@@ -262,6 +263,7 @@ describe('preferences service', () => {
         build_thinking_level: null,
         yolo_thinking_level: null,
         linear_api_key: null,
+        window_effect: 'sidebar',
       }
       vi.mocked(invoke).mockResolvedValueOnce(prefsWithOldBinding)
 
@@ -352,6 +354,7 @@ describe('preferences service', () => {
         build_thinking_level: null,
         yolo_thinking_level: null,
         linear_api_key: null,
+        window_effect: 'sidebar',
       }
 
       const { result } = renderHook(() => useSavePreferences(), {
@@ -441,6 +444,7 @@ describe('preferences service', () => {
         build_thinking_level: null,
         yolo_thinking_level: null,
         linear_api_key: null,
+        window_effect: 'sidebar',
       }
 
       const { result } = renderHook(() => useSavePreferences(), {
@@ -530,6 +534,7 @@ describe('preferences service', () => {
         build_thinking_level: null,
         yolo_thinking_level: null,
         linear_api_key: null,
+        window_effect: 'sidebar',
       }
 
       const { result } = renderHook(() => useSavePreferences(), {
@@ -617,6 +622,7 @@ describe('preferences service', () => {
         build_thinking_level: null,
         yolo_thinking_level: null,
         linear_api_key: null,
+        window_effect: 'sidebar',
       }
 
       const { result } = renderHook(() => useSavePreferences(), {
