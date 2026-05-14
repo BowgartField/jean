@@ -538,30 +538,40 @@ pub fn build_turn_start_params(
     }
 
     // Sandbox policy — grant read access to add_dirs (pasted files, contexts, etc.)
-    // in ALL modes, and writable roots only in build/yolo modes.
+    // in ALL modes, and writable roots only in build mode.
     // Also include git metadata dirs so worktree commits work (issue #280).
+    // In yolo mode, keep true danger-full-access. A per-turn sandboxPolicy
+    // overrides the thread-level `sandbox`, so using workspaceWrite here would
+    // accidentally re-sandbox yolo turns and break tools such as Playwright on
+    // macOS.
     let mode = execution_mode.unwrap_or("plan");
-    let is_writable = mode == "build" || mode == "yolo";
-    let writable_roots: Vec<serde_json::Value> = if is_writable {
-        let mut roots = vec![serde_json::json!(working_dir.to_string_lossy())];
-        for dir in add_dirs {
-            roots.push(serde_json::json!(dir));
-        }
-        for dir in git_writable_roots {
-            roots.push(serde_json::json!(dir));
-        }
-        roots
+    if mode == "yolo" {
+        params["sandboxPolicy"] = serde_json::json!({
+            "type": "dangerFullAccess",
+        });
     } else {
-        vec![]
-    };
-    params["sandboxPolicy"] = serde_json::json!({
-        "type": if is_writable { "workspaceWrite" } else { "readOnly" },
-        "writableRoots": writable_roots,
-        "readOnlyAccess": { "type": "fullAccess" },
-        "networkAccess": true,
-        "excludeTmpdirEnvVar": false,
-        "excludeSlashTmp": false,
-    });
+        let is_writable = mode == "build";
+        let writable_roots: Vec<serde_json::Value> = if is_writable {
+            let mut roots = vec![serde_json::json!(working_dir.to_string_lossy())];
+            for dir in add_dirs {
+                roots.push(serde_json::json!(dir));
+            }
+            for dir in git_writable_roots {
+                roots.push(serde_json::json!(dir));
+            }
+            roots
+        } else {
+            vec![]
+        };
+        params["sandboxPolicy"] = serde_json::json!({
+            "type": if is_writable { "workspaceWrite" } else { "readOnly" },
+            "writableRoots": writable_roots,
+            "readOnlyAccess": { "type": "fullAccess" },
+            "networkAccess": true,
+            "excludeTmpdirEnvVar": false,
+            "excludeSlashTmp": false,
+        });
+    }
 
     // Override cwd per turn
     params["cwd"] = serde_json::json!(working_dir.to_string_lossy());
@@ -4186,6 +4196,36 @@ mod tests {
             None,
         );
         assert_eq!(params["approvalPolicy"], "never");
+    }
+
+    #[test]
+    fn yolo_turn_uses_danger_full_access_even_with_writable_roots() {
+        let params = build_turn_start_params(
+            "thread-1",
+            "prompt",
+            std::path::Path::new("/repo/worktree"),
+            Some("yolo"),
+            None,
+            &[],
+            &["/repo/.git/worktrees/worktree".to_string()],
+        );
+
+        assert_eq!(params["sandboxPolicy"]["type"], "dangerFullAccess");
+    }
+
+    #[test]
+    fn yolo_turn_uses_danger_full_access_without_writable_roots() {
+        let params = build_turn_start_params(
+            "thread-1",
+            "prompt",
+            std::path::Path::new("/repo/worktree"),
+            Some("yolo"),
+            None,
+            &[],
+            &[],
+        );
+
+        assert_eq!(params["sandboxPolicy"]["type"], "dangerFullAccess");
     }
 
     #[test]
