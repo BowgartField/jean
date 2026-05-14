@@ -37,6 +37,10 @@ describe('FullScreenTerminalSurface', () => {
       'data-terminal-root',
       'true'
     )
+    expect(container.firstElementChild).toHaveAttribute(
+      'data-terminal-surface',
+      'session'
+    )
   })
 
   it('passes inactive state down so hidden terminal sessions do not start', () => {

@@ -15,6 +15,7 @@ import {
   CommandItem,
   CommandList,
 } from '@/components/ui/command'
+import { Kbd, KbdGroup } from '@/components/ui/kbd'
 import { Popover, PopoverContent, PopoverAnchor } from '@/components/ui/popover'
 import { useWorktreeFiles, fileQueryKeys } from '@/services/files'
 import type { WorktreeFile, PendingFile } from '@/types/chat'
@@ -29,6 +30,8 @@ export interface FileMentionPopoverHandle {
   moveUp: () => void
   moveDown: () => void
   selectCurrent: () => void
+  selectPreviousScope: () => void
+  selectNextScope: () => void
 }
 
 interface FileMentionPopoverProps {
@@ -77,6 +80,8 @@ export function FileMentionPopover({
   )
   const { data: files = [] } = useWorktreeFiles(selectedRootPath)
   const listRef = useRef<HTMLDivElement>(null)
+  // File row index only. Project scopes live outside the command list so
+  // 3+ linked projects never push file results out of view.
   const [selectedIndex, setSelectedIndex] = useState(0)
 
   const currentProject = useMemo(
@@ -114,12 +119,17 @@ export function FileMentionPopover({
     [scopes, selectedRootPath]
   )
 
+  const selectedScopeIndex = useMemo(
+    () => scopes.findIndex(scope => scope.rootPath === selectedRootPath),
+    [scopes, selectedRootPath]
+  )
+
   useEffect(() => {
     if (open) {
       setSelectedRootPath(worktreePath)
-      setSelectedIndex(scopes.length)
+      setSelectedIndex(0)
     }
-  }, [open, scopes.length, worktreePath])
+  }, [open, worktreePath])
 
   // Refetch file list each time the popover opens so newly added files appear
   useEffect(() => {
@@ -139,15 +149,25 @@ export function FileMentionPopover({
   // Clamp selectedIndex to valid range (handles case when filter reduces results)
   const clampedSelectedIndex = Math.min(
     selectedIndex,
-    Math.max(0, scopes.length + filteredFiles.length - 1)
+    Math.max(0, filteredFiles.length - 1)
   )
 
-  const handleScopeSelect = useCallback(
-    (scope: FileMentionScope) => {
-      setSelectedRootPath(scope.rootPath)
-      setSelectedIndex(scopes.length)
+  const handleScopeSelect = useCallback((scope: FileMentionScope) => {
+    setSelectedRootPath(scope.rootPath)
+    setSelectedIndex(0)
+  }, [])
+
+  const handleScopeCycle = useCallback(
+    (direction: -1 | 1) => {
+      if (scopes.length === 0) return
+
+      const currentIndex = selectedScopeIndex >= 0 ? selectedScopeIndex : 0
+      const nextIndex =
+        (currentIndex + direction + scopes.length) % scopes.length
+      const nextScope = scopes[nextIndex]
+      if (nextScope) handleScopeSelect(nextScope)
     },
-    [scopes.length]
+    [handleScopeSelect, scopes, selectedScopeIndex]
   )
 
   const handleSelect = useCallback(
@@ -179,29 +199,19 @@ export function FileMentionPopover({
       },
       moveDown: () => {
         setSelectedIndex(i =>
-          Math.min(i + 1, scopes.length + filteredFiles.length - 1)
+          Math.min(i + 1, Math.max(0, filteredFiles.length - 1))
         )
       },
       selectCurrent: () => {
-        if (clampedSelectedIndex < scopes.length) {
-          const scope = scopes[clampedSelectedIndex]
-          if (scope) handleScopeSelect(scope)
-          return
-        }
-
-        const file = filteredFiles[clampedSelectedIndex - scopes.length]
+        const file = filteredFiles[clampedSelectedIndex]
         if (file) {
           handleSelect(file)
         }
       },
+      selectPreviousScope: () => handleScopeCycle(-1),
+      selectNextScope: () => handleScopeCycle(1),
     }
-  }, [
-    filteredFiles,
-    scopes,
-    clampedSelectedIndex,
-    handleSelect,
-    handleScopeSelect,
-  ])
+  }, [filteredFiles, clampedSelectedIndex, handleSelect, handleScopeCycle])
 
   // Scroll selected item into view
   useEffect(() => {
@@ -238,14 +248,58 @@ export function FileMentionPopover({
         onOpenAutoFocus={e => e.preventDefault()}
         onCloseAutoFocus={e => e.preventDefault()}
       >
-        <div className="flex min-h-[41px] items-center justify-between border-b px-3 py-2">
-          <span className="text-xs font-medium text-muted-foreground">
-            File links
-          </span>
-          {selectedScope && (
-            <span className="max-w-[60%] truncate text-xs text-muted-foreground">
-              Scope: {selectedScope.name}
+        <div className="space-y-2 border-b px-3 py-2">
+          <div className="flex min-h-5 items-center justify-between gap-3">
+            <span className="text-xs font-medium text-muted-foreground">
+              File links
             </span>
+            {scopes.length > 1 && (
+              <KbdGroup
+                className="gap-0.5"
+                aria-label="Use Control Shift Left or Right to switch scope"
+              >
+                <Kbd className="h-4 min-w-4 px-1 text-[10px]">Ctrl</Kbd>
+                <Kbd className="h-4 min-w-4 px-1 text-[10px]">Shift</Kbd>
+                <Kbd className="h-4 min-w-4 px-1 text-[10px]">←</Kbd>
+                <Kbd className="h-4 min-w-4 px-1 text-[10px]">→</Kbd>
+              </KbdGroup>
+            )}
+          </div>
+
+          {scopes.length > 0 && (
+            <div className="space-y-1.5">
+              <div
+                className="flex gap-1.5 overflow-x-auto pb-0.5"
+                aria-label="Project scope selector"
+              >
+                {scopes.map(scope => {
+                  const isActiveScope = scope.rootPath === selectedRootPath
+                  const label = scope.isCurrent
+                    ? `${scope.name} current`
+                    : scope.name
+
+                  return (
+                    <button
+                      key={`${scope.id}:${scope.rootPath}`}
+                      type="button"
+                      title={scope.name}
+                      aria-label={`Search files in ${label}`}
+                      aria-pressed={isActiveScope}
+                      onClick={() => handleScopeSelect(scope)}
+                      className={cn(
+                        'flex max-w-[11rem] shrink-0 items-center gap-2 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors',
+                        isActiveScope
+                          ? 'border-primary/55 bg-primary/15 text-primary shadow-sm'
+                          : 'border-transparent bg-muted/40 text-muted-foreground hover:bg-muted/70 hover:text-foreground'
+                      )}
+                    >
+                      <FolderIcon className="h-4 w-4 shrink-0" />
+                      <span className="truncate">{scope.name}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
           )}
         </div>
         <Command shouldFilter={false}>
@@ -253,94 +307,48 @@ export function FileMentionPopover({
             ref={listRef}
             className="min-h-[280px] max-h-[min(360px,60vh)]"
           >
-            {scopes.length === 0 && filteredFiles.length === 0 ? (
-              <CommandEmpty>No files found</CommandEmpty>
+            {filteredFiles.length === 0 ? (
+              <CommandEmpty>
+                {scopes.length === 0
+                  ? 'No files found'
+                  : 'No files found in selected project'}
+              </CommandEmpty>
             ) : (
-              <>
-                {scopes.length > 0 && (
-                  <CommandGroup heading="Projects">
-                    {scopes.map((scope, index) => {
-                      const isSelected = index === clampedSelectedIndex
-                      const isActiveScope = scope.rootPath === selectedRootPath
-
-                      return (
-                        <CommandItem
-                          key={`${scope.id}:${scope.rootPath}`}
-                          data-index={index}
-                          value={`project:${scope.name}`}
-                          onSelect={() => handleScopeSelect(scope)}
+              <CommandGroup heading="Files">
+                {filteredFiles.map((file, index) => {
+                  const isSelected = index === clampedSelectedIndex
+                  return (
+                    <CommandItem
+                      key={file.relative_path}
+                      data-index={index}
+                      value={file.relative_path}
+                      onSelect={() => handleSelect(file)}
+                      className={cn(
+                        'flex items-center gap-2 cursor-pointer',
+                        // Override cmdk's internal selection styling - we manage selection ourselves
+                        'data-[selected=true]:bg-transparent data-[selected=true]:text-foreground',
+                        isSelected && '!bg-accent !text-accent-foreground'
+                      )}
+                    >
+                      {file.is_dir ? (
+                        <FolderIcon className="h-4 w-4 shrink-0 text-muted-foreground/80" />
+                      ) : (
+                        <FileIcon
                           className={cn(
-                            'flex items-center gap-2 cursor-pointer',
-                            'data-[selected=true]:bg-transparent data-[selected=true]:text-foreground',
-                            isActiveScope &&
-                              '!bg-primary/15 !text-foreground ring-1 ring-inset ring-primary/25',
-                            isSelected && '!bg-accent !text-accent-foreground'
+                            'h-4 w-4 shrink-0',
+                            getExtensionColor(file.extension)
                           )}
-                        >
-                          <FolderIcon
-                            className={cn(
-                              'h-4 w-4 shrink-0',
-                              isActiveScope
-                                ? 'text-foreground/80'
-                                : scope.isCurrent
-                                  ? 'text-muted-foreground'
-                                  : 'text-muted-foreground/80'
-                            )}
-                          />
-                          <span className="truncate text-sm">
-                            {scope.isCurrent
-                              ? `${scope.name} (current)`
-                              : scope.name}
-                          </span>
-                        </CommandItem>
-                      )
-                    })}
-                  </CommandGroup>
-                )}
-
-                {filteredFiles.length === 0 ? (
-                  <CommandEmpty>
-                    No files found in selected project
-                  </CommandEmpty>
-                ) : (
-                  <CommandGroup heading="Files">
-                    {filteredFiles.map((file, index) => {
-                      const itemIndex = scopes.length + index
-                      const isSelected = itemIndex === clampedSelectedIndex
-                      return (
-                        <CommandItem
-                          key={file.relative_path}
-                          data-index={itemIndex}
-                          value={file.relative_path}
-                          onSelect={() => handleSelect(file)}
-                          className={cn(
-                            'flex items-center gap-2 cursor-pointer',
-                            // Override cmdk's internal selection styling - we manage selection ourselves
-                            'data-[selected=true]:bg-transparent data-[selected=true]:text-foreground',
-                            isSelected && '!bg-accent !text-accent-foreground'
-                          )}
-                        >
-                          {file.is_dir ? (
-                            <FolderIcon className="h-4 w-4 shrink-0 text-muted-foreground/80" />
-                          ) : (
-                            <FileIcon
-                              className={cn(
-                                'h-4 w-4 shrink-0',
-                                getExtensionColor(file.extension)
-                              )}
-                            />
-                          )}
-                          <span className="truncate text-sm">
-                            {file.is_dir
-                              ? `${file.relative_path}/`
-                              : file.relative_path}
-                          </span>
-                        </CommandItem>
-                      )
-                    })}
-                  </CommandGroup>
-                )}
-              </>
+                        />
+                      )}
+                      <span className="truncate text-sm">
+                        {file.is_dir
+                          ? `${file.relative_path}/`
+                          : file.relative_path}
+                      </span>
+                    </CommandItem>
+                  )
+                })}
+              </CommandGroup>
             )}
           </CommandList>
         </Command>

@@ -491,6 +491,18 @@ export const ChatInput = memo(function ChatInput({
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       // When file mention popover is open, handle navigation
       if (fileMentionOpen) {
+        if (e.ctrlKey && e.shiftKey && e.key === 'ArrowLeft') {
+          e.preventDefault()
+          fileMentionHandleRef.current?.selectPreviousScope()
+          return
+        }
+
+        if (e.ctrlKey && e.shiftKey && e.key === 'ArrowRight') {
+          e.preventDefault()
+          fileMentionHandleRef.current?.selectNextScope()
+          return
+        }
+
         switch (e.key) {
           case 'ArrowDown':
             e.preventDefault()

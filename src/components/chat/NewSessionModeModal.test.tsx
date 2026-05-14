@@ -157,6 +157,15 @@ describe('NewSessionModeModal', () => {
     expect(
       screen.getByText('No existing Codex sessions for this worktree.')
     ).toBeInTheDocument()
+    expect(
+      screen.getByTestId('native-cli-session-search-separator')
+    ).toBeInTheDocument()
+    const newCodexSessionButton = screen.getByRole('button', {
+      name: 'New Codex session',
+    })
+    expect(newCodexSessionButton).toHaveClass('bg-background')
+    expect(newCodexSessionButton).not.toHaveClass('bg-primary/12')
+    expect(newCodexSessionButton).toContainElement(screen.getByText('↵'))
 
     fireEvent.click(screen.getByText('New Codex session'))
 
@@ -229,6 +238,12 @@ describe('NewSessionModeModal', () => {
     fireEvent.keyDown(window, { key: '1' })
 
     expect(screen.getByText('Terminal sessions')).toBeInTheDocument()
+    expect(
+      screen.getByTestId('native-cli-session-search-separator')
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'New Terminal session' })
+    ).toContainElement(screen.getByText('↵'))
     fireEvent.click(screen.getByText('New Terminal session'))
 
     expect(mutate).toHaveBeenCalledWith(

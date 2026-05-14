@@ -6,7 +6,7 @@ use std::process::{Command, Output, Stdio};
 use std::time::Duration;
 use tauri::AppHandle;
 
-use super::config::{resolve_cli_binary, CLI_BINARY_NAME};
+use super::config::{resolve_cli_binary, CLI_BINARY_CANDIDATES};
 use crate::platform::silent_command;
 
 const AUTH_CHECK_TIMEOUT: Duration = Duration::from_secs(5);
@@ -93,6 +93,78 @@ fn looks_authenticated(output: &str) -> bool {
             && !line.contains("unknown")
             && !line.ends_with(':')
     })
+}
+
+fn parse_cursor_models_output(output: &str) -> Vec<CursorModelInfo> {
+    let cleaned = strip_ansi(output);
+    let mut models = Vec::new();
+
+    for line in cleaned.lines() {
+        let line = line.trim();
+        if line.is_empty()
+            || line == "Available models"
+            || line.starts_with("Loading models")
+            || line.starts_with("Tip:")
+        {
+            continue;
+        }
+
+        let Some((id, rest)) = line.split_once(" - ") else {
+            continue;
+        };
+        let mut label = rest.trim().to_string();
+        let is_current = label.contains("(current)");
+        let is_default = label.contains("(default)");
+        label = label
+            .replace("(current)", "")
+            .replace("(default)", "")
+            .trim()
+            .to_string();
+
+        models.push(CursorModelInfo {
+            id: id.trim().to_string(),
+            label,
+            is_default,
+            is_current,
+        });
+    }
+
+    sort_cursor_models(&mut models);
+    models
+}
+
+fn cursor_model_family_rank(id: &str) -> u8 {
+    if id.starts_with("composer-") {
+        0
+    } else if id.starts_with("gpt-") {
+        1
+    } else if id.starts_with("claude-") {
+        2
+    } else {
+        3
+    }
+}
+
+fn cursor_model_version_numbers(id: &str) -> Vec<u32> {
+    id.split(|ch: char| !ch.is_ascii_digit())
+        .filter(|part| !part.is_empty())
+        .filter_map(|part| part.parse::<u32>().ok())
+        .collect()
+}
+
+fn sort_cursor_models(models: &mut [CursorModelInfo]) {
+    models.sort_by(|a, b| {
+        let a_rank = cursor_model_family_rank(&a.id);
+        let b_rank = cursor_model_family_rank(&b.id);
+
+        a_rank.cmp(&b_rank).then_with(|| {
+            if matches!(a_rank, 1 | 2) && a_rank == b_rank {
+                cursor_model_version_numbers(&b.id).cmp(&cursor_model_version_numbers(&a.id))
+            } else {
+                std::cmp::Ordering::Equal
+            }
+        })
+    });
 }
 
 enum TimedCommandResult {
@@ -201,8 +273,7 @@ pub async fn check_cursor_cli_auth(app: AppHandle) -> Result<CursorAuthStatus, S
                 return Ok(CursorAuthStatus {
                     authenticated: false,
                     error: Some(
-                        "Cursor auth check timed out. Try again or run `cursor-agent login`."
-                            .to_string(),
+                        "Cursor auth check timed out. Try again or run `agent login`.".to_string(),
                     ),
                     timed_out: true,
                 });
@@ -235,7 +306,7 @@ pub async fn check_cursor_cli_auth(app: AppHandle) -> Result<CursorAuthStatus, S
             return Ok(CursorAuthStatus {
                 authenticated: false,
                 error: Some(if stderr.is_empty() {
-                    "Not authenticated. Run `cursor-agent login`.".to_string()
+                    "Not authenticated. Run `agent login`.".to_string()
                 } else {
                     stderr
                 }),
@@ -246,7 +317,7 @@ pub async fn check_cursor_cli_auth(app: AppHandle) -> Result<CursorAuthStatus, S
 
     Ok(CursorAuthStatus {
         authenticated: false,
-        error: Some("Not authenticated. Run `cursor-agent login`.".to_string()),
+        error: Some("Not authenticated. Run `agent login`.".to_string()),
         timed_out: false,
     })
 }
@@ -261,22 +332,21 @@ pub async fn detect_cursor_in_path(_app: AppHandle) -> Result<CursorPathDetectio
         "which"
     };
 
-    let output = match silent_command(which_cmd).arg(CLI_BINARY_NAME).output() {
-        Ok(output) if output.status.success() => String::from_utf8_lossy(&output.stdout)
-            .lines()
-            .next()
-            .unwrap_or("")
-            .trim()
-            .to_string(),
-        _ => {
-            return Ok(CursorPathDetection {
-                found: false,
-                path: None,
-                version: None,
-                package_manager: None,
-            });
+    let mut output = String::new();
+    for binary_name in CLI_BINARY_CANDIDATES {
+        output = match silent_command(which_cmd).arg(binary_name).output() {
+            Ok(output) if output.status.success() => String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .next()
+                .unwrap_or("")
+                .trim()
+                .to_string(),
+            _ => String::new(),
+        };
+        if !output.is_empty() {
+            break;
         }
-    };
+    }
 
     if output.is_empty() {
         return Ok(CursorPathDetection {
@@ -312,59 +382,49 @@ pub async fn list_cursor_models(app: AppHandle) -> Result<Vec<CursorModelInfo>, 
         return Err("Cursor CLI not found in PATH".to_string());
     }
 
-    let output = silent_command(&binary_path)
-        .arg("models")
-        .output()
-        .map_err(|e| format!("Failed to run cursor-agent models: {e}"))?;
+    let command_attempts: [&[&str]; 2] = [&["models"], &["--list-models"]];
+    let mut errors = Vec::new();
+    let mut had_successful_listing = false;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("cursor-agent models failed: {stderr}"));
-    }
+    for args in command_attempts {
+        let output = silent_command(&binary_path)
+            .args(args)
+            .output()
+            .map_err(|e| format!("Failed to run Cursor models command {:?}: {e}", args))?;
 
-    let cleaned = strip_ansi(&String::from_utf8_lossy(&output.stdout));
-    let mut models = Vec::new();
-
-    for line in cleaned.lines() {
-        let line = line.trim();
-        if line.is_empty()
-            || line == "Available models"
-            || line.starts_with("Loading models")
-            || line.starts_with("Tip:")
-        {
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            errors.push(format!("{:?}: {}", args, stderr));
             continue;
         }
 
-        let Some((id, rest)) = line.split_once(" - ") else {
-            continue;
-        };
-        let mut label = rest.trim().to_string();
-        let is_current = label.contains("(current)");
-        let is_default = label.contains("(default)");
-        label = label
-            .replace("(current)", "")
-            .replace("(default)", "")
-            .trim()
-            .to_string();
+        had_successful_listing = true;
+        let combined = format!(
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let models = parse_cursor_models_output(&combined);
+        if !models.is_empty() {
+            return Ok(models);
+        }
 
-        models.push(CursorModelInfo {
-            id: id.trim().to_string(),
-            label,
-            is_default,
-            is_current,
-        });
+        errors.push(format!("{:?}: no parseable models", args));
     }
 
-    if models.is_empty() {
-        models.push(CursorModelInfo {
+    if had_successful_listing {
+        Ok(vec![CursorModelInfo {
             id: "auto".to_string(),
             label: "Auto".to_string(),
             is_default: false,
             is_current: false,
-        });
+        }])
+    } else {
+        Err(format!(
+            "Cursor model listing failed. Tried `models` and `--list-models`: {}",
+            errors.join("; ")
+        ))
     }
-
-    Ok(models)
 }
 
 #[tauri::command]
@@ -413,5 +473,51 @@ mod tests {
         assert!(!looks_authenticated(
             "About Cursor CLI\nUser Email          unknown"
         ));
+    }
+
+    #[test]
+    fn parses_current_cursor_model_list_output() {
+        let output = r#"
+Available models
+
+auto - Auto
+composer-2-fast - Composer 2 Fast (default)
+composer-2 - Composer 2 (current)
+gpt-5.4-high - GPT-5.4 1M High
+gpt-5.5-high-fast - GPT-5.5 High Fast
+claude-4.6-sonnet-medium - Sonnet 4.6 1M
+claude-opus-4-7-thinking-high - Opus 4.7 1M High Thinking
+gemini-3.1-pro - Gemini 3.1 Pro
+grok-4.3 - Grok 4.3 1M
+
+Tip: use --model <id> (or /model <id> in interactive mode) to switch.
+"#;
+
+        let models = parse_cursor_models_output(output);
+
+        assert_eq!(models.len(), 9);
+        assert_eq!(models[0].id, "composer-2-fast");
+        assert_eq!(models[0].label, "Composer 2 Fast");
+        assert!(models[0].is_default);
+        assert!(!models[0].is_current);
+        assert_eq!(models[1].id, "composer-2");
+        assert_eq!(models[1].label, "Composer 2");
+        assert!(models[1].is_current);
+        assert_eq!(models[2].id, "gpt-5.5-high-fast");
+        assert_eq!(models[3].id, "gpt-5.4-high");
+        assert_eq!(models[4].id, "claude-opus-4-7-thinking-high");
+        assert_eq!(models[5].id, "claude-4.6-sonnet-medium");
+        assert_eq!(models[6].id, "auto");
+    }
+
+    #[test]
+    fn cursor_model_parser_ignores_unparseable_lines_and_strips_ansi() {
+        let output = "\u{1b}[2KLoading models...\nnot a model\nkimi-k2.5 - Kimi K2.5\n";
+
+        let models = parse_cursor_models_output(output);
+
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].id, "kimi-k2.5");
+        assert_eq!(models[0].label, "Kimi K2.5");
     }
 }

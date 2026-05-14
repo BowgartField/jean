@@ -32,6 +32,7 @@ export function FullScreenTerminalSurface({
   return (
     <div
       data-terminal-root="true"
+      data-terminal-surface="session"
       className={cn(
         'flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-background',
         className

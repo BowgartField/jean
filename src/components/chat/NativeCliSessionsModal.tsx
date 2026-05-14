@@ -9,6 +9,8 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Kbd } from '@/components/ui/kbd'
+import { Separator } from '@/components/ui/separator'
 import { cn } from '@/lib/utils'
 import { invoke } from '@/lib/transport'
 import {
@@ -368,7 +370,7 @@ export function NativeCliSessionsModal({
   return (
     <Dialog open={open} onOpenChange={nextOpen => !nextOpen && onClose()}>
       <DialogContent
-        className="grid h-[min(760px,calc(100vh-64px))] w-[min(860px,calc(100vw-32px))] grid-rows-[auto_auto_auto_minmax(0,1fr)] gap-4 p-5 sm:max-w-[860px]"
+        className="grid h-[min(760px,calc(100vh-64px))] w-[min(860px,calc(100vw-32px))] grid-rows-[auto_auto_auto_auto_minmax(0,1fr)] gap-4 p-5 sm:max-w-[860px]"
         onOpenAutoFocus={event => {
           event.preventDefault()
           newSessionButtonRef.current?.focus()
@@ -397,7 +399,8 @@ export function NativeCliSessionsModal({
         <Button
           ref={newSessionButtonRef}
           type="button"
-          className="justify-start gap-3 border-primary/40 bg-primary/12 px-3 text-foreground hover:border-primary/60 hover:bg-primary/18 focus-visible:ring-primary/50"
+          variant="outline"
+          className="h-10 justify-start gap-3 px-3"
           disabled={createSession.isPending || openingSessionId !== null}
           onClick={createNewSession}
         >
@@ -407,7 +410,15 @@ export function NativeCliSessionsModal({
             <Plus className="size-4" />
           )}
           New {label} session
+          <Kbd aria-hidden="true" className="shrink-0 text-[10px]">
+            ↵
+          </Kbd>
         </Button>
+
+        <Separator
+          data-testid="native-cli-session-search-separator"
+          className="my-1 bg-border/70"
+        />
 
         <div className="relative">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />

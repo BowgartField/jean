@@ -4,11 +4,21 @@ use crate::platform::silent_command;
 use std::path::PathBuf;
 use tauri::AppHandle;
 
-/// Name of the Cursor Agent binary.
+/// Primary Cursor Agent binary name.
+///
+/// Cursor's current CLI entrypoint is `agent`; `cursor-agent` remains a
+/// backwards-compatible alias on older installs.
 #[cfg(windows)]
-pub const CLI_BINARY_NAME: &str = "cursor-agent.exe";
+pub const CLI_BINARY_NAME: &str = "agent.exe";
 #[cfg(not(windows))]
-pub const CLI_BINARY_NAME: &str = "cursor-agent";
+pub const CLI_BINARY_NAME: &str = "agent";
+
+#[cfg(windows)]
+pub const LEGACY_CLI_BINARY_NAME: &str = "cursor-agent.exe";
+#[cfg(not(windows))]
+pub const LEGACY_CLI_BINARY_NAME: &str = "cursor-agent";
+
+pub const CLI_BINARY_CANDIDATES: [&str; 2] = [CLI_BINARY_NAME, LEGACY_CLI_BINARY_NAME];
 
 /// Resolve the Cursor Agent binary from system PATH.
 ///
@@ -22,18 +32,20 @@ pub fn resolve_cli_binary(_app: &AppHandle) -> PathBuf {
         "which"
     };
 
-    if let Ok(output) = silent_command(which_cmd).arg(CLI_BINARY_NAME).output() {
-        if output.status.success() {
-            let path_str = String::from_utf8_lossy(&output.stdout)
-                .lines()
-                .next()
-                .unwrap_or("")
-                .trim()
-                .to_string();
-            if !path_str.is_empty() {
-                let path = PathBuf::from(&path_str);
-                if path.exists() {
-                    return path;
+    for binary_name in CLI_BINARY_CANDIDATES {
+        if let Ok(output) = silent_command(which_cmd).arg(binary_name).output() {
+            if output.status.success() {
+                let path_str = String::from_utf8_lossy(&output.stdout)
+                    .lines()
+                    .next()
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
+                if !path_str.is_empty() {
+                    let path = PathBuf::from(&path_str);
+                    if path.exists() {
+                        return path;
+                    }
                 }
             }
         }
@@ -47,8 +59,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn fallback_path_is_cursor_agent_binary_name() {
+    fn fallback_path_is_primary_agent_binary_name() {
         let resolved = PathBuf::from(CLI_BINARY_NAME);
         assert!(resolved.ends_with(CLI_BINARY_NAME));
+    }
+
+    #[test]
+    fn candidates_prefer_agent_before_legacy_cursor_agent() {
+        assert_eq!(CLI_BINARY_CANDIDATES[0], CLI_BINARY_NAME);
+        assert_eq!(CLI_BINARY_CANDIDATES[1], LEGACY_CLI_BINARY_NAME);
     }
 }

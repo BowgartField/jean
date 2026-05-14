@@ -21,7 +21,16 @@ export const OPENCODE_MODEL_OPTIONS: { value: string; label: string }[] = [
 ]
 
 export const CURSOR_MODEL_OPTIONS: { value: string; label: string }[] = [
+  { value: 'cursor/composer-2-fast', label: 'Composer 2 Fast' },
+  { value: 'cursor/composer-2', label: 'Composer 2' },
+  { value: 'cursor/gpt-5.5-high-fast', label: 'GPT-5.5 High Fast' },
+  {
+    value: 'cursor/claude-opus-4-7-thinking-high',
+    label: 'Opus 4.7 1M High Thinking',
+  },
   { value: 'cursor/auto', label: 'Auto' },
+  { value: 'cursor/gemini-3.1-pro', label: 'Gemini 3.1 Pro' },
+  { value: 'cursor/grok-4.3', label: 'Grok 4.3 1M' },
 ]
 
 export const THINKING_LEVEL_OPTIONS: {

@@ -95,11 +95,11 @@ pub fn check_mcp_health(
 
     let output = cmd
         .output()
-        .map_err(|e| format!("Failed to run cursor-agent mcp list: {e}"))?;
+        .map_err(|e| format!("Failed to run Cursor MCP list: {e}"))?;
 
     if !output.status.success() {
         let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
-        return Err(format!("cursor-agent mcp list failed: {}", stderr.trim()));
+        return Err(format!("Cursor MCP list failed: {}", stderr.trim()));
     }
 
     let combined = format!(
@@ -203,7 +203,7 @@ fn run_mcp_approval_command(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .output()
-        .map_err(|e| format!("Failed to run cursor-agent mcp {verb} {identifier}: {e}"))?;
+        .map_err(|e| format!("Failed to run Cursor MCP {verb} {identifier}: {e}"))?;
 
     if output.status.success() {
         return Ok(());
@@ -211,7 +211,7 @@ fn run_mcp_approval_command(
 
     let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
     Err(format!(
-        "cursor-agent mcp {verb} {identifier} failed: {}",
+        "Cursor MCP {verb} {identifier} failed: {}",
         stderr.trim()
     ))
 }

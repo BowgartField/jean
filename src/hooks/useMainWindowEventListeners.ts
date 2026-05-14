@@ -39,13 +39,34 @@ export function shouldLetPlanDialogHandleAction(
   return planDialogOpen && PLAN_DIALOG_APPROVAL_ACTIONS.has(action)
 }
 
-export function getTerminalShortcutWorktreeId(): string | null {
+function getFocusedTerminalElement(): HTMLElement | null {
   const activeElement = document.activeElement
-  const terminalFocused =
-    activeElement instanceof HTMLElement &&
-    !!activeElement.closest('.xterm, [data-terminal-emulator]')
+  if (!(activeElement instanceof HTMLElement)) return null
 
-  if (!terminalFocused) return null
+  return activeElement.closest('.xterm, [data-terminal-emulator]')
+}
+
+export function isPlainSessionTerminalFocused(): boolean {
+  return !!getFocusedTerminalElement()?.closest(
+    '[data-terminal-surface="session"]'
+  )
+}
+
+export function blurFocusedTerminalForShortcut(): boolean {
+  const terminalElement = getFocusedTerminalElement()
+  if (!terminalElement) return false
+
+  const activeElement = document.activeElement
+  if (activeElement instanceof HTMLElement) {
+    activeElement.blur()
+  }
+
+  document.body.focus({ preventScroll: true })
+  return true
+}
+
+export function getTerminalShortcutWorktreeId(): string | null {
+  if (!getFocusedTerminalElement()) return null
 
   const uiState = useUIStore.getState()
   const chatState = useChatStore.getState()
@@ -532,6 +553,19 @@ export function useMainWindowEventListeners() {
           return
         }
       }
+
+      if (
+        shortcut === 'mod+shift+escape' &&
+        blurFocusedTerminalForShortcut()
+      ) {
+        e.preventDefault()
+        e.stopPropagation()
+        return
+      }
+
+      // A focused full-screen/plain terminal session should own all keybindings.
+      // Side/modal terminals still use the terminal-specific remapping below.
+      if (isPlainSessionTerminalFocused()) return
 
       // Cancel prompt should work even when modals are open
       if (shortcut === keybindingsRef.current.cancel_prompt) {

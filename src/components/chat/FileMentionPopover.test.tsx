@@ -1,6 +1,10 @@
+import { createRef } from 'react'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen } from '@/test/test-utils'
-import { FileMentionPopover } from './FileMentionPopover'
+import { act, fireEvent, render, screen } from '@/test/test-utils'
+import {
+  FileMentionPopover,
+  type FileMentionPopoverHandle,
+} from './FileMentionPopover'
 import type { WorktreeFile } from '@/types/chat'
 
 const filesByRoot: Record<string, WorktreeFile[]> = {
@@ -107,7 +111,7 @@ describe('FileMentionPopover linked project scopes', () => {
     Element.prototype.scrollIntoView = vi.fn()
   })
 
-  it('shows linked projects first and only switches file search after a project click', () => {
+  it('shows linked projects in a scope selector and only switches file search after a project click', () => {
     const onSelectFile = vi.fn()
 
     render(
@@ -122,19 +126,30 @@ describe('FileMentionPopover linked project scopes', () => {
       />
     )
 
-    expect(screen.getByText('Jean (current)')).toBeInTheDocument()
-    expect(screen.getByText('Docs')).toBeInTheDocument()
-    expect(screen.getByText('Build')).toBeInTheDocument()
-    expect(screen.getByText('API')).toBeInTheDocument()
+    const scopeSelector = screen.getByLabelText('Project scope selector')
+    expect(scopeSelector).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Search files in Jean current' })
+    ).toHaveAttribute('aria-pressed', 'true')
+    expect(
+      screen.getByRole('button', { name: 'Search files in Docs' })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Search files in Build' })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Search files in API' })
+    ).toBeInTheDocument()
     expect(screen.getByText('src/App.tsx')).toBeInTheDocument()
     expect(screen.queryByText('docs/intro.md')).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByText('Docs'))
-
-    expect(screen.queryByText('selected')).not.toBeInTheDocument()
-    expect(screen.getByText('Docs').closest('[role="option"]')).toHaveClass(
-      '!bg-primary/15'
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Search files in Docs' })
     )
+
+    expect(
+      screen.getByRole('button', { name: 'Search files in Docs' })
+    ).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getByText('docs/intro.md')).toBeInTheDocument()
     expect(screen.queryByText('src/App.tsx')).not.toBeInTheDocument()
 
@@ -148,6 +163,42 @@ describe('FileMentionPopover linked project scopes', () => {
         sourceProjectName: 'Docs',
       })
     )
+  })
+
+  it('cycles project scopes through the imperative keyboard handle', () => {
+    const handleRef = createRef<FileMentionPopoverHandle | null>()
+
+    render(
+      <FileMentionPopover
+        worktreePath="/tmp/current-worktree"
+        currentProjectId="current"
+        open
+        onOpenChange={vi.fn()}
+        onSelectFile={vi.fn()}
+        searchQuery=""
+        anchorPosition={{ top: 0, left: 0 }}
+        handleRef={handleRef}
+      />
+    )
+
+    expect(screen.queryByText(/Scope:/)).not.toBeInTheDocument()
+    expect(screen.queryByText('Switch scope')).not.toBeInTheDocument()
+    expect(screen.getByText('Ctrl')).toBeInTheDocument()
+    expect(screen.getByText('Shift')).toBeInTheDocument()
+
+    act(() => handleRef.current?.selectNextScope())
+
+    expect(
+      screen.getByRole('button', { name: 'Search files in Docs' })
+    ).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByText('docs/intro.md')).toBeInTheDocument()
+
+    act(() => handleRef.current?.selectPreviousScope())
+
+    expect(
+      screen.getByRole('button', { name: 'Search files in Jean current' })
+    ).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByText('src/App.tsx')).toBeInTheDocument()
   })
 
   it('keeps the file viewer prominent when several linked projects are shown', () => {
@@ -167,10 +218,24 @@ describe('FileMentionPopover linked project scopes', () => {
     expect(commandList).toHaveClass('min-h-[280px]')
     expect(commandList).toHaveClass('max-h-[min(360px,60vh)]')
 
-    expect(screen.getByText('Jean (current)')).toBeInTheDocument()
-    expect(screen.getByText('Docs')).toBeInTheDocument()
-    expect(screen.getByText('Build')).toBeInTheDocument()
-    expect(screen.getByText('API')).toBeInTheDocument()
+    expect(screen.queryByText('Projects')).not.toBeInTheDocument()
+    const commandListEl = commandList as HTMLElement
+    expect(screen.getByLabelText('Project scope selector')).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Search files in Jean current' })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Search files in Docs' })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Search files in Build' })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Search files in API' })
+    ).toBeInTheDocument()
+    expect(commandListEl).not.toHaveTextContent('Docs')
+    expect(commandListEl).not.toHaveTextContent('Build')
+    expect(commandListEl).not.toHaveTextContent('API')
 
     expect(screen.getByText('src/App.tsx')).toBeInTheDocument()
     expect(screen.getByText('src/main.tsx')).toBeInTheDocument()

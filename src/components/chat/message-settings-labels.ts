@@ -4,7 +4,10 @@ import {
   MODEL_OPTIONS,
   OPENCODE_MODEL_OPTIONS,
 } from '@/components/chat/toolbar/toolbar-options'
-import { formatOpencodeModelLabel } from '@/components/chat/toolbar/toolbar-utils'
+import {
+  formatCursorModelLabel,
+  formatOpencodeModelLabel,
+} from '@/components/chat/toolbar/toolbar-utils'
 import {
   codexDefaultModelOptions,
   getClaudeFastInfo,
@@ -32,5 +35,6 @@ export function getMessageModelLabel(model: string): string {
     if (baseLabel) return `${baseLabel} Fast`
   }
 
+  if (model.startsWith('cursor/')) return formatCursorModelLabel(model)
   return model.includes('/') ? formatOpencodeModelLabel(model) : model
 }

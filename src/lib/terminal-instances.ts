@@ -411,6 +411,23 @@ function getTerminalTheme() {
 }
 
 function shouldLetAppHandleShortcut(event: KeyboardEvent): boolean {
+  if (
+    (event.metaKey || event.ctrlKey) &&
+    event.shiftKey &&
+    !event.altKey &&
+    event.code === 'Escape'
+  ) {
+    return true
+  }
+
+  const target = event.target
+  if (
+    target instanceof HTMLElement &&
+    target.closest('[data-terminal-surface="session"]')
+  ) {
+    return false
+  }
+
   if (!event.metaKey) return false
   const code = event.code
   // CMD+` → toggle terminal panel
