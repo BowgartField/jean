@@ -145,6 +145,39 @@ pub fn update_cancel_flag_context(
     }
 }
 
+/// Fire-and-forget server-side abort for a running OpenCode session.
+///
+/// OpenCode exposes `POST /session/{id}/abort`. Jean still keeps a local
+/// cancellation flag so the in-process request can return promptly even if
+/// the server abort request is slow or fails.
+pub fn abort_opencode_session(opencode_session_id: String, working_dir: Option<String>) {
+    std::thread::spawn(move || {
+        let Some(base_url) = crate::opencode_server::get_current_url() else {
+            log::warn!("OpenCode: no server URL available for abort");
+            return;
+        };
+
+        let abort_url = format!("{base_url}/session/{opencode_session_id}/abort");
+        log::info!("OpenCode: sending abort to {abort_url}");
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .build();
+        match client {
+            Ok(c) => {
+                let mut request = c.post(&abort_url);
+                if let Some(dir) = working_dir {
+                    request = request.query(&[("directory", dir)]);
+                }
+                match request.send() {
+                    Ok(resp) => log::info!("OpenCode abort response: status={}", resp.status()),
+                    Err(e) => log::warn!("OpenCode abort request failed: {e}"),
+                }
+            }
+            Err(e) => log::warn!("OpenCode abort client build failed: {e}"),
+        }
+    });
+}
+
 /// Register a Codex app-server turn for a session.
 /// Returns `false` if the session was already pending cancellation.
 pub fn register_codex_turn(session_id: String, thread_id: String, turn_id: String) -> bool {
@@ -265,6 +298,23 @@ mod tests {
 
         clear_registries();
     }
+
+    #[test]
+    fn cleanup_session_registrations_clears_opencode_active_flag() {
+        clear_registries();
+
+        assert!(register_cancel_flag(
+            "opencode-session".to_string(),
+            Arc::new(AtomicBool::new(false))
+        ));
+        assert!(is_session_actively_managed("opencode-session"));
+
+        cleanup_session_registrations("opencode-session");
+
+        assert!(!is_session_actively_managed("opencode-session"));
+
+        clear_registries();
+    }
 }
 
 /// Cancel a running Claude process for a session by sending SIGKILL to the process group
@@ -369,39 +419,10 @@ pub fn cancel_process(
         entry.flag.store(true, Ordering::SeqCst);
 
         // Fire-and-forget: call the OpenCode interrupt endpoint to abort server-side processing.
-        // This makes the in-flight blocking POST return immediately.
+        // The in-process OpenCode request also watches the cancel flag and drops
+        // its HTTP future so Jean can unregister the session promptly.
         if let Some(oc_sid) = entry.opencode_session_id {
-            if let Some(base_url) = crate::opencode_server::get_current_url() {
-                // sst/opencode renamed the endpoint to `/abort` in v1.14.x (HttpApi migration).
-                let interrupt_url = format!("{base_url}/session/{oc_sid}/abort");
-                let working_dir = entry.working_dir.clone();
-                std::thread::spawn(move || {
-                    log::info!("OpenCode: sending interrupt to {interrupt_url}");
-                    let client = reqwest::blocking::Client::builder()
-                        .timeout(std::time::Duration::from_secs(5))
-                        .build();
-                    match client {
-                        Ok(c) => {
-                            let mut request = c.post(&interrupt_url);
-                            if let Some(dir) = working_dir {
-                                request = request.query(&[("directory", dir)]);
-                            }
-                            match request.send() {
-                                Ok(resp) => {
-                                    log::info!(
-                                        "OpenCode interrupt response: status={}",
-                                        resp.status()
-                                    )
-                                }
-                                Err(e) => log::warn!("OpenCode interrupt request failed: {e}"),
-                            }
-                        }
-                        Err(e) => log::warn!("OpenCode interrupt client build failed: {e}"),
-                    }
-                });
-            } else {
-                log::warn!("OpenCode: no server URL available for interrupt");
-            }
+            abort_opencode_session(oc_sid, entry.working_dir.clone());
         }
 
         // Mark run as cancelled immediately (before HTTP call returns)
@@ -512,26 +533,9 @@ pub fn cancel_process_if_running(
         log::trace!("OpenCode session {session_id} is running, setting cancel flag");
         entry.flag.store(true, Ordering::SeqCst);
 
-        // Fire-and-forget interrupt
+        // Fire-and-forget abort
         if let Some(oc_sid) = entry.opencode_session_id {
-            if let Some(base_url) = crate::opencode_server::get_current_url() {
-                // sst/opencode renamed the endpoint to `/abort` in v1.14.x (HttpApi migration).
-                let interrupt_url = format!("{base_url}/session/{oc_sid}/abort");
-                let working_dir = entry.working_dir.clone();
-                std::thread::spawn(move || {
-                    log::info!("OpenCode: sending interrupt to {interrupt_url}");
-                    let client = reqwest::blocking::Client::builder()
-                        .timeout(std::time::Duration::from_secs(5))
-                        .build();
-                    if let Ok(c) = client {
-                        let mut request = c.post(&interrupt_url);
-                        if let Some(dir) = working_dir {
-                            request = request.query(&[("directory", dir)]);
-                        }
-                        let _ = request.send();
-                    }
-                });
-            }
+            abort_opencode_session(oc_sid, entry.working_dir.clone());
         }
 
         if let Err(e) = run_log::mark_running_run_cancelled(app, session_id) {
