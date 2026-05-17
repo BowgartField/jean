@@ -80,6 +80,7 @@ export function FileMentionPopover({
   )
   const { data: files = [] } = useWorktreeFiles(selectedRootPath)
   const listRef = useRef<HTMLDivElement>(null)
+  const scopeListRef = useRef<HTMLDivElement>(null)
   // File row index only. Project scopes live outside the command list so
   // 3+ linked projects never push file results out of view.
   const [selectedIndex, setSelectedIndex] = useState(0)
@@ -224,6 +225,20 @@ export function FileMentionPopover({
     selectedItem?.scrollIntoView({ block: 'nearest' })
   }, [clampedSelectedIndex])
 
+  // Scroll selected project scope into view when cycling with keyboard.
+  useEffect(() => {
+    const scopeList = scopeListRef.current
+    if (!open || !scopeList || selectedScopeIndex < 0) return
+
+    const selectedScopeItem = scopeList.querySelector(
+      `[data-scope-index="${selectedScopeIndex}"]`
+    )
+    selectedScopeItem?.scrollIntoView({
+      block: 'nearest',
+      inline: 'nearest',
+    })
+  }, [open, selectedScopeIndex])
+
   if (!open || !anchorPosition) return null
 
   return (
@@ -269,10 +284,11 @@ export function FileMentionPopover({
           {scopes.length > 0 && (
             <div className="space-y-1.5">
               <div
+                ref={scopeListRef}
                 className="flex gap-1.5 overflow-x-auto pb-0.5"
                 aria-label="Project scope selector"
               >
-                {scopes.map(scope => {
+                {scopes.map((scope, index) => {
                   const isActiveScope = scope.rootPath === selectedRootPath
                   const label = scope.isCurrent
                     ? `${scope.name} current`
@@ -283,6 +299,7 @@ export function FileMentionPopover({
                       key={`${scope.id}:${scope.rootPath}`}
                       type="button"
                       title={scope.name}
+                      data-scope-index={index}
                       aria-label={`Search files in ${label}`}
                       aria-pressed={isActiveScope}
                       onClick={() => handleScopeSelect(scope)}

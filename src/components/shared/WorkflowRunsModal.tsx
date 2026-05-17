@@ -645,7 +645,7 @@ export function WorkflowRunsModal() {
     <Dialog open={workflowRunsModalOpen} onOpenChange={handleOpenChange}>
       <DialogContent
         showCloseButton={false}
-        className="h-[80vh] sm:max-w-5xl overflow-hidden flex flex-col"
+        className="h-[80vh] w-[calc(100vw-2rem)] max-w-[calc(100vw-2rem)] overflow-hidden flex flex-col sm:max-w-5xl"
       >
         <DialogHeader>
           <div className="flex items-center gap-2">
@@ -685,11 +685,11 @@ export function WorkflowRunsModal() {
             ref={sidebarRef}
             tabIndex={0}
             onKeyDown={handleKeyDown}
-            className="flex min-h-0 flex-1 gap-4 outline-none"
+            className="flex min-h-0 flex-1 flex-col gap-3 outline-none sm:flex-row sm:gap-4"
           >
             {/* Sidebar */}
-            <ScrollArea className="w-80 shrink-0">
-              <div className="space-y-0.5 pr-3">
+            <ScrollArea className="w-full max-h-[30vh] shrink-0 sm:max-h-none sm:w-80">
+              <div className="space-y-0.5 pr-2 sm:pr-3">
                 {sidebarItems.map((workflowName, idx) => {
                   const group = workflowName
                     ? groups.find(g => g.workflowName === workflowName)
@@ -728,7 +728,7 @@ export function WorkflowRunsModal() {
             {/* Run list */}
             <div
               ref={listRef}
-              className="flex-1 min-w-0 overflow-y-auto outline-none"
+              className="flex-1 min-h-0 min-w-0 overflow-y-auto outline-none"
             >
               <div className="space-y-1 pb-2">
                 {displayedRuns.map((run, index) => (
@@ -747,8 +747,8 @@ export function WorkflowRunsModal() {
                     <div className="flex min-w-0 flex-1 items-center gap-2.5">
                       <RunStatusIcon run={run} />
                       <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-1.5">
-                          <span className="truncate text-sm font-medium">
+                        <div className="flex min-w-0 items-center gap-1.5">
+                          <span className="min-w-0 truncate text-sm font-medium">
                             {run.workflowName}
                           </span>
                           <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">
@@ -774,8 +774,10 @@ export function WorkflowRunsModal() {
                             </Tooltip>
                           )}
                         </div>
-                        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                          <span className="truncate">{run.displayTitle}</span>
+                        <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+                          <span className="min-w-0 truncate">
+                            {run.displayTitle}
+                          </span>
                           <span className="shrink-0">·</span>
                           <span className="shrink-0">
                             {timeAgo(run.createdAt)}

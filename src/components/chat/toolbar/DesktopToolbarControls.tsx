@@ -5,6 +5,7 @@ import {
   FolderOpen,
   GitMerge,
   GitPullRequest,
+  Paperclip,
   Shield,
   ShieldAlert,
   Wand2,
@@ -172,7 +173,7 @@ export function DesktopToolbarControls({
   onOpenProjectSettings: _onOpenProjectSettings,
   onResolvePrConflicts,
   onLoadContext,
-  onAttach: _onAttach,
+  onAttach,
   installedBackends,
   onSetExecutionMode,
   availableExecutionModes,
@@ -233,6 +234,21 @@ export function DesktopToolbarControls({
           </button>
         </TooltipTrigger>
         <TooltipContent>Magic (⌘M)</TooltipContent>
+      </Tooltip>
+
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            aria-label="Attachments"
+            disabled={hasPendingQuestions}
+            className="hidden @xl:flex h-8 items-center gap-1 px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+            onClick={onAttach}
+          >
+            <Paperclip className="h-3.5 w-3.5" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>Attachments</TooltipContent>
       </Tooltip>
 
       <div className="hidden @xl:block h-4 w-px bg-border/50" />

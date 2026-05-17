@@ -1,5 +1,5 @@
 import { createRef } from 'react'
-import { beforeAll, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen } from '@/test/test-utils'
 import {
   FileMentionPopover,
@@ -112,6 +112,10 @@ describe('FileMentionPopover linked project scopes', () => {
     Element.prototype.scrollIntoView = vi.fn()
   })
 
+  beforeEach(() => {
+    vi.mocked(Element.prototype.scrollIntoView).mockClear()
+  })
+
   it('shows linked projects in a scope selector and only switches file search after a project click', () => {
     const onSelectFile = vi.fn()
 
@@ -193,6 +197,10 @@ describe('FileMentionPopover linked project scopes', () => {
       screen.getByRole('button', { name: 'Search files in Docs' })
     ).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getByText('docs/intro.md')).toBeInTheDocument()
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalledWith({
+      block: 'nearest',
+      inline: 'nearest',
+    })
 
     act(() => handleRef.current?.selectPreviousScope())
 
@@ -200,6 +208,37 @@ describe('FileMentionPopover linked project scopes', () => {
       screen.getByRole('button', { name: 'Search files in Jean current' })
     ).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getByText('src/App.tsx')).toBeInTheDocument()
+  })
+
+  it('scrolls the active scope chip into view when keyboard cycling reaches hidden projects', () => {
+    const handleRef = createRef<FileMentionPopoverHandle | null>()
+
+    render(
+      <FileMentionPopover
+        worktreePath="/tmp/current-worktree"
+        currentProjectId="current"
+        open
+        onOpenChange={vi.fn()}
+        onSelectFile={vi.fn()}
+        searchQuery=""
+        anchorPosition={{ top: 0, left: 0 }}
+        handleRef={handleRef}
+      />
+    )
+
+    vi.mocked(Element.prototype.scrollIntoView).mockClear()
+
+    act(() => handleRef.current?.selectNextScope())
+    act(() => handleRef.current?.selectNextScope())
+    act(() => handleRef.current?.selectNextScope())
+
+    expect(
+      screen.getByRole('button', { name: 'Search files in API' })
+    ).toHaveAttribute('aria-pressed', 'true')
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalledWith({
+      block: 'nearest',
+      inline: 'nearest',
+    })
   })
 
   it('keeps the file viewer prominent when several linked projects are shown', () => {
