@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { MessageSquarePlus, Loader2, Terminal } from 'lucide-react'
+import { MessageSquarePlus, Loader2, Terminal, Zap } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -36,6 +36,12 @@ const backendCommands: Record<CliBackend, string> = {
   cursor: 'cursor-agent',
 }
 
+const YOLO_ARGS_BY_BACKEND: Partial<Record<CliBackend, string[]>> = {
+  claude: ['--permission-mode', 'bypassPermissions'],
+  codex: ['--dangerously-bypass-approvals-and-sandbox'],
+  cursor: ['--yolo', '--sandbox', 'disabled'],
+}
+
 export function NewSessionModeModal() {
   const target = useUIStore(state => state.newSessionModeTarget)
   const close = useUIStore(state => state.closeNewSessionModeModal)
@@ -47,6 +53,10 @@ export function NewSessionModeModal() {
   const { data: preferences } = usePreferences()
   const [nativePickerKind, setNativePickerKind] =
     useState<NativeCliSessionKind | null>(null)
+  const [nativePickerInitialCommandArgs, setNativePickerInitialCommandArgs] =
+    useState<string[]>([])
+  const [nativePickerAutoStartNew, setNativePickerAutoStartNew] =
+    useState(false)
   const autoHandledTargetRef = useRef<string | null>(null)
   const open = target !== null
 
@@ -134,16 +144,30 @@ export function NewSessionModeModal() {
   }, [close, createSession, openSessionModal, target])
 
   const choosePlainTerminal = useCallback(() => {
+    setNativePickerInitialCommandArgs([])
+    setNativePickerAutoStartNew(false)
     setNativePickerKind('terminal')
   }, [])
 
   const chooseBackendTerminal = useCallback((backend: CliBackend) => {
+    setNativePickerInitialCommandArgs([])
+    setNativePickerAutoStartNew(false)
+    setNativePickerKind(backend)
+  }, [])
+
+  const chooseBackendTerminalYolo = useCallback((backend: CliBackend) => {
+    const yoloArgs = YOLO_ARGS_BY_BACKEND[backend]
+    if (!yoloArgs) return
+    setNativePickerInitialCommandArgs(yoloArgs)
+    setNativePickerAutoStartNew(true)
     setNativePickerKind(backend)
   }, [])
 
   const closeAll = useCallback(() => {
     autoHandledTargetRef.current = null
     setNativePickerKind(null)
+    setNativePickerInitialCommandArgs([])
+    setNativePickerAutoStartNew(false)
     close()
   }, [close])
 
@@ -165,10 +189,14 @@ export function NewSessionModeModal() {
     }
 
     if (defaultKind === 'terminal') {
+      setNativePickerInitialCommandArgs([])
+      setNativePickerAutoStartNew(false)
       setNativePickerKind('terminal')
       return
     }
 
+    setNativePickerInitialCommandArgs([])
+    setNativePickerAutoStartNew(false)
     setNativePickerKind(defaultKind)
   }, [chooseChat, preferences?.default_new_session_kind, target])
 
@@ -208,6 +236,7 @@ export function NewSessionModeModal() {
     return () => window.removeEventListener('keydown', handleKeyDown, true)
   }, [
     chooseBackendTerminal,
+    chooseBackendTerminalYolo,
     chooseChat,
     choosePlainTerminal,
     installedBackendChoices,
@@ -266,15 +295,18 @@ export function NewSessionModeModal() {
             {installedBackendChoices.map(choice => {
               const Icon = getBackendIcon(choice.backend)
               const label = getBackendPlainLabel(choice.backend)
+              const yoloArgs = YOLO_ARGS_BY_BACKEND[choice.backend]
               return (
-                <NewSessionChoice
+                <NativeBackendChoice
                   key={choice.backend}
                   icon={<Icon className="size-4" />}
                   title={label}
                   subtitle={`Open native ${label} in a terminal session`}
                   shortcut={choice.shortcut}
+                  yoloAvailable={Boolean(yoloArgs)}
                   disabled={createSession.isPending}
                   onClick={() => chooseBackendTerminal(choice.backend)}
+                  onYoloClick={() => chooseBackendTerminalYolo(choice.backend)}
                 />
               )
             })}
@@ -301,13 +333,86 @@ export function NewSessionModeModal() {
           worktreeId={target.worktreeId}
           worktreePath={target.worktreePath}
           command={nativePickerCommand}
-          onBack={() => setNativePickerKind(null)}
+          initialCommandArgs={nativePickerInitialCommandArgs}
+          onBack={() => {
+            setNativePickerKind(null)
+            setNativePickerInitialCommandArgs([])
+            setNativePickerAutoStartNew(false)
+          }}
           onClose={closeAll}
           onOpenSessionModal={openSessionModal}
-          autoStartNew={target.intent === 'default'}
+          autoStartNew={target.intent === 'default' || nativePickerAutoStartNew}
         />
       )}
     </>
+  )
+}
+
+function NativeBackendChoice({
+  icon,
+  title,
+  subtitle,
+  shortcut,
+  yoloAvailable,
+  disabled,
+  onClick,
+  onYoloClick,
+}: {
+  icon: React.ReactNode
+  title: string
+  subtitle: string
+  shortcut: string
+  yoloAvailable: boolean
+  disabled?: boolean
+  onClick: () => void
+  onYoloClick: () => void
+}) {
+  return (
+    <div
+      className={cn(
+        'flex w-full min-w-0 max-w-full items-center gap-3 rounded-lg border border-border/70 bg-muted/25 px-3 py-2.5 text-left transition-colors'
+      )}
+    >
+      <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-background text-muted-foreground">
+        {icon}
+      </span>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={onClick}
+        className={cn(
+          'min-w-0 flex-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          disabled && 'cursor-not-allowed opacity-50'
+        )}
+      >
+        <span className="flex items-center gap-2 text-sm font-medium leading-none">
+          {title}
+        </span>
+        <span className="mt-1 block truncate text-xs text-muted-foreground">
+          {subtitle}
+        </span>
+      </button>
+      <span className="flex shrink-0 items-center gap-1.5">
+        {yoloAvailable && (
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={onYoloClick}
+            title={`Start ${title} in yolo mode`}
+            aria-label={`Start ${title} in yolo mode`}
+            className={cn(
+              'inline-flex h-8 items-center gap-1.5 rounded-md border border-border/70 bg-background px-2 text-xs font-medium text-muted-foreground transition-colors',
+              'hover:border-border hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              disabled && 'cursor-not-allowed opacity-50 hover:bg-background'
+            )}
+          >
+            <Zap className="size-3.5 text-destructive" />
+            Yolo
+          </button>
+        )}
+        <Kbd className="h-7 min-w-7 shrink-0 text-[10px]">{shortcut}</Kbd>
+      </span>
+    </div>
   )
 }
 

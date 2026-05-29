@@ -42,6 +42,7 @@ interface NativeCliSessionsModalProps {
   worktreeId: string
   worktreePath: string
   command: string | null
+  initialCommandArgs?: string[]
   onBack: () => void
   onClose: () => void
   onOpenSessionModal: (
@@ -99,6 +100,7 @@ export function NativeCliSessionsModal({
   worktreeId,
   worktreePath,
   command,
+  initialCommandArgs = [],
   onBack,
   onClose,
   onOpenSessionModal,
@@ -133,6 +135,7 @@ export function NativeCliSessionsModal({
         : 'CLI sessions'
   const label = backend ? getBackendPlainLabel(backend) : 'Terminal'
   const Icon = backend ? getBackendIcon(backend) : Terminal
+  const hasInitialCommandArgs = initialCommandArgs.length > 0
 
   const sessions = useMemo(() => {
     if (!kind) return []
@@ -241,6 +244,55 @@ export function NativeCliSessionsModal({
     [backend, worktreeId]
   )
 
+  const shouldAppendPreparedContext = useCallback(
+    (commandArgs: string[]): boolean => {
+      if (!backend || commandArgs.length === 0) return false
+      if (hasInitialCommandArgs) {
+        return commandArgs.every(
+          (arg, index) => arg === initialCommandArgs[index]
+        )
+      }
+      if (
+        backend === 'claude' &&
+        commandArgs[0] === '--permission-mode' &&
+        commandArgs[1] === 'bypassPermissions'
+      ) {
+        return true
+      }
+      if (
+        backend === 'codex' &&
+        commandArgs[0] === '--dangerously-bypass-approvals-and-sandbox'
+      ) {
+        return true
+      }
+      if (
+        backend === 'cursor' &&
+        commandArgs[0] === '--yolo' &&
+        commandArgs[1] === '--sandbox' &&
+        commandArgs[2] === 'disabled'
+      ) {
+        return true
+      }
+      return false
+    },
+    [backend, hasInitialCommandArgs, initialCommandArgs]
+  )
+
+  const resolveTerminalCommandArgs = useCallback(
+    async (session: Session): Promise<string[]> => {
+      const savedArgs = session.terminal_command_args ?? []
+      if (savedArgs.length === 0) {
+        return prepareCommandArgs(session.id)
+      }
+      if (!shouldAppendPreparedContext(savedArgs)) {
+        return savedArgs
+      }
+      const preparedArgs = await prepareCommandArgs(session.id)
+      return [...savedArgs, ...preparedArgs]
+    },
+    [prepareCommandArgs, shouldAppendPreparedContext]
+  )
+
   const openTerminalSession = useCallback(
     async (session: Session) => {
       setOpeningSessionId(session.id)
@@ -256,11 +308,7 @@ export function NativeCliSessionsModal({
 
         let terminalId = existingTerminal?.id
         if (!terminalId) {
-          const commandArgs =
-            session.terminal_command_args &&
-            session.terminal_command_args.length > 0
-              ? session.terminal_command_args
-              : await prepareCommandArgs(session.id)
+          const commandArgs = await resolveTerminalCommandArgs(session)
           terminalId = terminalStore.addTerminal(
             worktreeId,
             session.terminal_command ?? command,
@@ -290,13 +338,14 @@ export function NativeCliSessionsModal({
       command,
       onClose,
       onOpenSessionModal,
-      prepareCommandArgs,
+      resolveTerminalCommandArgs,
       worktreeId,
       worktreePath,
     ]
   )
 
   const createNewSession = useCallback(() => {
+    const commandArgs = initialCommandArgs
     createSession.mutate(
       {
         worktreeId,
@@ -305,7 +354,7 @@ export function NativeCliSessionsModal({
         backend,
         primarySurface: 'terminal',
         terminalCommand: command,
-        terminalCommandArgs: [],
+        terminalCommandArgs: commandArgs,
         terminalLabel: label,
       },
       {
@@ -314,7 +363,7 @@ export function NativeCliSessionsModal({
             ...session,
             primary_surface: 'terminal',
             terminal_command: command,
-            terminal_command_args: [],
+            terminal_command_args: commandArgs,
             terminal_label: label,
           })
         },
@@ -324,6 +373,7 @@ export function NativeCliSessionsModal({
     backend,
     command,
     createSession,
+    initialCommandArgs,
     label,
     openTerminalSession,
     worktreeId,

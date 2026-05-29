@@ -248,6 +248,124 @@ describe('NewSessionModeModal', () => {
     )
   })
 
+  it('starts a native Claude session in yolo permission mode', async () => {
+    mutate.mockImplementation(
+      (
+        _args: unknown,
+        opts?: {
+          onSuccess?: (session: {
+            id: string
+            name: string
+            backend?: string
+          }) => void
+        }
+      ) => {
+        opts?.onSuccess?.({
+          id: 'session-claude-yolo',
+          name: 'Claude',
+          backend: 'claude',
+        })
+      }
+    )
+    useUIStore.getState().openNewSessionModeModal({
+      worktreeId: 'worktree-1',
+      worktreePath: '/tmp/worktree-1',
+      origin: 'chat',
+    })
+
+    render(<NewSessionModeModal />)
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Start Claude in yolo mode' })
+    )
+
+    expect(mutate).toHaveBeenCalledWith(
+      {
+        worktreeId: 'worktree-1',
+        worktreePath: '/tmp/worktree-1',
+        name: 'Claude',
+        backend: 'claude',
+        primarySurface: 'terminal',
+        terminalCommand: '/usr/local/bin/claude',
+        terminalCommandArgs: ['--permission-mode', 'bypassPermissions'],
+        terminalLabel: 'Claude',
+      },
+      expect.any(Object)
+    )
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith('prepare_backend_terminal_context', {
+        sessionId: 'session-claude-yolo',
+        worktreeId: 'worktree-1',
+        backend: 'claude',
+      })
+    })
+    expect(
+      useTerminalStore.getState().terminals['worktree-1']?.[0]
+    ).toMatchObject({
+      command: '/usr/local/bin/claude',
+      commandArgs: [
+        '--permission-mode',
+        'bypassPermissions',
+        '--context-arg',
+        'context-value',
+      ],
+    })
+  })
+
+  it('starts a native Codex session with dangerous approval bypass', async () => {
+    mutate.mockImplementation(
+      (
+        _args: unknown,
+        opts?: {
+          onSuccess?: (session: {
+            id: string
+            name: string
+            backend?: string
+          }) => void
+        }
+      ) => {
+        opts?.onSuccess?.({
+          id: 'session-codex-yolo',
+          name: 'Codex',
+          backend: 'codex',
+        })
+      }
+    )
+    useUIStore.getState().openNewSessionModeModal({
+      worktreeId: 'worktree-1',
+      worktreePath: '/tmp/worktree-1',
+      origin: 'chat',
+    })
+
+    render(<NewSessionModeModal />)
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Start Codex in yolo mode' })
+    )
+
+    expect(mutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'Codex',
+        backend: 'codex',
+        primarySurface: 'terminal',
+        terminalCommandArgs: ['--dangerously-bypass-approvals-and-sandbox'],
+      }),
+      expect.any(Object)
+    )
+    await waitFor(() => {
+      expect(
+        useTerminalStore.getState().terminals['worktree-1']?.[0]
+      ).toMatchObject({
+        command: '/usr/local/bin/codex',
+        commandArgs: [
+          '--dangerously-bypass-approvals-and-sandbox',
+          '--context-arg',
+          'context-value',
+        ],
+      })
+    })
+  })
+
   it('opens a plain terminal session with shortcut 1', async () => {
     mutate.mockImplementation(
       (
