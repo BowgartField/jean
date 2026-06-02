@@ -713,6 +713,29 @@ export function useMainWindowEventListeners() {
         }
       }
 
+      // On the project canvas, Cmd/Ctrl+ArrowUp/Down reorders the selected
+      // worktree. The global chat-scroll shortcuts use the same keys and run in
+      // capture phase, so handle this before they stop propagation.
+      if (
+        (matchedAction === 'scroll_chat_up' ||
+          matchedAction === 'scroll_chat_down') &&
+        !useUIStore.getState().sessionChatModalOpen &&
+        document.querySelector(
+          '[data-pdnd-worktree-scope="canvas-worktree-list"]'
+        )
+      ) {
+        e.preventDefault()
+        e.stopPropagation()
+        window.dispatchEvent(
+          new CustomEvent('move-selected-worktree', {
+            detail: {
+              direction: matchedAction === 'scroll_chat_up' ? 'up' : 'down',
+            },
+          })
+        )
+        return
+      }
+
       // Look up matching action in keybindings
       if (matchedAction) {
         const action = matchedAction

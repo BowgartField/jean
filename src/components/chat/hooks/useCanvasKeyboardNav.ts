@@ -15,6 +15,10 @@ interface UseCanvasKeyboardNavOptions<T> {
   onNavigateLeft?: () => void
   /** Optional callback when ArrowRight is pressed */
   onNavigateRight?: () => void
+  /** Optional callback when Cmd/Ctrl+ArrowUp is pressed */
+  onMoveUp?: () => void
+  /** Optional callback when Cmd/Ctrl+ArrowDown is pressed */
+  onMoveDown?: () => void
   /** Whether keyboard navigation is enabled (disable when modal open) */
   enabled: boolean
   /** Optional callback when selection changes (for tracking in store) */
@@ -41,6 +45,8 @@ export function useCanvasKeyboardNav<T>({
   onSelect,
   onNavigateLeft,
   onNavigateRight,
+  onMoveUp,
+  onMoveDown,
   enabled,
   onSelectionChange,
 }: UseCanvasKeyboardNavOptions<T>): UseCanvasKeyboardNavResult {
@@ -120,6 +126,18 @@ export function useCanvasKeyboardNav<T>({
       const currentIndex = selectedIndexRef.current
       const total = cardsLengthRef.current
 
+      if ((e.metaKey || e.ctrlKey) && e.key === 'ArrowUp' && onMoveUp) {
+        e.preventDefault()
+        onMoveUp()
+        return
+      }
+
+      if ((e.metaKey || e.ctrlKey) && e.key === 'ArrowDown' && onMoveDown) {
+        e.preventDefault()
+        onMoveDown()
+        return
+      }
+
       if (e.key === 'ArrowLeft' && onNavigateLeft) {
         e.preventDefault()
         onNavigateLeft()
@@ -179,6 +197,8 @@ export function useCanvasKeyboardNav<T>({
     onSelect,
     onNavigateLeft,
     onNavigateRight,
+    onMoveUp,
+    onMoveDown,
     onSelectionChange,
   ])
 

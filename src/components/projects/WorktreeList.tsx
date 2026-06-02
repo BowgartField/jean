@@ -1,26 +1,21 @@
-import { useCallback, useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQueries } from '@tanstack/react-query'
 import {
-  DndContext,
-  closestCenter,
-  KeyboardSensor,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-} from '@dnd-kit/core'
+  draggable,
+  dropTargetForElements,
+  monitorForElements,
+} from '@atlaskit/pragmatic-drag-and-drop/element/adapter'
+import { combine } from '@atlaskit/pragmatic-drag-and-drop/combine'
 import {
-  SortableContext,
-  sortableKeyboardCoordinates,
-  verticalListSortingStrategy,
-  useSortable,
-} from '@dnd-kit/sortable'
-import { CSS } from '@dnd-kit/utilities'
-import type { Worktree } from '@/types/projects'
+  attachClosestEdge,
+  type Edge,
+} from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge'
+import { isBaseSession, type Worktree } from '@/types/projects'
 import type { WorktreeSessions } from '@/types/chat'
 import { invoke } from '@/lib/transport'
+import { cn } from '@/lib/utils'
 import { chatQueryKeys } from '@/services/chat'
-import { isTauri } from '@/services/projects'
+import { isTauri, useReorderWorktrees } from '@/services/projects'
 import { useProjectsStore } from '@/store/projects-store'
 import {
   compareWorktreesForCanvasSort,
@@ -28,6 +23,24 @@ import {
 } from './worktree-sort-utils'
 import { WorktreeItem } from './WorktreeItem'
 import { WorktreeItemSkeleton } from './WorktreeItemSkeleton'
+import {
+  DRAG_SCOPE_WORKTREE_LIST,
+  isWorktreeDragData,
+} from '@/lib/drag-and-drop/types'
+import { reorderWithClosestEdge } from '@/lib/drag-and-drop/reorder'
+import { announceDrag } from '@/lib/drag-and-drop/live-region'
+import { DropIndicator } from '@/components/drag-and-drop/DropIndicator'
+import {
+  applyWorktreeDropSnapshot,
+  emptyWorktreeDropSnapshot,
+  getSnapshotFromWorktreeDropTarget,
+  getSnapshotFromWorktreeElement,
+  getWorktreeDropTargetForScope,
+  getWorktreeElementFromEventTarget,
+  getWorktreeElementFromPoint,
+  type WorktreeDropSnapshot,
+  type WorktreeReorderDragState,
+} from '@/lib/drag-and-drop/worktree-reorder-ux'
 
 interface SortableWorktreeProps {
   worktree: Worktree
@@ -35,6 +48,8 @@ interface SortableWorktreeProps {
   projectPath: string
   defaultBranch: string
   disabled: boolean
+  isDragging: boolean
+  closestEdge: Edge | null
 }
 
 function SortableWorktree({
@@ -43,25 +58,68 @@ function SortableWorktree({
   projectPath,
   defaultBranch,
   disabled,
+  isDragging,
+  closestEdge,
 }: SortableWorktreeProps) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({
-    id: worktree.id,
-    disabled,
-  })
+  const elementRef = useRef<HTMLDivElement | null>(null)
 
-  const style: React.CSSProperties = {
-    // Use Translate instead of Transform to avoid scale which affects text rendering
-    transform: CSS.Translate.toString(transform),
-    transition,
-    zIndex: isDragging ? 1 : 0,
-  }
+  useEffect(() => {
+    const element = elementRef.current
+    if (
+      !element ||
+      worktree.status === 'pending' ||
+      worktree.status === 'deleting'
+    ) {
+      return
+    }
+
+    const cleanupFns = [
+      dropTargetForElements({
+        element,
+        canDrop: ({ source }) => {
+          return (
+            !disabled &&
+            isWorktreeDragData(source.data) &&
+            source.data.projectId === projectId &&
+            source.data.scope === DRAG_SCOPE_WORKTREE_LIST &&
+            source.data.worktreeId !== worktree.id
+          )
+        },
+        getData: ({ input, element }) => {
+          return attachClosestEdge(
+            {
+              type: 'worktree-section',
+              projectId,
+              worktreeId: worktree.id,
+              scope: DRAG_SCOPE_WORKTREE_LIST,
+            },
+            {
+              input,
+              element,
+              allowedEdges: ['top', 'bottom'],
+            }
+          )
+        },
+      }),
+    ]
+
+    if (!disabled) {
+      cleanupFns.push(
+        draggable({
+          element,
+          canDrag: () => !disabled,
+          getInitialData: () => ({
+            type: 'worktree-section',
+            projectId,
+            worktreeId: worktree.id,
+            scope: DRAG_SCOPE_WORKTREE_LIST,
+          }),
+        })
+      )
+    }
+
+    return combine(...cleanupFns)
+  }, [disabled, projectId, worktree.id, worktree.status])
 
   // Pending or deleting worktrees show skeleton
   if (worktree.status === 'pending' || worktree.status === 'deleting') {
@@ -70,12 +128,12 @@ function SortableWorktree({
 
   return (
     <div
-      ref={setNodeRef}
-      style={style}
-      {...attributes}
-      {...listeners}
-      className={disabled ? '' : isDragging ? 'cursor-grabbing' : 'cursor-grab'}
+      ref={elementRef}
+      data-pdnd-worktree-id={worktree.id}
+      data-pdnd-worktree-scope={DRAG_SCOPE_WORKTREE_LIST}
+      className={cnWorktreeDragClass(disabled, isDragging)}
     >
+      <DropIndicator edge={closestEdge} insetClassName="left-2 right-2" />
       <WorktreeItem
         worktree={worktree}
         projectId={projectId}
@@ -83,6 +141,17 @@ function SortableWorktree({
         defaultBranch={defaultBranch}
       />
     </div>
+  )
+}
+
+function cnWorktreeDragClass(disabled: boolean, isDragging: boolean) {
+  return cn(
+    'relative transition-opacity',
+    disabled
+      ? undefined
+      : isDragging
+        ? 'cursor-grabbing opacity-40'
+        : 'cursor-grab'
   )
 }
 
@@ -99,6 +168,7 @@ export function WorktreeList({
   worktrees,
   defaultBranch,
 }: WorktreeListProps) {
+  const reorderWorktrees = useReorderWorktrees()
   const worktreeSortMode = useProjectsStore(
     state =>
       state.projectCanvasSettings[projectId]?.worktreeSortMode ?? 'created'
@@ -183,50 +253,276 @@ export function WorktreeList({
     return [...sortedPending, ...sortedReady]
   }, [pendingWorktrees, readyWorktrees, sessionsByWorktreeId, worktreeSortMode])
 
-  const sensors = useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: {
-        distance: 8,
-      },
-    }),
-    useSensor(KeyboardSensor, {
-      coordinateGetter: sortableKeyboardCoordinates,
-    })
-  )
-
-  const handleDragEnd = useCallback((_event: DragEndEvent) => {
-    // Sidebar order is derived from the ProjectCanvasView sort setting.
-    // Manual reordering is disabled so the sidebar cannot drift from canvas.
+  const canReorderWorktree = useCallback((worktree: Worktree) => {
+    return (
+      !isBaseSession(worktree) &&
+      (!worktree.status ||
+        worktree.status === 'ready' ||
+        worktree.status === 'error')
+    )
   }, [])
 
-  // Get only the draggable worktree IDs for SortableContext
-  const draggableIds: string[] = []
+  const worktreeById = useMemo(
+    () => new Map(sortedWorktrees.map(worktree => [worktree.id, worktree])),
+    [sortedWorktrees]
+  )
+
+  const draggableIds = useMemo(
+    () =>
+      sortedWorktrees
+        .filter(worktree => canReorderWorktree(worktree))
+        .map(worktree => worktree.id),
+    [canReorderWorktree, sortedWorktrees]
+  )
+
+  const draggableIdSet = useMemo(() => new Set(draggableIds), [draggableIds])
+  const [dragState, setDragState] = useState<WorktreeReorderDragState>({
+    draggingId: null,
+    targetId: null,
+    closestEdge: null,
+  })
+  const latestDropTargetRef = useRef<WorktreeDropSnapshot>(
+    emptyWorktreeDropSnapshot
+  )
+  const dragStateRef = useRef(dragState)
+
+  useEffect(() => {
+    dragStateRef.current = dragState
+  }, [dragState])
+
+  const getWorktreeDropTarget = useCallback(
+    (dropTargets: { data: Record<string | symbol, unknown> }[]) =>
+      getWorktreeDropTargetForScope(dropTargets, DRAG_SCOPE_WORKTREE_LIST),
+    []
+  )
+
+  const reorderFromDrop = useCallback(
+    (activeId: string, overId: string, closestEdge: Edge | null) => {
+      if (activeId === overId) return
+
+      const oldIndex = draggableIds.indexOf(activeId)
+      const newIndex = draggableIds.indexOf(overId)
+
+      if (oldIndex === -1 || newIndex === -1 || oldIndex === newIndex) return
+
+      const reorderedDraggableIds = reorderWithClosestEdge({
+        items: draggableIds,
+        startIndex: oldIndex,
+        indexOfTarget: newIndex,
+        closestEdgeOfTarget: closestEdge,
+      })
+      const nextDraggableIds = [...reorderedDraggableIds]
+      const fullOrderedIds = sortedWorktrees.map(worktree => {
+        if (!draggableIdSet.has(worktree.id)) return worktree.id
+        return nextDraggableIds.shift() ?? worktree.id
+      })
+
+      reorderWorktrees.mutate({
+        projectId,
+        worktreeIds: fullOrderedIds.filter(id => {
+          const worktree = worktreeById.get(id)
+          return (
+            worktree != null &&
+            (isBaseSession(worktree) || canReorderWorktree(worktree))
+          )
+        }),
+        switchToManualSort: worktreeSortMode !== 'manual',
+      })
+
+      announceDrag('Worktree reordered')
+    },
+    [
+      canReorderWorktree,
+      draggableIdSet,
+      draggableIds,
+      projectId,
+      reorderWorktrees,
+      sortedWorktrees,
+      worktreeById,
+      worktreeSortMode,
+    ]
+  )
+
+  const nativeDropHandledRef = useRef(false)
+
+  useEffect(() => {
+    return monitorForElements({
+      canMonitor: ({ source }) =>
+        isWorktreeDragData(source.data) &&
+        source.data.projectId === projectId &&
+        source.data.scope === DRAG_SCOPE_WORKTREE_LIST,
+      onDragStart: ({ source }) => {
+        if (!isWorktreeDragData(source.data)) return
+        latestDropTargetRef.current = emptyWorktreeDropSnapshot
+        setDragState({
+          draggingId: source.data.worktreeId,
+          targetId: null,
+          closestEdge: null,
+        })
+        announceDrag('Started dragging worktree')
+      },
+      onDropTargetChange: ({ location }) => {
+        const snapshot = getSnapshotFromWorktreeDropTarget(
+          getWorktreeDropTarget(location.current.dropTargets)
+        )
+        latestDropTargetRef.current = snapshot
+        setDragState(state => applyWorktreeDropSnapshot(state, snapshot))
+      },
+      onDrag: ({ location }) => {
+        const snapshot = getSnapshotFromWorktreeDropTarget(
+          getWorktreeDropTarget(location.current.dropTargets)
+        )
+        setDragState(state => {
+          latestDropTargetRef.current = snapshot
+          return applyWorktreeDropSnapshot(state, snapshot)
+        })
+      },
+      onDrop: ({ source, location }) => {
+        if (nativeDropHandledRef.current) {
+          nativeDropHandledRef.current = false
+          return
+        }
+        setDragState({ draggingId: null, targetId: null, closestEdge: null })
+        if (!isWorktreeDragData(source.data)) return
+        const targetSnapshot = getSnapshotFromWorktreeDropTarget(
+          getWorktreeDropTarget(location.current.dropTargets)
+        )
+        const fallback = latestDropTargetRef.current
+        const snapshot = targetSnapshot.targetId ? targetSnapshot : fallback
+        latestDropTargetRef.current = emptyWorktreeDropSnapshot
+        const { targetId, closestEdge } = snapshot
+        if (!targetId) {
+          announceDrag('Worktree move cancelled')
+          return
+        }
+        reorderFromDrop(source.data.worktreeId, targetId, closestEdge)
+      },
+    })
+  }, [getWorktreeDropTarget, projectId, reorderFromDrop])
+
+  const handleNativeDragOver = useCallback(
+    (event: React.DragEvent<HTMLDivElement>) => {
+      if (!dragState.draggingId) return
+      const target = getWorktreeElementFromEventTarget({
+        eventTarget: event.target,
+        scope: DRAG_SCOPE_WORKTREE_LIST,
+      })
+      const snapshot = getSnapshotFromWorktreeElement({
+        element: target,
+        draggingId: dragState.draggingId,
+        clientY: event.clientY,
+      })
+      if (!snapshot.targetId) return
+
+      event.preventDefault()
+      latestDropTargetRef.current = snapshot
+      setDragState(state => applyWorktreeDropSnapshot(state, snapshot))
+    },
+    [dragState.draggingId]
+  )
+
+  const handleNativeDrop = useCallback(
+    (event: React.DragEvent<HTMLDivElement>) => {
+      if (!dragState.draggingId) return
+      event.preventDefault()
+      event.stopPropagation()
+      const fallback = latestDropTargetRef.current
+      nativeDropHandledRef.current = true
+      setDragState({ draggingId: null, targetId: null, closestEdge: null })
+      latestDropTargetRef.current = emptyWorktreeDropSnapshot
+      if (fallback.targetId) {
+        reorderFromDrop(
+          dragState.draggingId,
+          fallback.targetId,
+          fallback.closestEdge
+        )
+      }
+    },
+    [dragState.draggingId, reorderFromDrop]
+  )
+
+  const handleNativeDragEnd = useCallback(() => {
+    latestDropTargetRef.current = emptyWorktreeDropSnapshot
+    setDragState({ draggingId: null, targetId: null, closestEdge: null })
+  }, [])
+
+  useEffect(() => {
+    const handleDocumentDragOver = (event: DragEvent) => {
+      const draggingId = dragStateRef.current.draggingId
+      if (!draggingId) return
+      const target = getWorktreeElementFromPoint({
+        clientX: event.clientX,
+        clientY: event.clientY,
+        scope: DRAG_SCOPE_WORKTREE_LIST,
+      })
+      const snapshot = getSnapshotFromWorktreeElement({
+        element: target,
+        draggingId,
+        clientY: event.clientY,
+      })
+      if (!snapshot.targetId) return
+
+      event.preventDefault()
+      latestDropTargetRef.current = snapshot
+      setDragState(state => applyWorktreeDropSnapshot(state, snapshot))
+    }
+
+    const handleDocumentDrop = (event: DragEvent) => {
+      const draggingId = dragStateRef.current.draggingId
+      if (!draggingId) return
+      const fallback = latestDropTargetRef.current
+      if (!fallback.targetId) return
+      event.preventDefault()
+      event.stopPropagation()
+      nativeDropHandledRef.current = true
+      setDragState({ draggingId: null, targetId: null, closestEdge: null })
+      latestDropTargetRef.current = emptyWorktreeDropSnapshot
+      reorderFromDrop(draggingId, fallback.targetId, fallback.closestEdge)
+    }
+
+    const handleDocumentDragEnd = () => {
+      if (!dragStateRef.current.draggingId) return
+      latestDropTargetRef.current = emptyWorktreeDropSnapshot
+      setDragState({ draggingId: null, targetId: null, closestEdge: null })
+    }
+
+    document.addEventListener('dragover', handleDocumentDragOver, true)
+    document.addEventListener('drop', handleDocumentDrop, true)
+    document.addEventListener('dragend', handleDocumentDragEnd, true)
+
+    return () => {
+      document.removeEventListener('dragover', handleDocumentDragOver, true)
+      document.removeEventListener('drop', handleDocumentDrop, true)
+      document.removeEventListener('dragend', handleDocumentDragEnd, true)
+    }
+  }, [reorderFromDrop])
 
   return (
-    <div className="ml-4 border-l border-border/40 py-0.5">
-      <DndContext
-        sensors={sensors}
-        collisionDetection={closestCenter}
-        onDragEnd={handleDragEnd}
-      >
-        <SortableContext
-          items={draggableIds}
-          strategy={verticalListSortingStrategy}
-        >
-          {sortedWorktrees.map(worktree => {
-            return (
-              <SortableWorktree
-                key={worktree.id}
-                worktree={worktree}
-                projectId={projectId}
-                projectPath={projectPath}
-                defaultBranch={defaultBranch}
-                disabled
-              />
-            )
-          })}
-        </SortableContext>
-      </DndContext>
+    <div
+      className="ml-4 border-l border-border/40 py-0.5"
+      onPointerDown={event => event.stopPropagation()}
+      onKeyDown={event => event.stopPropagation()}
+      onDragOver={handleNativeDragOver}
+      onDrop={handleNativeDrop}
+      onDragEnd={handleNativeDragEnd}
+    >
+      {sortedWorktrees.map(worktree => {
+        const isTarget = dragState.targetId === worktree.id
+        return (
+          <SortableWorktree
+            key={worktree.id}
+            worktree={worktree}
+            projectId={projectId}
+            projectPath={projectPath}
+            defaultBranch={defaultBranch}
+            disabled={
+              reorderWorktrees.isPending || !canReorderWorktree(worktree)
+            }
+            isDragging={dragState.draggingId === worktree.id}
+            closestEdge={isTarget ? dragState.closestEdge : null}
+          />
+        )
+      })}
     </div>
   )
 }

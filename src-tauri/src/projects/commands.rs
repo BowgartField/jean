@@ -5840,13 +5840,15 @@ pub async fn reorder_worktrees(
 
     let mut data = load_projects_data(&app)?;
 
-    // Update order based on position in the provided array
-    // Start from 1 since base sessions always have order 0
-    for (index, worktree_id) in worktree_ids.iter().enumerate() {
+    // Update order based on position in the provided array.
+    // Base sessions always stay at order 0 and do not consume an order slot.
+    let mut next_order = 1_u32;
+    for worktree_id in worktree_ids.iter() {
         if let Some(worktree) = data.worktrees.iter_mut().find(|w| w.id == *worktree_id) {
             // Skip base sessions - they always stay at order 0
             if worktree.session_type != SessionType::Base {
-                worktree.order = (index + 1) as u32;
+                worktree.order = next_order;
+                next_order += 1;
             }
         }
     }

@@ -1,7 +1,11 @@
-import { isBaseSession, type Worktree } from '@/types/projects'
+import {
+  isBaseSession,
+  type Worktree,
+  type WorktreeSortMode,
+} from '@/types/projects'
 import type { Session } from '@/types/chat'
 
-export type WorktreeSortMode = 'created' | 'last_activity'
+export type { WorktreeSortMode } from '@/types/projects'
 
 export function getSessionActivityTimestamp(session: Session): number {
   return session.last_message_at ?? session.updated_at ?? session.created_at
@@ -22,6 +26,10 @@ export function getWorktreeSortValue(
   latestActivityAt: number,
   sortMode: WorktreeSortMode
 ): number {
+  if (sortMode === 'manual') {
+    return worktree.order
+  }
+
   if (sortMode === 'created') {
     return worktree.created_at
   }
@@ -39,6 +47,16 @@ export function compareWorktreesForCanvasSort(
   const bIsBase = isBaseSession(b)
   if (aIsBase && !bIsBase) return -1
   if (!aIsBase && bIsBase) return 1
+
+  if (sortMode === 'manual') {
+    const orderDiff = a.order - b.order
+    if (orderDiff !== 0) return orderDiff
+
+    const createdDiff = b.created_at - a.created_at
+    if (createdDiff !== 0) return createdDiff
+
+    return a.id.localeCompare(b.id)
+  }
 
   const sortDiff =
     getWorktreeSortValue(

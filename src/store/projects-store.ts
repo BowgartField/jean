@@ -1,8 +1,9 @@
 import { create } from 'zustand'
 import { devtools } from 'zustand/middleware'
+import type { WorktreeSortMode } from '@/types/projects'
 
 export interface ProjectCanvasSettings {
-  worktreeSortMode?: 'created' | 'last_activity'
+  worktreeSortMode?: WorktreeSortMode
 }
 
 interface ProjectsUIState {
@@ -101,7 +102,7 @@ interface ProjectsUIState {
   ) => void
   setProjectCanvasWorktreeSortMode: (
     projectId: string,
-    sortMode: 'created' | 'last_activity'
+    sortMode: WorktreeSortMode
   ) => void
 }
 

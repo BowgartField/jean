@@ -92,6 +92,35 @@ describe('worktree-sort-utils', () => {
     expect(sorted.map(w => w.id)).toEqual(['newest', 'middle', 'oldest'])
   })
 
+  it('sorts manual mode by persisted order after base sessions', () => {
+    const base = worktree({
+      id: 'base',
+      session_type: 'base',
+      created_at: 1,
+      order: 0,
+    })
+    const first = worktree({ id: 'first', created_at: 10, order: 1 })
+    const second = worktree({ id: 'second', created_at: 30, order: 2 })
+    const third = worktree({ id: 'third', created_at: 20, order: 3 })
+
+    const sorted = [third, second, base, first].sort((a, b) =>
+      compareWorktreesForCanvasSort(a, b, new Map(), 'manual')
+    )
+
+    expect(sorted.map(w => w.id)).toEqual(['base', 'first', 'second', 'third'])
+  })
+
+  it('uses created_at as manual mode tie-breaker', () => {
+    const older = worktree({ id: 'older', created_at: 10, order: 1 })
+    const newer = worktree({ id: 'newer', created_at: 20, order: 1 })
+
+    const sorted = [older, newer].sort((a, b) =>
+      compareWorktreesForCanvasSort(a, b, new Map(), 'manual')
+    )
+
+    expect(sorted.map(w => w.id)).toEqual(['newer', 'older'])
+  })
+
   it('uses created_at as tie-breaker', () => {
     const older = worktree({ id: 'older', created_at: 10 })
     const newer = worktree({ id: 'newer', created_at: 20 })

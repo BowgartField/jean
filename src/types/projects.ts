@@ -6,6 +6,8 @@ import type { AdvisoryContext, SecurityAlertContext } from '@/types/github'
  */
 export type SessionType = 'worktree' | 'base'
 
+export type WorktreeSortMode = 'created' | 'last_activity' | 'manual'
+
 /**
  * Status of a worktree (for tracking background operations)
  */
