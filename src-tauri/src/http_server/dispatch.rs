@@ -2298,7 +2298,7 @@ pub async fn dispatch_command(
             to_value(result)
         }
         "get_codex_usage" => {
-            let result = crate::codex_cli::get_codex_usage().await?;
+            let result = crate::codex_cli::get_codex_usage(app.clone()).await?;
             to_value(result)
         }
         "install_codex_cli" => {
@@ -2850,9 +2850,7 @@ pub async fn dispatch_command(
         // =====================================================================
         // WSL commands
         // =====================================================================
-        "list_wsl_distros" => {
-            to_value(crate::list_wsl_distros())
-        }
+        "list_wsl_distros" => to_value(crate::list_wsl_distros()),
         "check_wsl_tool" => {
             let distro: String = from_field(&args, "distro")?;
             let tool: String = from_field(&args, "tool")?;
@@ -2863,9 +2861,7 @@ pub async fn dispatch_command(
             let result = crate::get_wsl_home_dir(distro)?;
             to_value(result)
         }
-        "is_wsl_available" => {
-            to_value(crate::is_wsl_available())
-        }
+        "is_wsl_available" => to_value(crate::is_wsl_available()),
 
         // =====================================================================
         // Opinionated plugin commands

@@ -16,6 +16,11 @@ pub use crate::platform::is_process_alive;
 use crate::platform::shell_escape;
 use crate::platform::silent_command;
 
+#[cfg(any(windows, test))]
+fn wsl_shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
 /// Spawn Claude CLI as a detached process that survives Jean quitting (Unix).
 ///
 /// Uses `nohup` and shell backgrounding to fully detach the process.
@@ -201,7 +206,8 @@ pub fn spawn_detached_claude(
         let cli_name_owned = if cli_path_str.starts_with('/') {
             cli_path_str.to_string()
         } else {
-            cli_path.file_stem()
+            cli_path
+                .file_stem()
                 .and_then(|s| s.to_str())
                 .unwrap_or("claude")
                 .to_string()
@@ -211,6 +217,8 @@ pub fn spawn_detached_claude(
         // Input/output files are on the Windows side — convert to /mnt/c/... paths
         let unix_input = crate::platform::win_to_wsl_path(&input_file.to_string_lossy());
         let unix_output = crate::platform::win_to_wsl_path(&output_file.to_string_lossy());
+        let unix_input_escaped = wsl_shell_quote(&unix_input);
+        let unix_output_escaped = wsl_shell_quote(&unix_output);
 
         // Build env exports
         let env_exports = env_vars
@@ -228,11 +236,11 @@ pub fn spawn_detached_claude(
         let cli_quoted = format!("'{}'", cli_name.replace('\'', "'\\''"));
         let shell_cmd = if env_exports.is_empty() {
             format!(
-                "cat '{unix_input}' | nohup {cli_quoted} {args_str} >> '{unix_output}' 2>&1 & echo $!"
+                "cat {unix_input_escaped} | nohup {cli_quoted} {args_str} >> {unix_output_escaped} 2>&1 & echo $!"
             )
         } else {
             format!(
-                "cat '{unix_input}' | {env_exports} nohup {cli_quoted} {args_str} >> '{unix_output}' 2>&1 & echo $!"
+                "cat {unix_input_escaped} | {env_exports} nohup {cli_quoted} {args_str} >> {unix_output_escaped} 2>&1 & echo $!"
             )
         };
 
@@ -240,7 +248,16 @@ pub fn spawn_detached_claude(
         log::trace!("WSL shell command: {shell_cmd}");
 
         let mut child = silent_command("wsl.exe")
-            .args(["-d", &wsl_config.distro, "--cd", &unix_cwd, "--", "sh", "-c", &shell_cmd])
+            .args([
+                "-d",
+                &wsl_config.distro,
+                "--cd",
+                &unix_cwd,
+                "--",
+                "sh",
+                "-c",
+                &shell_cmd,
+            ])
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -258,12 +275,15 @@ pub fn spawn_detached_claude(
             }
         }
 
-        let status = child.wait().map_err(|e| format!("Failed to wait for WSL shell: {e}"))?;
+        let status = child
+            .wait()
+            .map_err(|e| format!("Failed to wait for WSL shell: {e}"))?;
         if !status.success() {
             return Err(format!("WSL shell command failed with status: {status}"));
         }
 
-        let pid: u32 = pid_str.parse()
+        let pid: u32 = pid_str
+            .parse()
             .map_err(|e| format!("Failed to parse WSL PID '{pid_str}': {e}"))?;
 
         log::trace!("Detached Claude CLI spawned inside WSL with PID: {pid}");
@@ -328,6 +348,14 @@ mod tests {
         assert_eq!(shell_escape("hello world"), "'hello world'");
         assert_eq!(shell_escape("it's"), "'it'\\''s'");
         assert_eq!(shell_escape(""), "''");
+    }
+
+    #[test]
+    fn test_wsl_shell_quote_escapes_single_quotes() {
+        assert_eq!(
+            wsl_shell_quote("/mnt/c/Users/O'Brien/input.jsonl"),
+            "'/mnt/c/Users/O'\\''Brien/input.jsonl'"
+        );
     }
 
     #[test]

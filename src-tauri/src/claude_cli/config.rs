@@ -1,6 +1,6 @@
 //! Configuration and path management for the embedded Claude CLI
 
-use crate::platform::{silent_command, get_wsl_config, get_wsl_home_dir};
+use crate::platform::{get_wsl_config, get_wsl_home_dir, silent_command};
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
 
@@ -80,7 +80,11 @@ pub fn resolve_cli_binary(app: &AppHandle) -> PathBuf {
             // spawn path can exec it directly. `wsl_which` uses a login
             // shell so PATH additions from ~/.profile / ~/.bashrc apply
             // (nvm, bun, volta, npm-global, etc.).
-            if let Some(unix_path) = crate::platform::wsl_which(&wsl.distro, "claude") {
+            if let Some(unix_path) = crate::platform::wsl_which(
+                &wsl.distro,
+                "claude",
+                get_wsl_cli_binary_path(&wsl.distro).ok().as_deref(),
+            ) {
                 return PathBuf::from(unix_path);
             }
         } else {

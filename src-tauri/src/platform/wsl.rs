@@ -26,10 +26,21 @@ impl Default for WslConfig {
     }
 }
 
+fn normalize_wsl_config(enabled: bool, distro: String) -> WslConfig {
+    if enabled && distro.trim().is_empty() {
+        WslConfig {
+            enabled: false,
+            distro: String::new(),
+        }
+    } else {
+        WslConfig { enabled, distro }
+    }
+}
+
 /// Initialize the WSL config cache from app preferences.
 /// Called once at app startup.
 pub fn init_wsl_config(enabled: bool, distro: String) {
-    let config = WslConfig { enabled, distro };
+    let config = normalize_wsl_config(enabled, distro);
     let lock = WSL_CONFIG.get_or_init(|| RwLock::new(WslConfig::default()));
     if let Ok(mut w) = lock.write() {
         *w = config;
@@ -46,10 +57,10 @@ pub fn get_wsl_config() -> WslConfig {
 
 /// Update WSL config at runtime (e.g., when preferences change).
 pub fn update_wsl_config(enabled: bool, distro: String) {
+    let config = normalize_wsl_config(enabled, distro);
     if let Some(lock) = WSL_CONFIG.get() {
         if let Ok(mut w) = lock.write() {
-            w.enabled = enabled;
-            w.distro = distro;
+            *w = config;
         }
     }
 }
@@ -116,6 +127,14 @@ pub fn wsl_to_win_path(unix_path: &str, distro: &str) -> String {
 /// On non-Windows or when WSL is disabled, this is equivalent to `silent_command(program)`
 /// with an optional `current_dir`.
 pub fn wsl_aware_command(program: &str, cwd: Option<&std::path::Path>) -> Command {
+    if !cfg!(windows) {
+        let mut cmd = silent_command(program);
+        if let Some(dir) = cwd {
+            cmd.current_dir(dir);
+        }
+        return cmd;
+    }
+
     let config = get_wsl_config();
 
     if !config.enabled {
@@ -218,11 +237,40 @@ pub fn check_wsl_tool(_distro: &str, _tool: &str) -> bool {
     false
 }
 
-/// Resolve the Unix path of a tool inside a WSL distro via `command -v`
-/// in a login shell.
+fn select_wsl_which_candidate(output: &str, jean_managed: Option<&str>) -> Option<String> {
+    let jean_managed = jean_managed.map(str::trim).filter(|p| !p.is_empty());
+
+    output
+        .lines()
+        .map(str::trim)
+        .find(|path| {
+            !path.is_empty()
+                && jean_managed
+                    .map(|jean_path| *path != jean_path)
+                    .unwrap_or(true)
+        })
+        .map(ToString::to_string)
+}
+
+/// Resolve the Unix path of a tool inside a WSL distro via `type -P -a`
+/// in a login shell, optionally excluding Jean's managed binary.
 #[cfg(windows)]
-pub fn wsl_which(distro: &str, tool: &str) -> Option<String> {
-    let script = format!("command -v {}", shell_single_quote(tool));
+pub fn wsl_which(distro: &str, tool: &str, jean_managed: Option<&str>) -> Option<String> {
+    let script = if let Some(jean_path) = jean_managed.map(str::trim).filter(|p| !p.is_empty()) {
+        format!(
+            "jean={jean}; \
+             jean_real=$(readlink -f -- \"$jean\" 2>/dev/null || printf '%s' \"$jean\"); \
+             while IFS= read -r candidate; do \
+               candidate_real=$(readlink -f -- \"$candidate\" 2>/dev/null || printf '%s' \"$candidate\"); \
+               if [ \"$candidate_real\" != \"$jean_real\" ]; then printf '%s\\n' \"$candidate\"; exit 0; fi; \
+             done < <(type -P -a {tool} 2>/dev/null); \
+             exit 1",
+            jean = shell_single_quote(jean_path),
+            tool = shell_single_quote(tool),
+        )
+    } else {
+        format!("type -P -a {}", shell_single_quote(tool))
+    };
     let output = silent_command("wsl.exe")
         .args(["-d", distro, "--", "bash", "-lc", &script])
         .output()
@@ -230,21 +278,11 @@ pub fn wsl_which(distro: &str, tool: &str) -> Option<String> {
     if !output.status.success() {
         return None;
     }
-    let path = String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .next()
-        .unwrap_or("")
-        .trim()
-        .to_string();
-    if path.is_empty() {
-        None
-    } else {
-        Some(path)
-    }
+    select_wsl_which_candidate(&String::from_utf8_lossy(&output.stdout), None)
 }
 
 #[cfg(not(windows))]
-pub fn wsl_which(_distro: &str, _tool: &str) -> Option<String> {
+pub fn wsl_which(_distro: &str, _tool: &str, _jean_managed: Option<&str>) -> Option<String> {
     None
 }
 
@@ -323,6 +361,14 @@ fn shell_single_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
 
+fn wsl_remove_path_script(unix_path: &str) -> String {
+    format!("rm -rf -- {}", shell_single_quote(unix_path))
+}
+
+fn wsl_remove_file_script(unix_path: &str) -> String {
+    format!("rm -f -- {}", shell_single_quote(unix_path))
+}
+
 /// Write `bytes` to `unix_path` inside a WSL distro.
 /// Creates any missing parent directories. Transfers bytes via stdin into
 /// `bash -c "mkdir -p <dir> && cat > <path>"` so no intermediate file is
@@ -359,15 +405,53 @@ pub fn wsl_write_bytes(distro: &str, unix_path: &str, bytes: &[u8]) -> Result<()
         .wait()
         .map_err(|e| format!("wsl.exe did not exit cleanly: {e}"))?;
     if !status.success() {
-        return Err(format!(
-            "Failed to write file inside WSL (exit {status})"
-        ));
+        return Err(format!("Failed to write file inside WSL (exit {status})"));
     }
     Ok(())
 }
 
 #[cfg(not(windows))]
 pub fn wsl_write_bytes(_distro: &str, _unix_path: &str, _bytes: &[u8]) -> Result<(), String> {
+    Err("WSL is not available on this platform".to_string())
+}
+
+/// Remove a file inside a WSL distro. Missing files are ignored.
+#[cfg(windows)]
+pub fn wsl_remove_file(distro: &str, unix_path: &str) -> Result<(), String> {
+    let script = wsl_remove_file_script(unix_path);
+    let output = silent_command("wsl.exe")
+        .args(["-d", distro, "--", "bash", "-c", &script])
+        .output()
+        .map_err(|e| format!("Failed to run wsl.exe rm: {e}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("rm failed inside WSL: {stderr}"));
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+pub fn wsl_remove_file(_distro: &str, _unix_path: &str) -> Result<(), String> {
+    Err("WSL is not available on this platform".to_string())
+}
+
+/// Remove a file or directory inside a WSL distro. Missing paths are ignored.
+#[cfg(windows)]
+pub fn wsl_remove_path(distro: &str, unix_path: &str) -> Result<(), String> {
+    let script = wsl_remove_path_script(unix_path);
+    let output = silent_command("wsl.exe")
+        .args(["-d", distro, "--", "bash", "-c", &script])
+        .output()
+        .map_err(|e| format!("Failed to run wsl.exe rm: {e}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("rm failed inside WSL: {stderr}"));
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+pub fn wsl_remove_path(_distro: &str, _unix_path: &str) -> Result<(), String> {
     Err("WSL is not available on this platform".to_string())
 }
 
@@ -434,6 +518,38 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_normalize_wsl_config_disables_empty_enabled_distro() {
+        let config = normalize_wsl_config(true, String::new());
+
+        assert!(!config.enabled);
+        assert_eq!(config.distro, "");
+    }
+
+    #[test]
+    fn test_normalize_wsl_config_disables_whitespace_enabled_distro() {
+        let config = normalize_wsl_config(true, "   \t\n  ".to_string());
+
+        assert!(!config.enabled);
+        assert_eq!(config.distro, "");
+    }
+
+    #[test]
+    fn test_normalize_wsl_config_preserves_valid_enabled_distro() {
+        let config = normalize_wsl_config(true, "Ubuntu".to_string());
+
+        assert!(config.enabled);
+        assert_eq!(config.distro, "Ubuntu");
+    }
+
+    #[test]
+    fn test_normalize_wsl_config_keeps_disabled_state() {
+        let config = normalize_wsl_config(false, String::new());
+
+        assert!(!config.enabled);
+        assert_eq!(config.distro, "");
+    }
+
+    #[test]
     fn test_win_to_wsl_path_unc_localhost() {
         assert_eq!(
             win_to_wsl_path(r"\\wsl.localhost\Ubuntu\home\user\project"),
@@ -443,10 +559,7 @@ mod tests {
 
     #[test]
     fn test_win_to_wsl_path_unc_wsl_dollar() {
-        assert_eq!(
-            win_to_wsl_path(r"\\wsl$\Ubuntu\home\user"),
-            "/home/user"
-        );
+        assert_eq!(win_to_wsl_path(r"\\wsl$\Ubuntu\home\user"), "/home/user");
     }
 
     #[test]
@@ -486,10 +599,70 @@ mod tests {
         assert!(program.contains("git"));
     }
 
+    #[cfg(not(windows))]
+    #[test]
+    fn test_wsl_aware_command_non_windows_ignores_enabled_config() {
+        init_wsl_config(true, "Ubuntu".to_string());
+
+        let cwd = std::path::Path::new("/tmp");
+        let cmd = wsl_aware_command("git", Some(cwd));
+        let program = format!("{:?}", cmd.get_program());
+
+        assert!(program.contains("git"));
+        assert!(!program.contains("wsl.exe"));
+        assert_eq!(cmd.get_current_dir(), Some(cwd));
+    }
+
     #[test]
     fn test_decode_utf16le() {
-        let input = "Ubuntu\0".encode_utf16().flat_map(|c| c.to_le_bytes()).collect::<Vec<_>>();
+        let input = "Ubuntu\0"
+            .encode_utf16()
+            .flat_map(|c| c.to_le_bytes())
+            .collect::<Vec<_>>();
         let result = decode_utf16le(&input);
         assert!(result.contains("Ubuntu"));
+    }
+
+    #[test]
+    fn select_wsl_which_candidate_skips_jean_managed_path() {
+        let candidates = "/home/u/.local/share/jean/codex-cli/codex\n/usr/bin/codex\n";
+
+        assert_eq!(
+            select_wsl_which_candidate(
+                candidates,
+                Some("/home/u/.local/share/jean/codex-cli/codex")
+            ),
+            Some("/usr/bin/codex".to_string())
+        );
+    }
+
+    #[test]
+    fn select_wsl_which_candidate_returns_none_when_only_jean_managed_path_exists() {
+        let candidates = "/home/u/.local/share/jean/gh-cli/gh\n";
+
+        assert_eq!(
+            select_wsl_which_candidate(candidates, Some("/home/u/.local/share/jean/gh-cli/gh")),
+            None
+        );
+    }
+
+    #[test]
+    fn test_wsl_remove_path_script_quotes_path() {
+        let script = wsl_remove_path_script("/home/o'hara/.local/share/jean/claude-cli");
+
+        assert_eq!(
+            script,
+            "rm -rf -- '/home/o'\\''hara/.local/share/jean/claude-cli'"
+        );
+    }
+
+    #[test]
+    fn test_wsl_remove_file_script_quotes_path() {
+        let script = wsl_remove_file_script("/home/o'hara/.local/share/jean/opencode-cli/opencode");
+
+        assert_eq!(
+            script,
+            "rm -f -- '/home/o'\\''hara/.local/share/jean/opencode-cli/opencode'"
+        );
     }
 }

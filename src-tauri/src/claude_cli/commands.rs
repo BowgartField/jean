@@ -12,7 +12,8 @@ use tauri::AppHandle;
 use tokio::sync::Mutex as AsyncMutex;
 
 use super::config::{
-    ensure_cli_dir, get_cli_binary_path, get_cli_dir, get_wsl_cli_binary_path, resolve_cli_binary,
+    ensure_cli_dir, get_cli_binary_path, get_cli_dir, get_wsl_cli_binary_path, get_wsl_cli_dir,
+    resolve_cli_binary,
 };
 use crate::http_server::EmitExt;
 use crate::platform::silent_command;
@@ -493,12 +494,7 @@ pub async fn install_claude_cli(app: AppHandle, version: Option<String>) -> Resu
         // WSL branch: stream the bytes into the distro at
         // $HOME/.local/share/jean/claude-cli/claude and make it executable.
         let unix_path = get_wsl_cli_binary_path(&wsl.distro)?;
-        emit_progress(
-            &app,
-            "installing",
-            "Installing Claude CLI into WSL...",
-            65,
-        );
+        emit_progress(&app, "installing", "Installing Claude CLI into WSL...", 65);
         log::trace!("Writing Claude CLI to WSL at {unix_path}");
         crate::platform::wsl_write_bytes(&wsl.distro, &unix_path, &binary_content)
             .map_err(|e| format!("Failed to write binary into WSL: {e}"))?;
@@ -570,6 +566,19 @@ pub async fn uninstall_claude_cli(app: AppHandle) -> Result<(), String> {
         ));
     }
 
+    let wsl = crate::platform::get_wsl_config();
+    if wsl.enabled {
+        let cli_dir = get_wsl_cli_dir(&wsl.distro)?;
+        crate::platform::wsl_remove_path(&wsl.distro, &cli_dir)
+            .map_err(|e| format!("Failed to remove Claude CLI directory inside WSL: {e}"))?;
+        log::info!(
+            "Removed Jean-managed Claude CLI inside WSL distro {} at {}",
+            wsl.distro,
+            cli_dir
+        );
+        return Ok(());
+    }
+
     let cli_dir = get_cli_dir(&app)?;
     if cli_dir.exists() {
         std::fs::remove_dir_all(&cli_dir)
@@ -638,6 +647,10 @@ struct ClaudeCredentialsFile {
 #[derive(Debug, Clone)]
 enum ClaudeCredentialSource {
     File(PathBuf),
+    WslFile {
+        distro: String,
+        path: String,
+    },
     #[cfg(target_os = "macos")]
     Keychain,
 }
@@ -750,6 +763,39 @@ fn get_claude_credentials_path() -> Result<PathBuf, String> {
     Ok(home.join(CLAUDE_CREDENTIALS_FILE))
 }
 
+fn wsl_claude_credentials_path(home: &str) -> String {
+    format!("{}/{}", home.trim_end_matches('/'), CLAUDE_CREDENTIALS_FILE)
+}
+
+fn credentials_have_access_token(credentials: &ClaudeCredentialsFile) -> bool {
+    credentials
+        .claude_ai_oauth
+        .as_ref()
+        .and_then(|o| o.access_token.as_ref())
+        .is_some()
+}
+
+fn parse_claude_credentials(raw: &str) -> Result<ClaudeCredentialsFile, String> {
+    serde_json::from_str::<ClaudeCredentialsFile>(raw)
+        .map_err(|e| format!("Failed to parse Claude credentials JSON: {e}"))
+}
+
+fn read_wsl_claude_credentials(distro: &str, path: &str) -> Result<ClaudeCredentialsFile, String> {
+    let output = crate::platform::wsl_aware_command("cat", None)
+        .arg(path)
+        .output()
+        .map_err(|e| format!("Failed to read Claude credentials inside WSL: {e}"))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "Claude credentials not found inside WSL distro {distro}. Run `claude` inside WSL to authenticate."
+        ));
+    }
+
+    let raw = String::from_utf8_lossy(&output.stdout);
+    parse_claude_credentials(&raw)
+}
+
 #[cfg(target_os = "macos")]
 fn load_credentials_from_keychain() -> Option<ClaudeCredentialsFile> {
     let output = silent_command("security")
@@ -764,18 +810,32 @@ fn load_credentials_from_keychain() -> Option<ClaudeCredentialsFile> {
 }
 
 fn load_claude_credentials() -> Result<(ClaudeCredentialSource, ClaudeCredentialsFile), String> {
+    let wsl = crate::platform::get_wsl_config();
+    if wsl.enabled {
+        let home = crate::platform::get_wsl_home_dir(&wsl.distro)?;
+        let cred_path = wsl_claude_credentials_path(&home);
+        let parsed = read_wsl_claude_credentials(&wsl.distro, &cred_path)?;
+        if credentials_have_access_token(&parsed) {
+            return Ok((
+                ClaudeCredentialSource::WslFile {
+                    distro: wsl.distro,
+                    path: cred_path,
+                },
+                parsed,
+            ));
+        }
+        return Err(format!(
+            "Claude credentials not found inside WSL distro {}. Run `claude` inside WSL to authenticate.",
+            wsl.distro
+        ));
+    }
+
     let cred_path = get_claude_credentials_path()?;
     if cred_path.exists() {
         let raw = std::fs::read_to_string(&cred_path)
             .map_err(|e| format!("Failed to read Claude credentials file: {e}"))?;
-        let parsed = serde_json::from_str::<ClaudeCredentialsFile>(&raw)
-            .map_err(|e| format!("Failed to parse Claude credentials JSON: {e}"))?;
-        if parsed
-            .claude_ai_oauth
-            .as_ref()
-            .and_then(|o| o.access_token.as_ref())
-            .is_some()
-        {
+        let parsed = parse_claude_credentials(&raw)?;
+        if credentials_have_access_token(&parsed) {
             return Ok((ClaudeCredentialSource::File(cred_path), parsed));
         }
     }
@@ -783,12 +843,7 @@ fn load_claude_credentials() -> Result<(ClaudeCredentialSource, ClaudeCredential
     #[cfg(target_os = "macos")]
     {
         if let Some(parsed) = load_credentials_from_keychain() {
-            if parsed
-                .claude_ai_oauth
-                .as_ref()
-                .and_then(|o| o.access_token.as_ref())
-                .is_some()
-            {
+            if credentials_have_access_token(&parsed) {
                 return Ok((ClaudeCredentialSource::Keychain, parsed));
             }
         }
@@ -817,6 +872,10 @@ fn persist_claude_credentials(
             }
             std::fs::write(path, payload)
                 .map_err(|e| format!("Failed to write Claude credentials file: {e}"))
+        }
+        ClaudeCredentialSource::WslFile { distro, path } => {
+            crate::platform::wsl_write_bytes(distro, path, payload.as_bytes())
+                .map_err(|e| format!("Failed to write Claude credentials inside WSL: {e}"))
         }
         #[cfg(target_os = "macos")]
         ClaudeCredentialSource::Keychain => {
@@ -1183,9 +1242,18 @@ pub async fn detect_claude_in_path(app: AppHandle) -> Result<ClaudePathDetection
     let jean_managed_path = get_cli_binary_path(&app)
         .ok()
         .and_then(|p| std::fs::canonicalize(&p).ok());
+    let wsl = crate::platform::get_wsl_config();
+    let jean_managed_wsl = if wsl.enabled {
+        get_wsl_cli_binary_path(&wsl.distro).ok()
+    } else {
+        None
+    };
 
-    let detection =
-        crate::platform::detect_cli_in_path("claude", jean_managed_path.as_deref());
+    let detection = crate::platform::detect_cli_in_path(
+        "claude",
+        jean_managed_path.as_deref(),
+        jean_managed_wsl.as_deref(),
+    );
 
     if !detection.found {
         log::trace!("Claude CLI not found in PATH");
@@ -1224,5 +1292,34 @@ fn emit_progress(app: &AppHandle, stage: &str, message: &str, percent: u8) {
 
     if let Err(e) = app.emit_all("claude-cli:install-progress", &progress) {
         log::warn!("Failed to emit install progress: {}", e);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wsl_credentials_path_uses_wsl_home() {
+        assert_eq!(
+            wsl_claude_credentials_path("/home/alice"),
+            "/home/alice/.claude/.credentials.json"
+        );
+        assert_eq!(
+            wsl_claude_credentials_path("/home/alice/"),
+            "/home/alice/.claude/.credentials.json"
+        );
+    }
+
+    #[test]
+    fn credentials_have_access_token_only_when_oauth_token_exists() {
+        let mut credentials = ClaudeCredentialsFile::default();
+        assert!(!credentials_have_access_token(&credentials));
+
+        credentials.claude_ai_oauth = Some(ClaudeOauthCredentials {
+            access_token: Some("token".to_string()),
+            ..Default::default()
+        });
+        assert!(credentials_have_access_token(&credentials));
     }
 }

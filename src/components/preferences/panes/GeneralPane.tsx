@@ -1999,9 +1999,8 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
             </InlineField>
             {!cursorStatus?.installed && !cursorPathDetection?.found && (
               <p className="text-xs text-muted-foreground px-1">
-                Install with Jean, or install <code>cursor-agent</code>{' '}
-                yourself in your environment — we&apos;ll detect it on your
-                PATH.
+                Install with Jean, or install <code>cursor-agent</code> yourself
+                in your environment — we&apos;ll detect it on your PATH.
               </p>
             )}
           </div>
@@ -3564,14 +3563,17 @@ const AiLanguageField: FC<{
   )
 }
 
-const WslSettingsSection: FC<{
+export const WslSettingsSection: FC<{
   preferences: AppPreferences | undefined
   patchPreferences: ReturnType<typeof usePatchPreferences>
 }> = ({ preferences, patchPreferences }) => {
   const [distros, setDistros] = useState<string[]>([])
   const [loadingDistros, setLoadingDistros] = useState(false)
   const [toolStatus, setToolStatus] = useState<string>('')
+  const [isChoosingWsl, setIsChoosingWsl] = useState(false)
   const queryClient = useQueryClient()
+  const wslEnabled = preferences?.wsl_enabled ?? false
+  const showWslDistroSelect = wslEnabled || isChoosingWsl
 
   // Toggling WSL mode changes where CLI detection, status, and auth checks
   // look for binaries — bust the cached results so subsequent reads fetch
@@ -3581,6 +3583,8 @@ const WslSettingsSection: FC<{
     void queryClient.invalidateQueries({ queryKey: ['codex-cli'] })
     void queryClient.invalidateQueries({ queryKey: ['opencode-cli'] })
     void queryClient.invalidateQueries({ queryKey: ['gh-cli'] })
+    void queryClient.invalidateQueries({ queryKey: ['cursor-cli'] })
+    void queryClient.invalidateQueries({ queryKey: ['coderabbit-cli'] })
   }, [queryClient])
 
   // Load available distros
@@ -3601,9 +3605,11 @@ const WslSettingsSection: FC<{
     invoke<boolean>('check_wsl_tool', {
       distro: preferences.wsl_distro,
       tool: 'git',
-    }).then(hasGit => {
-      setToolStatus(hasGit ? 'git found' : 'git not found in WSL')
-    }).catch(() => setToolStatus(''))
+    })
+      .then(hasGit => {
+        setToolStatus(hasGit ? 'git found' : 'git not found in WSL')
+      })
+      .catch(() => setToolStatus(''))
   }, [preferences?.wsl_enabled, preferences?.wsl_distro])
 
   return (
@@ -3614,11 +3620,16 @@ const WslSettingsSection: FC<{
           description="Route commands through Windows Subsystem for Linux"
         >
           <Switch
-            checked={preferences?.wsl_enabled ?? false}
+            checked={showWslDistroSelect}
             onCheckedChange={checked => {
+              if (checked) {
+                setIsChoosingWsl(true)
+                return
+              }
+              setIsChoosingWsl(false)
               patchPreferences.mutate(
                 {
-                  wsl_enabled: checked,
+                  wsl_enabled: false,
                   wsl_mode_chosen: true,
                 },
                 { onSuccess: invalidateCliCaches }
@@ -3627,7 +3638,7 @@ const WslSettingsSection: FC<{
           />
         </InlineField>
 
-        {preferences?.wsl_enabled && (
+        {showWslDistroSelect && (
           <>
             <InlineField
               label="Distribution"
@@ -3640,11 +3651,39 @@ const WslSettingsSection: FC<{
                 </div>
               ) : (
                 <Select
-                  value={preferences?.wsl_distro || ''}
-                  onValueChange={value => {
+                  value={wslEnabled ? preferences?.wsl_distro || '' : ''}
+                  onValueChange={async value => {
+                    if (!value || !distros.includes(value)) {
+                      return
+                    }
+                    setToolStatus('Checking for git...')
+                    try {
+                      const hasGit = await invoke<boolean>('check_wsl_tool', {
+                        distro: value,
+                        tool: 'git',
+                      })
+                      if (!hasGit) {
+                        setToolStatus(
+                          'git not found. Install it inside WSL: sudo apt install git'
+                        )
+                        return
+                      }
+                    } catch {
+                      setToolStatus('Failed to check WSL distro')
+                      return
+                    }
                     patchPreferences.mutate(
-                      { wsl_distro: value },
-                      { onSuccess: invalidateCliCaches }
+                      {
+                        wsl_enabled: true,
+                        wsl_distro: value,
+                        wsl_mode_chosen: true,
+                      },
+                      {
+                        onSuccess: () => {
+                          setIsChoosingWsl(false)
+                          invalidateCliCaches()
+                        },
+                      }
                     )
                   }}
                 >

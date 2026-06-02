@@ -40,9 +40,15 @@ pub fn get_worktrees_base_dir() -> Result<PathBuf, String> {
         let jean_dir = PathBuf::from(&win_path);
 
         // Ensure the directory exists (via WSL since UNC mkdir can be unreliable)
-        let _ = crate::platform::silent_command("wsl.exe")
+        let output = crate::platform::silent_command("wsl.exe")
             .args(["-d", &wsl.distro, "--", "mkdir", "-p", &wsl_jean_dir])
-            .output();
+            .output()
+            .map_err(|e| format!("Failed to create WSL worktrees base dir: {e}"))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            return Err(format!("Failed to create WSL worktrees base dir: {stderr}"));
+        }
 
         return Ok(jean_dir);
     }

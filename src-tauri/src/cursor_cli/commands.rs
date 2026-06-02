@@ -374,8 +374,7 @@ pub async fn check_cursor_cli_auth(app: AppHandle) -> Result<CursorAuthStatus, S
 pub async fn detect_cursor_in_path(_app: AppHandle) -> Result<CursorPathDetection, String> {
     log::trace!("Detecting Cursor CLI in system PATH");
 
-    let detection =
-        crate::platform::detect_cli_in_path(super::config::CLI_TOOL_NAME, None);
+    let detection = crate::platform::detect_cli_in_path(super::config::CLI_TOOL_NAME, None, None);
 
     if !detection.found {
         return Ok(CursorPathDetection {
@@ -386,9 +385,7 @@ pub async fn detect_cursor_in_path(_app: AppHandle) -> Result<CursorPathDetectio
         });
     }
 
-    let version = detection
-        .version
-        .and_then(|v| parse_version(v.as_bytes()));
+    let version = detection.version.and_then(|v| parse_version(v.as_bytes()));
 
     Ok(CursorPathDetection {
         found: true,
@@ -473,7 +470,9 @@ pub async fn get_cursor_install_command(_app: AppHandle) -> Result<CursorInstall
                 "-lc".to_string(),
                 "curl -fsSL https://cursor.com/install | bash".to_string(),
             ],
-            description: "Installs Cursor Agent inside your WSL distro using Cursor's official installer".to_string(),
+            description:
+                "Installs Cursor Agent inside your WSL distro using Cursor's official installer"
+                    .to_string(),
         });
     }
 

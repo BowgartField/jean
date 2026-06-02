@@ -7554,7 +7554,7 @@ fn execute_codex_review(
     working_dir: Option<&std::path::Path>,
     review_run_id: Option<&str>,
 ) -> Result<String, String> {
-    let cli_path = resolve_codex_cli_binary(app);
+    let cli_path = resolve_codex_cli_binary(app)?;
     if !cli_path.exists() {
         return Err("Codex CLI not installed".to_string());
     }

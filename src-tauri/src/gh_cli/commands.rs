@@ -93,9 +93,8 @@ pub async fn check_gh_cli_installed(app: AppHandle) -> Result<GhCliStatus, Strin
                 path: None,
             });
         }
-        let version = crate::platform::wsl_tool_version(&wsl.distro, &tool).and_then(|v| {
-            v.split_whitespace().nth(2).map(|s| s.to_string())
-        });
+        let version = crate::platform::wsl_tool_version(&wsl.distro, &tool)
+            .and_then(|v| v.split_whitespace().nth(2).map(|s| s.to_string()));
         return Ok(GhCliStatus {
             installed: true,
             version,
@@ -376,9 +375,7 @@ fn wsl_gh_platform(distro: &str) -> Result<(&'static str, &'static str), String>
     match crate::platform::wsl_detect_arch(distro) {
         Some("linux-x64") => Ok(("linux_amd64", "tar.gz")),
         Some("linux-arm64") => Ok(("linux_arm64", "tar.gz")),
-        _ => Err(
-            "Unsupported WSL architecture (expected x86_64 or aarch64)".to_string(),
-        ),
+        _ => Err("Unsupported WSL architecture (expected x86_64 or aarch64)".to_string()),
     }
 }
 
@@ -781,9 +778,18 @@ pub async fn detect_gh_in_path(app: AppHandle) -> Result<GhPathDetection, String
     let jean_managed_path = get_gh_cli_binary_path(&app)
         .ok()
         .and_then(|p| std::fs::canonicalize(&p).ok());
+    let wsl = crate::platform::get_wsl_config();
+    let jean_managed_wsl = if wsl.enabled {
+        super::config::get_wsl_gh_binary_path(&wsl.distro).ok()
+    } else {
+        None
+    };
 
-    let detection =
-        crate::platform::detect_cli_in_path("gh", jean_managed_path.as_deref());
+    let detection = crate::platform::detect_cli_in_path(
+        "gh",
+        jean_managed_path.as_deref(),
+        jean_managed_wsl.as_deref(),
+    );
 
     if !detection.found {
         log::trace!("GitHub CLI not found in PATH");

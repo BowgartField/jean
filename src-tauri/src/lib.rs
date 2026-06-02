@@ -3425,9 +3425,18 @@ pub fn run() {
                 let prefs_handle = app.handle().clone();
                 match load_preferences_sync(&prefs_handle) {
                     Ok(prefs) => {
-                        platform::init_wsl_config(prefs.wsl_enabled, prefs.wsl_distro.clone());
-                        if prefs.wsl_enabled {
-                            log::info!("WSL mode enabled with distro: {}", prefs.wsl_distro);
+                        let distro = prefs.wsl_distro.trim().to_string();
+                        let wsl_enabled = prefs.wsl_enabled && !distro.is_empty();
+
+                        if prefs.wsl_enabled && distro.is_empty() {
+                            log::warn!(
+                                "WSL was enabled in preferences without a distro; disabling WSL routing until configured"
+                            );
+                        }
+
+                        platform::init_wsl_config(wsl_enabled, distro.clone());
+                        if wsl_enabled {
+                            log::info!("WSL mode enabled with distro: {distro}");
                         }
                     }
                     Err(e) => {

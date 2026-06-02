@@ -1,6 +1,6 @@
 //! Configuration and path management for the embedded GitHub CLI
 
-use crate::platform::{silent_command, get_wsl_config, get_wsl_home_dir};
+use crate::platform::{get_wsl_config, get_wsl_home_dir, silent_command};
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
 
@@ -73,7 +73,11 @@ pub fn resolve_gh_binary(app: &AppHandle) -> PathBuf {
         if wsl.enabled {
             // Resolve absolute Unix path so the session/status checks don't
             // depend on a non-login-shell PATH.
-            if let Some(unix_path) = crate::platform::wsl_which(&wsl.distro, "gh") {
+            if let Some(unix_path) = crate::platform::wsl_which(
+                &wsl.distro,
+                "gh",
+                get_wsl_gh_binary_path(&wsl.distro).ok().as_deref(),
+            ) {
                 return PathBuf::from(unix_path);
             }
         } else {

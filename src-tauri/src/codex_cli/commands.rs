@@ -282,10 +282,19 @@ pub async fn detect_codex_in_path(app: AppHandle) -> Result<CodexPathDetection, 
     let jean_managed_path = get_cli_binary_path(&app)
         .ok()
         .and_then(|p| std::fs::canonicalize(&p).ok());
+    let wsl = crate::platform::get_wsl_config();
+    let jean_managed_wsl = if wsl.enabled {
+        super::config::get_wsl_cli_binary_path(&wsl.distro).ok()
+    } else {
+        None
+    };
     log::debug!("detect_codex_in_path: jean_managed_path={jean_managed_path:?}");
 
-    let detection =
-        crate::platform::detect_cli_in_path("codex", jean_managed_path.as_deref());
+    let detection = crate::platform::detect_cli_in_path(
+        "codex",
+        jean_managed_path.as_deref(),
+        jean_managed_wsl.as_deref(),
+    );
 
     if !detection.found {
         log::debug!("detect_codex_in_path: not found");
@@ -352,22 +361,116 @@ fn build_usage_client() -> Result<reqwest::Client, String> {
         .map_err(|e| format!("Failed to create usage HTTP client: {e}"))
 }
 
-fn get_codex_auth_paths() -> Vec<PathBuf> {
-    if let Ok(codex_home) = std::env::var("CODEX_HOME") {
-        let trimmed = codex_home.trim();
-        if !trimmed.is_empty() {
-            return vec![PathBuf::from(trimmed).join("auth.json")];
+fn push_codex_home_auth_path(
+    paths: &mut Vec<PathBuf>,
+    codex_home: Option<&str>,
+    in_wsl: bool,
+    distro: &str,
+) {
+    let Some(codex_home) = codex_home else {
+        return;
+    };
+    let trimmed = codex_home.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+
+    let auth_path = PathBuf::from(trimmed).join("auth.json");
+    if in_wsl {
+        if trimmed.starts_with('/') {
+            paths.push(PathBuf::from(crate::platform::wsl_to_win_path(
+                &auth_path.to_string_lossy(),
+                distro,
+            )));
         }
+    } else {
+        paths.push(auth_path);
+    }
+}
+
+fn push_host_codex_auth_paths(
+    paths: &mut Vec<PathBuf>,
+    host_home: Option<PathBuf>,
+    codex_home: Option<&str>,
+) {
+    push_codex_home_auth_path(paths, codex_home, false, "");
+
+    if let Some(home) = host_home {
+        paths.push(home.join(".config").join("codex").join("auth.json"));
+        paths.push(home.join(".codex").join("auth.json"));
+    }
+}
+
+fn push_wsl_codex_auth_paths(
+    paths: &mut Vec<PathBuf>,
+    wsl_home: Option<&str>,
+    codex_home: Option<&str>,
+    distro: &str,
+) {
+    push_codex_home_auth_path(paths, codex_home, true, distro);
+
+    let Some(wsl_home) = wsl_home else {
+        return;
+    };
+    let trimmed_home = wsl_home.trim();
+    if trimmed_home.is_empty() {
+        return;
     }
 
-    if let Some(home) = dirs::home_dir() {
-        return vec![
-            home.join(".config").join("codex").join("auth.json"),
-            home.join(".codex").join("auth.json"),
-        ];
+    for unix_path in [
+        format!("{trimmed_home}/.config/codex/auth.json"),
+        format!("{trimmed_home}/.codex/auth.json"),
+    ] {
+        paths.push(PathBuf::from(crate::platform::wsl_to_win_path(
+            &unix_path, distro,
+        )));
+    }
+}
+
+fn should_prefer_wsl_codex_auth(wsl_enabled: bool, binary_path: Option<&str>) -> bool {
+    wsl_enabled
+        && binary_path
+            .map(|path| path.starts_with('/'))
+            .unwrap_or(true)
+}
+
+fn build_codex_auth_paths(
+    codex_home: Option<&str>,
+    host_home: Option<PathBuf>,
+    wsl_home: Option<&str>,
+    wsl_enabled: bool,
+    distro: &str,
+    binary_path: Option<&str>,
+) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+
+    if should_prefer_wsl_codex_auth(wsl_enabled, binary_path) {
+        push_wsl_codex_auth_paths(&mut paths, wsl_home, codex_home, distro);
     }
 
-    Vec::new()
+    push_host_codex_auth_paths(&mut paths, host_home, codex_home);
+    paths.dedup();
+    paths
+}
+
+fn get_codex_auth_paths(binary_path: Option<&str>) -> Vec<PathBuf> {
+    let codex_home = std::env::var("CODEX_HOME").ok();
+    let host_home = dirs::home_dir();
+    let wsl = crate::platform::get_wsl_config();
+    let wsl_home = if wsl.enabled {
+        crate::platform::get_wsl_home_dir(&wsl.distro).ok()
+    } else {
+        None
+    };
+
+    build_codex_auth_paths(
+        codex_home.as_deref(),
+        host_home,
+        wsl_home.as_deref(),
+        wsl.enabled,
+        &wsl.distro,
+        binary_path,
+    )
 }
 
 fn get_usage_cache_dir() -> Option<PathBuf> {
@@ -446,8 +549,10 @@ fn load_codex_auth_from_keychain() -> Option<CodexAuthFile> {
     parse_auth_payload(&payload)
 }
 
-fn load_codex_auth() -> Result<(CodexAuthSource, CodexAuthFile), String> {
-    let auth_paths = get_codex_auth_paths();
+fn load_codex_auth_for_binary(
+    binary_path: Option<&str>,
+) -> Result<(CodexAuthSource, CodexAuthFile), String> {
+    let auth_paths = get_codex_auth_paths(binary_path);
 
     for path in auth_paths {
         if !path.exists() {
@@ -473,6 +578,11 @@ fn load_codex_auth() -> Result<(CodexAuthSource, CodexAuthFile), String> {
     }
 
     Err("Codex auth not found. Run `codex` to authenticate.".to_string())
+}
+
+#[allow(dead_code)]
+fn load_codex_auth() -> Result<(CodexAuthSource, CodexAuthFile), String> {
+    load_codex_auth_for_binary(None)
 }
 
 fn persist_codex_auth(source: &CodexAuthSource, auth: &CodexAuthFile) -> Result<(), String> {
@@ -656,9 +766,12 @@ async fn refresh_codex_access_token(
 }
 
 pub async fn refresh_codex_app_server_auth_tokens(
+    app: AppHandle,
     previous_account_id: Option<String>,
 ) -> Result<CodexAppServerAuthTokens, String> {
-    let (auth_source, mut auth) = load_codex_auth()?;
+    let binary_path = resolve_cli_binary(&app)?;
+    let binary_str = binary_path.to_string_lossy();
+    let (auth_source, mut auth) = load_codex_auth_for_binary(Some(&binary_str))?;
     let client = build_usage_client()?;
     let refreshed = refresh_codex_access_token(&client, &auth_source, &mut auth).await?;
     if refreshed.is_none() {
@@ -693,7 +806,7 @@ pub async fn check_codex_cli_installed(app: AppHandle) -> Result<CodexCliStatus,
     log::debug!("check_codex_cli_installed: starting");
 
     let wsl = crate::platform::get_wsl_config();
-    let binary_path = resolve_cli_binary(&app);
+    let binary_path = resolve_cli_binary(&app)?;
     log::debug!(
         "check_codex_cli_installed: resolved binary_path={:?}",
         binary_path
@@ -720,7 +833,11 @@ pub async fn check_codex_cli_installed(app: AppHandle) -> Result<CodexCliStatus,
                 .unwrap_or(&v)
                 .trim_start_matches('v')
                 .to_string();
-            if cleaned.is_empty() { None } else { Some(cleaned) }
+            if cleaned.is_empty() {
+                None
+            } else {
+                Some(cleaned)
+            }
         });
         return Ok(CodexCliStatus {
             installed: true,
@@ -796,7 +913,7 @@ pub async fn check_codex_cli_auth(app: AppHandle) -> Result<CodexAuthStatus, Str
     log::trace!("Checking Codex CLI authentication status");
 
     let wsl = crate::platform::get_wsl_config();
-    let binary_path = resolve_cli_binary(&app);
+    let binary_path = resolve_cli_binary(&app)?;
 
     if !wsl.enabled && !binary_path.exists() {
         return Ok(CodexAuthStatus {
@@ -848,7 +965,7 @@ pub async fn check_codex_cli_auth(app: AppHandle) -> Result<CodexAuthStatus, Str
 
 /// Get current Codex usage for authenticated users.
 #[tauri::command]
-pub async fn get_codex_usage() -> Result<CodexUsageSnapshot, String> {
+pub async fn get_codex_usage(app: AppHandle) -> Result<CodexUsageSnapshot, String> {
     let now_secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -857,7 +974,9 @@ pub async fn get_codex_usage() -> Result<CodexUsageSnapshot, String> {
         return Ok(cached);
     }
 
-    let (auth_source, mut auth) = load_codex_auth()?;
+    let binary_path = resolve_cli_binary(&app)?;
+    let binary_str = binary_path.to_string_lossy();
+    let (auth_source, mut auth) = load_codex_auth_for_binary(Some(&binary_str))?;
     let usage_client = build_usage_client()?;
 
     let mut access_token = auth
@@ -1289,9 +1408,7 @@ fn wsl_codex_target(distro: &str) -> Result<&'static str, String> {
     match crate::platform::wsl_detect_arch(distro) {
         Some("linux-x64") => Ok("x86_64-unknown-linux-gnu"),
         Some("linux-arm64") => Ok("aarch64-unknown-linux-gnu"),
-        _ => Err(
-            "Unsupported WSL architecture (expected x86_64 or aarch64)".to_string(),
-        ),
+        _ => Err("Unsupported WSL architecture (expected x86_64 or aarch64)".to_string()),
     }
 }
 
@@ -1481,6 +1598,14 @@ pub async fn uninstall_codex_cli(app: AppHandle) -> Result<(), String> {
         ));
     }
 
+    let wsl = crate::platform::get_wsl_config();
+    if wsl.enabled {
+        let unix_path = super::config::get_wsl_cli_binary_path(&wsl.distro)?;
+        crate::platform::wsl_remove_path(&wsl.distro, &unix_path)
+            .map_err(|e| format!("Failed to remove Codex CLI from WSL: {e}"))?;
+        log::info!("Removed Jean-managed Codex CLI at WSL:{unix_path}");
+    }
+
     let cli_dir = get_cli_dir(&app)?;
     if cli_dir.exists() {
         std::fs::remove_dir_all(&cli_dir)
@@ -1491,10 +1616,7 @@ pub async fn uninstall_codex_cli(app: AppHandle) -> Result<(), String> {
 }
 
 /// Extract the codex binary bytes from a tar.gz archive (Linux/macOS release).
-fn extract_tar_gz_binary_bytes(
-    archive_content: &[u8],
-    target: &str,
-) -> Result<Vec<u8>, String> {
+fn extract_tar_gz_binary_bytes(archive_content: &[u8], target: &str) -> Result<Vec<u8>, String> {
     use flate2::read::GzDecoder;
     use std::io::{Cursor, Read};
     use tar::Archive;
@@ -1537,10 +1659,7 @@ fn extract_tar_gz_binary_bytes(
 /// The Windows zip may contain helper binaries (codex-command-runner.exe,
 /// codex-windows-sandbox-setup.exe) bundled for WinGet. We must extract only
 /// the main codex binary matching the expected target name.
-fn extract_zip_binary_bytes(
-    archive_content: &[u8],
-    target: &str,
-) -> Result<Vec<u8>, String> {
+fn extract_zip_binary_bytes(archive_content: &[u8], target: &str) -> Result<Vec<u8>, String> {
     use std::io::{Cursor, Read};
 
     let cursor = Cursor::new(archive_content);
@@ -1571,4 +1690,60 @@ fn extract_zip_binary_bytes(
     Err(format!(
         "Codex binary '{expected_name}' not found in zip archive"
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn codex_auth_paths_prefer_wsl_home_when_wsl_binary_is_unix_path() {
+        let paths = build_codex_auth_paths(
+            None,
+            Some(PathBuf::from(r"C:\Users\alice")),
+            Some("/home/alice"),
+            true,
+            "Ubuntu",
+            Some("/home/alice/.local/share/jean/codex-cli/codex"),
+        );
+
+        assert_eq!(
+            paths[0],
+            PathBuf::from(r"\\wsl.localhost\Ubuntu\home\alice\.config\codex\auth.json")
+        );
+        assert_eq!(
+            paths[1],
+            PathBuf::from(r"\\wsl.localhost\Ubuntu\home\alice\.codex\auth.json")
+        );
+        assert!(paths.contains(
+            &PathBuf::from(r"C:\Users\alice")
+                .join(".codex")
+                .join("auth.json")
+        ));
+    }
+
+    #[test]
+    fn codex_auth_paths_use_host_paths_when_wsl_binary_is_not_unix_path() {
+        let paths = build_codex_auth_paths(
+            None,
+            Some(PathBuf::from(r"C:\Users\alice")),
+            Some("/home/alice"),
+            true,
+            "Ubuntu",
+            Some(r"C:\Users\alice\AppData\Local\jean\codex-cli\codex.exe"),
+        );
+
+        assert_eq!(
+            paths,
+            vec![
+                PathBuf::from(r"C:\Users\alice")
+                    .join(".config")
+                    .join("codex")
+                    .join("auth.json"),
+                PathBuf::from(r"C:\Users\alice")
+                    .join(".codex")
+                    .join("auth.json"),
+            ]
+        );
+    }
 }

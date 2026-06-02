@@ -1,6 +1,6 @@
 //! Configuration and path management for the OpenCode CLI
 
-use crate::platform::{silent_command, get_wsl_config, get_wsl_home_dir};
+use crate::platform::{get_wsl_config, get_wsl_home_dir, silent_command};
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
 
@@ -65,7 +65,11 @@ pub fn resolve_cli_binary(app: &AppHandle) -> PathBuf {
     if use_path {
         let wsl = get_wsl_config();
         if wsl.enabled {
-            if let Some(unix_path) = crate::platform::wsl_which(&wsl.distro, "opencode") {
+            if let Some(unix_path) = crate::platform::wsl_which(
+                &wsl.distro,
+                "opencode",
+                get_wsl_cli_binary_path(&wsl.distro).ok().as_deref(),
+            ) {
                 return PathBuf::from(unix_path);
             }
         } else {

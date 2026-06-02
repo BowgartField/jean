@@ -1,6 +1,6 @@
 //! Configuration and path management for the Codex CLI
 
-use crate::platform::{silent_command, get_wsl_config, get_wsl_home_dir};
+use crate::platform::{get_wsl_config, get_wsl_home_dir, silent_command};
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
 
@@ -48,7 +48,7 @@ pub fn get_cli_binary_path(app: &AppHandle) -> Result<PathBuf, String> {
 ///
 /// If `codex_cli_source` preference is `"path"`, look up `codex` in system PATH.
 /// Otherwise (default `"jean"`), use the Jean-managed binary.
-pub fn resolve_cli_binary(app: &AppHandle) -> PathBuf {
+pub fn resolve_cli_binary(app: &AppHandle) -> Result<PathBuf, String> {
     let use_path = match crate::get_preferences_path(app) {
         Ok(prefs_path) => {
             if let Ok(contents) = std::fs::read_to_string(&prefs_path) {
@@ -84,12 +84,15 @@ pub fn resolve_cli_binary(app: &AppHandle) -> PathBuf {
         if wsl.enabled {
             // Resolve absolute Unix path so downstream session/status probes
             // don't depend on a non-login-shell PATH.
-            if let Some(unix_path) = crate::platform::wsl_which(&wsl.distro, "codex") {
+            let jean_managed = get_wsl_cli_binary_path(&wsl.distro).ok();
+            if let Some(unix_path) =
+                crate::platform::wsl_which(&wsl.distro, "codex", jean_managed.as_deref())
+            {
                 log::debug!(
                     "resolve_cli_binary: found codex in WSL distro {} at {unix_path}",
                     wsl.distro
                 );
-                return PathBuf::from(unix_path);
+                return Ok(PathBuf::from(unix_path));
             }
         } else {
             let which_cmd = if cfg!(target_os = "windows") {
@@ -116,8 +119,10 @@ pub fn resolve_cli_binary(app: &AppHandle) -> PathBuf {
                         if !path_str.is_empty() {
                             let path = PathBuf::from(&path_str);
                             if path.exists() {
-                                log::debug!("resolve_cli_binary: resolved to PATH binary: {path_str}");
-                                return path;
+                                log::debug!(
+                                    "resolve_cli_binary: resolved to PATH binary: {path_str}"
+                                );
+                                return Ok(path);
                             } else {
                                 log::debug!("resolve_cli_binary: PATH binary does not exist on disk: {path_str}");
                             }
@@ -138,15 +143,13 @@ pub fn resolve_cli_binary(app: &AppHandle) -> PathBuf {
 
     let wsl = get_wsl_config();
     if wsl.enabled {
-        return get_wsl_cli_binary_path(&wsl.distro)
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from(CLI_BINARY_NAME_UNIX));
+        return get_wsl_cli_binary_path(&wsl.distro).map(PathBuf::from);
     }
 
     let fallback = get_cli_binary_path(app)
         .unwrap_or_else(|_| PathBuf::from(CLI_DIR_NAME).join(CLI_BINARY_NAME));
     log::debug!("resolve_cli_binary: using jean-managed binary: {fallback:?}");
-    fallback
+    Ok(fallback)
 }
 
 /// Ensure the CLI directory exists, creating it if necessary
@@ -167,5 +170,10 @@ mod tests {
 
         assert!(resolved.ends_with(CLI_BINARY_NAME));
         assert!(resolved.to_string_lossy().contains(CLI_DIR_NAME));
+    }
+
+    #[test]
+    fn resolve_cli_binary_fails_closed_with_explicit_errors() {
+        let _resolver: fn(&AppHandle) -> Result<PathBuf, String> = resolve_cli_binary;
     }
 }

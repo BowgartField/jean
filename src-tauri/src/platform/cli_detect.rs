@@ -31,18 +31,24 @@ impl CliDetection {
 
 /// Detect a CLI tool on the user's PATH.
 ///
-/// - When WSL mode is enabled: runs `wsl.exe -d <distro> -- which <tool>` and
-///   returns the Unix path. Version comes from `<tool> --version` inside WSL.
+/// - When WSL mode is enabled: resolves the Unix path inside the WSL distro.
+///   Version comes from the selected path's `--version` inside WSL.
 /// - Otherwise: runs Windows `where` / Unix `which` and returns the native path.
 ///   `jean_managed` (when provided) is the canonical path of a Jean-installed
 ///   binary that must be excluded from "found in PATH" detection.
-pub fn detect_cli_in_path(tool: &str, jean_managed: Option<&Path>) -> CliDetection {
+///   In WSL mode, `jean_managed_wsl` is the Unix path of the Jean-managed
+///   binary to exclude from WSL PATH detection.
+pub fn detect_cli_in_path(
+    tool: &str,
+    jean_managed: Option<&Path>,
+    jean_managed_wsl: Option<&str>,
+) -> CliDetection {
     let wsl = super::get_wsl_config();
     if wsl.enabled {
-        let Some(unix_path) = super::wsl_which(&wsl.distro, tool) else {
+        let Some(unix_path) = super::wsl_which(&wsl.distro, tool, jean_managed_wsl) else {
             return CliDetection::not_found();
         };
-        let version = super::wsl_tool_version(&wsl.distro, tool);
+        let version = super::wsl_tool_version(&wsl.distro, &unix_path);
         let package_manager = super::wsl_detect_package_manager(&unix_path);
         return CliDetection {
             found: true,
@@ -115,7 +121,9 @@ mod tests {
     #[test]
     fn wsl_pkg_mgr_bun() {
         assert_eq!(
-            wsl_detect_package_manager("/home/u/.bun/install/global/node_modules/@openai/codex/bin/codex.js"),
+            wsl_detect_package_manager(
+                "/home/u/.bun/install/global/node_modules/@openai/codex/bin/codex.js"
+            ),
             Some("bun".to_string())
         );
     }
@@ -123,7 +131,9 @@ mod tests {
     #[test]
     fn wsl_pkg_mgr_npm() {
         assert_eq!(
-            wsl_detect_package_manager("/usr/lib/node_modules/@anthropic-ai/claude-code/bin/claude"),
+            wsl_detect_package_manager(
+                "/usr/lib/node_modules/@anthropic-ai/claude-code/bin/claude"
+            ),
             Some("npm".to_string())
         );
     }

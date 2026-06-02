@@ -161,7 +161,11 @@ pub async fn check_opencode_cli_installed(app: AppHandle) -> Result<OpenCodeCliS
                 .unwrap_or(&v)
                 .trim_start_matches('v')
                 .to_string();
-            if cleaned.is_empty() { None } else { Some(cleaned) }
+            if cleaned.is_empty() {
+                None
+            } else {
+                Some(cleaned)
+            }
         });
         return Ok(OpenCodeCliStatus {
             installed: true,
@@ -220,9 +224,18 @@ pub async fn detect_opencode_in_path(app: AppHandle) -> Result<OpenCodePathDetec
     let jean_managed_path = get_cli_binary_path(&app)
         .ok()
         .and_then(|p| std::fs::canonicalize(&p).ok());
+    let wsl = crate::platform::get_wsl_config();
+    let jean_managed_wsl = if wsl.enabled {
+        super::config::get_wsl_cli_binary_path(&wsl.distro).ok()
+    } else {
+        None
+    };
 
-    let detection =
-        crate::platform::detect_cli_in_path("opencode", jean_managed_path.as_deref());
+    let detection = crate::platform::detect_cli_in_path(
+        "opencode",
+        jean_managed_path.as_deref(),
+        jean_managed_wsl.as_deref(),
+    );
 
     if !detection.found {
         log::trace!("OpenCode CLI not found in PATH");
@@ -241,7 +254,11 @@ pub async fn detect_opencode_in_path(app: AppHandle) -> Result<OpenCodePathDetec
             .unwrap_or(&v)
             .trim_start_matches('v')
             .to_string();
-        if cleaned.is_empty() { None } else { Some(cleaned) }
+        if cleaned.is_empty() {
+            None
+        } else {
+            Some(cleaned)
+        }
     });
 
     log::trace!(
@@ -556,9 +573,7 @@ fn wsl_opencode_platform_asset(distro: &str) -> Result<PlatformAsset, String> {
             asset_name: "opencode-linux-arm64.tar.gz".to_string(),
             format: ArchiveFormat::TarGz,
         }),
-        _ => Err(
-            "Unsupported WSL architecture (expected x86_64 or aarch64)".to_string(),
-        ),
+        _ => Err("Unsupported WSL architecture (expected x86_64 or aarch64)".to_string()),
     }
 }
 
@@ -693,6 +708,15 @@ pub async fn uninstall_opencode_cli(app: AppHandle) -> Result<(), String> {
             count,
             if count == 1 { "session is" } else { "sessions are" }
         ));
+    }
+
+    let wsl = crate::platform::get_wsl_config();
+    if wsl.enabled {
+        let unix_path = super::config::get_wsl_cli_binary_path(&wsl.distro)?;
+        crate::platform::wsl_remove_file(&wsl.distro, &unix_path)
+            .map_err(|e| format!("Failed to remove OpenCode CLI from WSL: {e}"))?;
+        log::info!("Removed Jean-managed OpenCode CLI at WSL:{unix_path}");
+        return Ok(());
     }
 
     let cli_dir = get_cli_dir(&app)?;
