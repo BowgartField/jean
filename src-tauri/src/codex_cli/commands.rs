@@ -135,6 +135,19 @@ struct GitHubAsset {
     browser_download_url: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CodexArchiveFormat {
+    TarGz,
+    Zip,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CodexAssetCandidate {
+    name: String,
+    binary_target: String,
+    format: CodexArchiveFormat,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct CodexAuthTokens {
     #[serde(default)]
@@ -1263,9 +1276,21 @@ async fn fetch_codex_versions_from_api(app: &AppHandle) -> Result<Vec<CodexRelea
         .await
         .map_err(|e| format!("Failed to parse GitHub API response: {e}"))?;
 
-    let versions: Vec<CodexReleaseInfo> = releases
+    let target = get_codex_target()?;
+    let asset_names = codex_asset_name_candidates(target);
+    let versions = codex_versions_from_releases(releases, &asset_names);
+
+    log::trace!("Found {} Codex CLI versions from API", versions.len());
+    Ok(versions)
+}
+
+fn codex_versions_from_releases(
+    releases: Vec<GitHubRelease>,
+    asset_names: &[String],
+) -> Vec<CodexReleaseInfo> {
+    releases
         .into_iter()
-        .filter(|r| !r.prerelease && !r.assets.is_empty())
+        .filter(|r| !r.prerelease && find_matching_asset_url(r, asset_names).is_some())
         .take(5)
         .map(|r| CodexReleaseInfo {
             version: extract_version_from_tag(&r.tag_name),
@@ -1273,10 +1298,7 @@ async fn fetch_codex_versions_from_api(app: &AppHandle) -> Result<Vec<CodexRelea
             published_at: r.published_at,
             prerelease: r.prerelease,
         })
-        .collect();
-
-    log::trace!("Found {} Codex CLI versions from API", versions.len());
-    Ok(versions)
+        .collect()
 }
 
 /// Get the Codex target triple for the current platform
@@ -1293,12 +1315,12 @@ fn get_codex_target() -> Result<&'static str, String> {
 
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     {
-        return Ok("x86_64-unknown-linux-gnu");
+        return Ok("x86_64-unknown-linux-musl");
     }
 
     #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
     {
-        return Ok("aarch64-unknown-linux-gnu");
+        return Ok("aarch64-unknown-linux-musl");
     }
 
     #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
@@ -1313,6 +1335,47 @@ fn get_codex_target() -> Result<&'static str, String> {
 
     #[allow(unreachable_code)]
     Err("Unsupported platform".to_string())
+}
+
+fn codex_asset_candidates(target: &str) -> Vec<CodexAssetCandidate> {
+    let tar_gz = |binary_target: &str| CodexAssetCandidate {
+        name: format!("codex-{binary_target}.tar.gz"),
+        binary_target: binary_target.to_string(),
+        format: CodexArchiveFormat::TarGz,
+    };
+    let zip = |binary_target: &str| CodexAssetCandidate {
+        name: format!("codex-{binary_target}.exe.zip"),
+        binary_target: binary_target.to_string(),
+        format: CodexArchiveFormat::Zip,
+    };
+
+    match target {
+        "x86_64-unknown-linux-musl" => vec![
+            tar_gz("x86_64-unknown-linux-musl"),
+            tar_gz("x86_64-unknown-linux-gnu"),
+        ],
+        "aarch64-unknown-linux-musl" => vec![
+            tar_gz("aarch64-unknown-linux-musl"),
+            tar_gz("aarch64-unknown-linux-gnu"),
+        ],
+        "x86_64-unknown-linux-gnu" => vec![
+            tar_gz("x86_64-unknown-linux-gnu"),
+            tar_gz("x86_64-unknown-linux-musl"),
+        ],
+        "aarch64-unknown-linux-gnu" => vec![
+            tar_gz("aarch64-unknown-linux-gnu"),
+            tar_gz("aarch64-unknown-linux-musl"),
+        ],
+        "x86_64-pc-windows-msvc" | "aarch64-pc-windows-msvc" => vec![zip(target)],
+        _ => vec![tar_gz(target)],
+    }
+}
+
+fn codex_asset_name_candidates(target: &str) -> Vec<String> {
+    codex_asset_candidates(target)
+        .into_iter()
+        .map(|candidate| candidate.name)
+        .collect()
 }
 
 /// Fetch the latest Codex CLI version from GitHub API.
@@ -1338,8 +1401,9 @@ async fn fetch_latest_codex_version(app: &AppHandle) -> Result<String, String> {
     if let Ok(resp) = request.send().await {
         if resp.status().is_success() {
             if let Ok(releases) = resp.json::<Vec<GitHubRelease>>().await {
-                if let Some(release) = releases.first() {
-                    let version = extract_version_from_tag(&release.tag_name);
+                let target = get_codex_target()?;
+                let asset_names = codex_asset_name_candidates(target);
+                if let Some(version) = latest_codex_version_from_releases(releases, &asset_names) {
                     log::trace!("Latest Codex CLI version: {version}");
                     return Ok(version);
                 }
@@ -1356,12 +1420,22 @@ async fn fetch_latest_codex_version(app: &AppHandle) -> Result<String, String> {
     Ok(FALLBACK_CODEX_VERSION.to_string())
 }
 
+fn latest_codex_version_from_releases(
+    releases: Vec<GitHubRelease>,
+    asset_names: &[String],
+) -> Option<String> {
+    releases
+        .into_iter()
+        .find(|release| find_matching_asset_url(release, asset_names).is_some())
+        .map(|release| extract_version_from_tag(&release.tag_name))
+}
+
 /// Find the download URL for a specific asset by searching recent releases
 async fn find_asset_url(
     app: &AppHandle,
     version: &str,
-    asset_name: &str,
-) -> Result<String, String> {
+    candidates: &[CodexAssetCandidate],
+) -> Result<(String, CodexAssetCandidate), String> {
     let client = build_github_client()?;
     let token = resolve_github_api_token(app);
     let mut request = client
@@ -1388,13 +1462,16 @@ async fn find_asset_url(
     for release in &releases {
         let release_version = extract_version_from_tag(&release.tag_name);
         if release_version == version {
-            for asset in &release.assets {
-                if asset.name == asset_name {
-                    return Ok(asset.browser_download_url.clone());
-                }
+            if let Some((url, candidate)) = find_matching_candidate_asset(release, candidates) {
+                return Ok((url, candidate));
             }
+            let asset_names: Vec<&str> = candidates
+                .iter()
+                .map(|candidate| candidate.name.as_str())
+                .collect();
             return Err(format!(
-                "Asset {asset_name} not found in release {}",
+                "Assets [{}] not found in release {}",
+                asset_names.join(", "),
                 release.tag_name
             ));
         }
@@ -1403,11 +1480,36 @@ async fn find_asset_url(
     Err(format!("Release for version {version} not found"))
 }
 
+fn find_matching_candidate_asset(
+    release: &GitHubRelease,
+    candidates: &[CodexAssetCandidate],
+) -> Option<(String, CodexAssetCandidate)> {
+    for candidate in candidates {
+        for asset in &release.assets {
+            if asset.name == candidate.name {
+                return Some((asset.browser_download_url.clone(), candidate.clone()));
+            }
+        }
+    }
+    None
+}
+
+fn find_matching_asset_url(release: &GitHubRelease, asset_names: &[String]) -> Option<String> {
+    for asset_name in asset_names {
+        for asset in &release.assets {
+            if asset.name == *asset_name {
+                return Some(asset.browser_download_url.clone());
+            }
+        }
+    }
+    None
+}
+
 /// Pick the codex target triple for a WSL distro given the host install.
 fn wsl_codex_target(distro: &str) -> Result<&'static str, String> {
     match crate::platform::wsl_detect_arch(distro) {
-        Some("linux-x64") => Ok("x86_64-unknown-linux-gnu"),
-        Some("linux-arm64") => Ok("aarch64-unknown-linux-gnu"),
+        Some("linux-x64") => Ok("x86_64-unknown-linux-musl"),
+        Some("linux-arm64") => Ok("aarch64-unknown-linux-musl"),
         _ => Err("Unsupported WSL architecture (expected x86_64 or aarch64)".to_string()),
     }
 }
@@ -1436,16 +1538,10 @@ pub async fn install_codex_cli(app: AppHandle, version: Option<String>) -> Resul
     };
     log::trace!("Installing version {version} for target {target}");
 
-    // Release assets: zip on Windows targets, tar.gz everywhere else.
-    let is_zip = target.contains("windows");
-    let asset_name = if is_zip {
-        format!("codex-{target}.exe.zip")
-    } else {
-        format!("codex-{target}.tar.gz")
-    };
+    let candidates = codex_asset_candidates(target);
 
     // Find the download URL from the release assets
-    let download_url = find_asset_url(&app, &version, &asset_name).await?;
+    let (download_url, asset_candidate) = find_asset_url(&app, &version, &candidates).await?;
     log::trace!("Downloading from: {download_url}");
 
     // Emit progress: downloading
@@ -1481,10 +1577,13 @@ pub async fn install_codex_cli(app: AppHandle, version: Option<String>) -> Resul
     emit_progress(&app, "extracting", "Extracting archive...", 45);
 
     // Extract the binary bytes in-memory so native and WSL can share the flow.
-    let binary_bytes = if is_zip {
-        extract_zip_binary_bytes(&archive_content, target)?
-    } else {
-        extract_tar_gz_binary_bytes(&archive_content, target)?
+    let binary_bytes = match asset_candidate.format {
+        CodexArchiveFormat::Zip => {
+            extract_zip_binary_bytes(&archive_content, &asset_candidate.binary_target)?
+        }
+        CodexArchiveFormat::TarGz => {
+            extract_tar_gz_binary_bytes(&archive_content, &asset_candidate.binary_target)?
+        }
     };
 
     if wsl.enabled {
@@ -1745,5 +1844,120 @@ mod tests {
                     .join("auth.json"),
             ]
         );
+    }
+
+    #[test]
+    fn codex_asset_candidates_use_musl_for_linux_x64() {
+        assert_eq!(
+            codex_asset_name_candidates("x86_64-unknown-linux-musl"),
+            vec![
+                "codex-x86_64-unknown-linux-musl.tar.gz".to_string(),
+                "codex-x86_64-unknown-linux-gnu.tar.gz".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn codex_asset_candidates_use_musl_for_linux_arm64() {
+        assert_eq!(
+            codex_asset_name_candidates("aarch64-unknown-linux-musl"),
+            vec![
+                "codex-aarch64-unknown-linux-musl.tar.gz".to_string(),
+                "codex-aarch64-unknown-linux-gnu.tar.gz".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn codex_release_asset_filter_accepts_matching_platform_asset_only() {
+        let releases = vec![
+            GitHubRelease {
+                tag_name: "rust-v0.130.0".to_string(),
+                published_at: "2026-05-08T23:09:55Z".to_string(),
+                prerelease: false,
+                assets: vec![GitHubAsset {
+                    name: "codex-x86_64-unknown-linux-musl.tar.gz".to_string(),
+                    browser_download_url: "https://example.com/codex-linux-musl.tar.gz".to_string(),
+                }],
+            },
+            GitHubRelease {
+                tag_name: "rust-v0.129.0".to_string(),
+                published_at: "2026-05-01T23:09:55Z".to_string(),
+                prerelease: false,
+                assets: vec![GitHubAsset {
+                    name: "codex-aarch64-apple-darwin.tar.gz".to_string(),
+                    browser_download_url: "https://example.com/codex-mac.tar.gz".to_string(),
+                }],
+            },
+        ];
+
+        let versions = codex_versions_from_releases(
+            releases,
+            &codex_asset_name_candidates("x86_64-unknown-linux-musl"),
+        );
+
+        assert_eq!(versions.len(), 1);
+        assert_eq!(versions[0].version, "0.130.0");
+        assert_eq!(versions[0].tag_name, "rust-v0.130.0");
+    }
+
+    #[test]
+    fn codex_release_asset_lookup_prefers_first_matching_candidate() {
+        let release = GitHubRelease {
+            tag_name: "rust-v0.130.0".to_string(),
+            published_at: "2026-05-08T23:09:55Z".to_string(),
+            prerelease: false,
+            assets: vec![
+                GitHubAsset {
+                    name: "codex-x86_64-unknown-linux-gnu.tar.gz".to_string(),
+                    browser_download_url: "https://example.com/codex-linux-gnu.tar.gz".to_string(),
+                },
+                GitHubAsset {
+                    name: "codex-x86_64-unknown-linux-musl.tar.gz".to_string(),
+                    browser_download_url: "https://example.com/codex-linux-musl.tar.gz".to_string(),
+                },
+            ],
+        };
+
+        let url = find_matching_asset_url(
+            &release,
+            &codex_asset_name_candidates("x86_64-unknown-linux-musl"),
+        );
+
+        assert_eq!(
+            url,
+            Some("https://example.com/codex-linux-musl.tar.gz".to_string())
+        );
+    }
+
+    #[test]
+    fn latest_codex_version_skips_releases_without_platform_asset() {
+        let releases = vec![
+            GitHubRelease {
+                tag_name: "rust-v0.131.0".to_string(),
+                published_at: "2026-05-15T23:09:55Z".to_string(),
+                prerelease: false,
+                assets: vec![GitHubAsset {
+                    name: "codex-aarch64-apple-darwin.tar.gz".to_string(),
+                    browser_download_url: "https://example.com/codex-mac.tar.gz".to_string(),
+                }],
+            },
+            GitHubRelease {
+                tag_name: "rust-v0.130.0".to_string(),
+                published_at: "2026-05-08T23:09:55Z".to_string(),
+                prerelease: false,
+                assets: vec![GitHubAsset {
+                    name: "codex-x86_64-unknown-linux-musl.tar.gz".to_string(),
+                    browser_download_url: "https://example.com/codex-linux-musl.tar.gz".to_string(),
+                }],
+            },
+        ];
+
+        let version = latest_codex_version_from_releases(
+            releases,
+            &codex_asset_name_candidates("x86_64-unknown-linux-musl"),
+        );
+
+        assert_eq!(version, Some("0.130.0".to_string()));
     }
 }
