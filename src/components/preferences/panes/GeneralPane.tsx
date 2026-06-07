@@ -894,6 +894,14 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
     }
   }
 
+  const handleDesktopNotificationsEnabledChange = (checked: boolean) => {
+    if (preferences) {
+      patchPreferences.mutate({
+        desktop_notifications_enabled: checked,
+      })
+    }
+  }
+
   const handleClaudeLogin = useCallback(async () => {
     if (!cliStatus?.path) return
 
@@ -3088,6 +3096,16 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
             anchorId="pref-general-section-notifications"
           >
             <div className="space-y-4">
+              <InlineField
+                label="Desktop notifications"
+                description="Show a native system banner when a session needs your input or finishes, but only while Jean is in the background."
+              >
+                <Switch
+                  checked={preferences?.desktop_notifications_enabled ?? true}
+                  onCheckedChange={handleDesktopNotificationsEnabledChange}
+                />
+              </InlineField>
+
               <InlineField
                 label="Web access sounds"
                 description="Applies only when using Jean in browser or mobile web access. Turn off to keep phone music uninterrupted."

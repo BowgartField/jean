@@ -21,6 +21,7 @@ import {
   normalizeCodexQuestions,
 } from '@/types/chat'
 import { playNotificationSound } from '@/lib/sounds'
+import { notifyIfBackground } from '@/lib/session-notifications'
 import { findPlanFilePath } from '@/components/chat/tool-call-utils'
 import { generateId } from '@/lib/uuid'
 import {
@@ -265,6 +266,19 @@ export default function useStreamingEvents({
       addThinkingBlock,
       addSendingSession,
     } = useChatStore.getState()
+
+    // Fire a native OS banner (background-only) for a session lifecycle event,
+    // gated by the desktop_notifications_enabled preference. Body = session name.
+    const notifySession = (sessionId: string, title: string): void => {
+      const prefs = queryClient.getQueryData<AppPreferences>(
+        preferencesQueryKeys.preferences()
+      )
+      if (prefs?.desktop_notifications_enabled === false) return
+      const name = queryClient.getQueryData<Session>(
+        chatQueryKeys.session(sessionId)
+      )?.name
+      notifyIfBackground(title, name)
+    }
 
     // Hydrate ScheduleWakeup indicator store from backend so reloads do not
     // show historical tool_use blocks stuck in the "pending" spinner state.
@@ -600,6 +614,7 @@ export default function useStreamingEvents({
         const next = [...current, request]
         setPendingCodexPermissionRequests(session_id, next)
         setWaitingForInput(session_id, true)
+        notifySession(session_id, 'Needs your input')
         persistCodexPendingState(session_id, worktree_id, {
           pendingCodexPermissionRequests: next,
         })
@@ -620,6 +635,7 @@ export default function useStreamingEvents({
           const next = [...current, request]
           setPendingCodexCommandApprovalRequests(session_id, next)
           setWaitingForInput(session_id, true)
+          notifySession(session_id, 'Needs your input')
           persistCodexPendingState(session_id, worktree_id, {
             pendingCodexCommandApprovalRequests: next,
           })
@@ -653,6 +669,7 @@ export default function useStreamingEvents({
         addToolCall(session_id, toolCall)
         addToolBlock(session_id, toolCall.id)
 
+        notifySession(session_id, 'Needs your input')
         persistCodexPendingState(session_id, worktree_id, {
           pendingCodexUserInputRequests: next,
         })
@@ -699,6 +716,7 @@ export default function useStreamingEvents({
           const next = [...current, request]
           setPendingCodexDynamicToolCallRequests(session_id, next)
           setWaitingForInput(session_id, true)
+          notifySession(session_id, 'Needs your input')
           persistCodexPendingState(session_id, worktree_id, {
             pendingCodexDynamicToolCallRequests: next,
           })
@@ -954,6 +972,7 @@ export default function useStreamingEvents({
             webAccessSoundsEnabled:
               preferences?.web_access_sounds_enabled ?? true,
           })
+          notifySession(sessionId, 'Needs your input')
         }
       } else if (event.payload.waiting_for_plan) {
         // Codex/Opencode plan-mode run completed with content — enter plan-waiting state.
@@ -1071,6 +1090,7 @@ export default function useStreamingEvents({
           webAccessSoundsEnabled:
             preferences?.web_access_sounds_enabled ?? true,
         })
+        notifySession(sessionId, 'Needs your input')
       } else {
         // No blocking tools — add optimistic message FIRST, then batch-clear state.
         // This eliminates the flicker gap where neither streaming nor persisted content is visible.
@@ -1169,6 +1189,7 @@ export default function useStreamingEvents({
             webAccessSoundsEnabled:
               preferences?.web_access_sounds_enabled ?? true,
           })
+          notifySession(sessionId, 'Needs your input')
         } else {
           // 2. Update last_run_status + session state in caches so UI reflects immediately.
           // CRITICAL: Include waiting_for_input/is_reviewing so useSessionStatePersistence's
@@ -1230,6 +1251,7 @@ export default function useStreamingEvents({
             webAccessSoundsEnabled:
               preferences?.web_access_sounds_enabled ?? true,
           })
+          notifySession(sessionId, 'Session finished')
 
           // Auto-save context (fire-and-forget, no blocking)
           if (preferences?.auto_save_context === true) {
@@ -1452,6 +1474,8 @@ export default function useStreamingEvents({
 
       // Batch-clear all streaming state in a single Zustand set()
       useChatStore.getState().failSession(session_id)
+
+      notifySession(session_id, 'Session failed')
 
       // Invalidate sessions list to update last_run_status in tab bar
       if (sessionWorktreeId) {
