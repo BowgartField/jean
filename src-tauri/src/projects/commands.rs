@@ -1020,11 +1020,7 @@ pub async fn create_worktree(
     log::trace!("Creating worktree for project: {project_id}");
 
     let auto_open_in_jean = auto_open_in_jean.unwrap_or(true);
-    let worktree_origin = match origin.as_deref() {
-        Some("auto_fix") => Some(WorktreeOrigin::AutoFix),
-        Some("manual") | None => None,
-        Some(other) => return Err(format!("Unsupported worktree origin: {other}")),
-    };
+    let worktree_origin = parse_worktree_origin(origin.as_deref())?;
 
     let data = load_projects_data(&app)?;
 
@@ -1872,6 +1868,15 @@ pub async fn create_worktree(
 
     log::trace!("Returning pending worktree: {}", pending_worktree.name);
     Ok(pending_worktree)
+}
+
+fn parse_worktree_origin(origin: Option<&str>) -> Result<Option<WorktreeOrigin>, String> {
+    match origin {
+        Some("auto_fix") => Ok(Some(WorktreeOrigin::AutoFix)),
+        Some("manual") => Ok(Some(WorktreeOrigin::Manual)),
+        None => Ok(None),
+        Some(other) => Err(format!("Unsupported worktree origin: {other}")),
+    }
 }
 
 /// Create a worktree from an existing branch (runs in background)
@@ -11089,6 +11094,14 @@ pub async fn revert_last_local_commit(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_worktree_origin_preserves_manual_origin() {
+        assert_eq!(
+            parse_worktree_origin(Some("manual")),
+            Ok(Some(WorktreeOrigin::Manual))
+        );
+    }
 
     #[test]
     fn extract_json_object_plain() {

@@ -39,6 +39,27 @@ const DEFAULT_AUTO_FIX_SETTINGS: ProjectAutoFixSettings = {
   active_hours_end: 8,
 }
 
+function normalizeAutoFixSettings(
+  settings: ProjectAutoFixSettings
+): ProjectAutoFixSettings {
+  return {
+    ...DEFAULT_AUTO_FIX_SETTINGS,
+    ...settings,
+    planning_model: settings.planning_model?.trim() || null,
+    yolo_model: settings.yolo_model?.trim() || null,
+  }
+}
+
+export function hasAutoFixSettingsChanges(
+  initialSettings: ProjectAutoFixSettings,
+  settings: ProjectAutoFixSettings
+) {
+  return (
+    JSON.stringify(normalizeAutoFixSettings(settings)) !==
+    JSON.stringify(normalizeAutoFixSettings(initialSettings))
+  )
+}
+
 const HOUR_OPTIONS = Array.from({ length: 24 }, (_, hour) => hour)
 
 function formatHour(hour: number): string {
@@ -134,6 +155,11 @@ export function AutoFixPane({ projectId }: { projectId: string }) {
     setSettings(initialSettings)
   }, [initialSettings])
 
+  const hasChanges = useMemo(
+    () => hasAutoFixSettingsChanges(initialSettings, settings),
+    [initialSettings, settings]
+  )
+
   const setNumber = (
     key: 'interval_minutes' | 'issue_limit' | 'max_parallel_worktrees',
     value: string
@@ -146,13 +172,11 @@ export function AutoFixPane({ projectId }: { projectId: string }) {
   }
 
   const saveSettings = (nextSettings = settings) => {
+    if (!hasAutoFixSettingsChanges(initialSettings, nextSettings)) return
+
     updateSettings.mutate({
       projectId,
-      autoFixSettings: {
-        ...nextSettings,
-        planning_model: nextSettings.planning_model?.trim() || null,
-        yolo_model: nextSettings.yolo_model?.trim() || null,
-      },
+      autoFixSettings: normalizeAutoFixSettings(nextSettings),
     })
   }
 
@@ -183,7 +207,7 @@ export function AutoFixPane({ projectId }: { projectId: string }) {
     const parsed = Number.parseInt(value, 10)
     setSettings(current => ({
       ...current,
-      [key]: Number.isFinite(parsed) ? parsed : 0,
+      [key]: Number.isFinite(parsed) ? Math.max(0, Math.min(23, parsed)) : 0,
     }))
   }
 
@@ -382,51 +406,52 @@ export function AutoFixPane({ projectId }: { projectId: string }) {
                 disabled={updateSettings.isPending}
               />
             </div>
-            <div
-              className={
-                settings.auto_yolo_enabled
-                  ? 'grid gap-4 sm:grid-cols-2'
-                  : 'grid gap-4 sm:grid-cols-2 opacity-50'
-              }
-            >
+            <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Backend">
-                <Select
-                  value={settings.yolo_backend}
-                  disabled={!settings.auto_yolo_enabled}
-                  onValueChange={yolo_backend =>
-                    setSettings(current => ({
-                      ...current,
-                      yolo_backend,
-                      yolo_model: null,
-                    }))
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="claude">Claude</SelectItem>
-                    <SelectItem value="codex">Codex</SelectItem>
-                    <SelectItem value="opencode">OpenCode</SelectItem>
-                    <SelectItem value="cursor">Cursor</SelectItem>
-                  </SelectContent>
-                </Select>
+                <div className={settings.auto_yolo_enabled ? '' : 'opacity-50'}>
+                  <Select
+                    value={settings.yolo_backend}
+                    disabled={!settings.auto_yolo_enabled}
+                    onValueChange={yolo_backend =>
+                      setSettings(current => ({
+                        ...current,
+                        yolo_backend,
+                        yolo_model: null,
+                      }))
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="claude">Claude</SelectItem>
+                      <SelectItem value="codex">Codex</SelectItem>
+                      <SelectItem value="opencode">OpenCode</SelectItem>
+                      <SelectItem value="cursor">Cursor</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </Field>
               <Field label="Model">
-                <ModelSelect
-                  backend={settings.yolo_backend}
-                  value={settings.yolo_model}
-                  disabled={!settings.auto_yolo_enabled}
-                  onChange={yolo_model =>
-                    setSettings(current => ({ ...current, yolo_model }))
-                  }
-                />
+                <div className={settings.auto_yolo_enabled ? '' : 'opacity-50'}>
+                  <ModelSelect
+                    backend={settings.yolo_backend}
+                    value={settings.yolo_model}
+                    disabled={!settings.auto_yolo_enabled}
+                    onChange={yolo_model =>
+                      setSettings(current => ({ ...current, yolo_model }))
+                    }
+                  />
+                </div>
               </Field>
             </div>
           </div>
         </div>
 
-        <Button onClick={save} disabled={updateSettings.isPending}>
+        <Button
+          onClick={save}
+          disabled={updateSettings.isPending || !hasChanges}
+        >
           {updateSettings.isPending && (
             <Loader2 className="h-4 w-4 animate-spin" />
           )}

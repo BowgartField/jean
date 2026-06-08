@@ -100,7 +100,7 @@ Additional systems (no dedicated docs yet):
   backend-owned history from local stores where stable (`~/.codex/sessions/**`
   and `~/.claude/projects/<escaped-cwd>/**`) and imports a chosen history row as
   a Jean terminal session running the backend's native resume command.
-- **Background Tasks** - Git/PR polling with focus-aware intervals (`src-tauri/src/background_tasks/`); Auto Fix issue polling/planning/yolo handoff (`src-tauri/src/auto_fix/`)
+- **Background Tasks** - Git/PR polling with focus-aware intervals (`src-tauri/src/background_tasks/`); Auto Fix issue polling/planning/yolo handoff and scheduler active-hours window via `chrono` local time with midnight-crossing support (`src-tauri/src/auto_fix/`)
 - **HTTP Server** - Embedded Axum server + WebSocket for headless/web mode (`src-tauri/src/http_server/`)
 - **Diagnostics** - CPU/memory monitoring panel (`src-tauri/src/diagnostics/`)
 - **MCP** - Model Context Protocol server integration with per-project overrides (`src/services/mcp.ts`)

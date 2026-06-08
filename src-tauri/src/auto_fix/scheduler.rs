@@ -564,7 +564,15 @@ async fn approve_plan_and_start_yolo(
     Ok(())
 }
 
+fn clear_pending_auto_yolo_for_project(project_id: &str) {
+    pending_yolo()
+        .lock()
+        .expect("pending auto yolo mutex")
+        .retain(|_, entry| entry.project_id != project_id);
+}
+
 fn emit_auto_fix_stopped(app: &AppHandle, project: &Project, backend: &str, error: &str) {
+    clear_pending_auto_yolo_for_project(&project.id);
     disable_project_auto_fix(app, &project.id);
     let event = AutoFixStoppedEvent {
         project_id: project.id.clone(),
@@ -667,6 +675,40 @@ mod tests {
 
         clear_auto_yolo_in_flight(&mut in_flight, "session-1");
         assert!(mark_auto_yolo_in_flight(&mut in_flight, "session-1"));
+    }
+
+    #[test]
+    fn clears_pending_auto_yolo_entries_for_stopped_project() {
+        let entry_for_stopped_project = PendingAutoYolo {
+            project_id: "project-1".to_string(),
+            project_name: "Project 1".to_string(),
+            worktree_id: "worktree-1".to_string(),
+            worktree_path: "/tmp/worktree-1".to_string(),
+            session_id: "session-1".to_string(),
+            backend: "claude".to_string(),
+            model: None,
+        };
+        let entry_for_other_project = PendingAutoYolo {
+            project_id: "project-2".to_string(),
+            project_name: "Project 2".to_string(),
+            worktree_id: "worktree-2".to_string(),
+            worktree_path: "/tmp/worktree-2".to_string(),
+            session_id: "session-2".to_string(),
+            backend: "claude".to_string(),
+            model: None,
+        };
+        {
+            let mut pending = pending_yolo().lock().expect("pending auto yolo mutex");
+            pending.clear();
+            pending.insert("session-1".to_string(), entry_for_stopped_project);
+            pending.insert("session-2".to_string(), entry_for_other_project);
+        }
+
+        clear_pending_auto_yolo_for_project("project-1");
+
+        let pending = pending_yolo().lock().expect("pending auto yolo mutex");
+        assert!(!pending.contains_key("session-1"));
+        assert!(pending.contains_key("session-2"));
     }
 
     #[test]
