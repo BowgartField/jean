@@ -26,6 +26,7 @@ describe('canvas worktree filters', () => {
 
     expect(mrRobotTab?.settingsPane).toBe('auto-fix')
     expect(mrRobotTab?.settingsPlacement).toBe('inside')
+    expect(mrRobotTab?.badge).toBe('Beta')
   })
 
   it('hides auto-fix issue worktrees from All and Issues', () => {

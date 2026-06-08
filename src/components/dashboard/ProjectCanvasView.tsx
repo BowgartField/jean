@@ -3223,6 +3223,7 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
                   'settingsPane' in tab ? tab.settingsPane : undefined
                 const settingsPlacement =
                   'settingsPlacement' in tab ? tab.settingsPlacement : undefined
+                const badge = 'badge' in tab ? tab.badge : undefined
                 if (settingsPane && settingsPlacement === 'inside') {
                   return (
                     <div
@@ -3243,6 +3244,18 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
                       >
                         <Icon className="h-3.5 w-3.5" />
                         <span>{tab.label}</span>
+                        {badge && (
+                          <span
+                            className={cn(
+                              'rounded border px-1 py-0 text-[9px] uppercase leading-4 tracking-wide',
+                              isActive
+                                ? 'border-primary/30 text-primary'
+                                : 'border-muted-foreground/20 text-muted-foreground'
+                            )}
+                          >
+                            {badge}
+                          </span>
+                        )}
                         <span
                           className={cn(
                             'rounded-md px-1.5 py-0.5 text-[10px] leading-none',

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Loader2 } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
@@ -20,6 +21,8 @@ import {
   CURSOR_MODEL_OPTIONS,
   OPENCODE_MODEL_OPTIONS,
 } from '@/components/chat/toolbar/toolbar-options'
+
+export const MR_ROBOT_SETTINGS_BADGE = 'Beta'
 
 const DEFAULT_AUTO_FIX_SETTINGS: ProjectAutoFixSettings = {
   enabled: false,
@@ -188,7 +191,15 @@ export function AutoFixPane({ projectId }: { projectId: string }) {
     <div className="space-y-6">
       <div className="space-y-4">
         <div>
-          <h3 className="text-lg font-medium text-foreground">Mr. Robot</h3>
+          <div className="flex items-center gap-2">
+            <h3 className="text-lg font-medium text-foreground">Mr. Robot</h3>
+            <Badge
+              variant="outline"
+              className="px-1.5 py-0 text-[10px] uppercase tracking-wide text-muted-foreground"
+            >
+              {MR_ROBOT_SETTINGS_BADGE}
+            </Badge>
+          </div>
           <Separator className="mt-2" />
         </div>
 

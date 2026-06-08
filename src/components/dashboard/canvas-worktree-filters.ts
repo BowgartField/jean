@@ -26,6 +26,7 @@ export interface CanvasPredefinedFilterTabItem {
   icon: LucideIcon
   settingsPane?: string
   settingsPlacement?: 'inside'
+  badge?: string
 }
 
 export const CANVAS_FILTER_TABS: CanvasPredefinedFilterTabItem[] = [
@@ -40,6 +41,7 @@ export const CANVAS_FILTER_TABS: CanvasPredefinedFilterTabItem[] = [
     icon: Bot,
     settingsPane: 'auto-fix',
     settingsPlacement: 'inside',
+    badge: 'Beta',
   },
 ]
 
