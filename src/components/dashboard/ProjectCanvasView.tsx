@@ -22,7 +22,6 @@ import { invoke } from '@/lib/transport'
 import { cn } from '@/lib/utils'
 import { dismissibleToast } from '@/lib/dismissible-toast'
 import {
-  type LucideIcon,
   Search,
   X,
   MoreHorizontal,
@@ -165,6 +164,15 @@ import {
   shouldDisableWorktreeTextSelection,
   shouldShowWorktreeLabelContextMenu,
 } from './worktree-label-context'
+import {
+  CANVAS_FILTER_TABS,
+  getCanvasFilterTabCount,
+  isLabelFilterTab,
+  matchesCanvasFilterTab,
+  type CanvasFilterTab,
+  type CanvasPredefinedFilterTab,
+  type CanvasPredefinedFilterTabItem,
+} from './canvas-worktree-filters'
 const GitDiffModal = lazy(() =>
   import('@/components/chat/GitDiffModal').then(mod => ({
     default: mod.GitDiffModal,
@@ -340,98 +348,18 @@ type ActiveStatus =
   | 'review'
   | null
 
-type CanvasPredefinedFilterTab =
-  | 'all'
-  | 'manual'
-  | 'issues'
-  | 'prs'
-  | 'security'
-type CanvasLabelFilterTab = `label:${string}`
-type CanvasFilterTab = CanvasPredefinedFilterTab | CanvasLabelFilterTab
-
-interface CanvasPredefinedFilterTabItem {
-  value: CanvasPredefinedFilterTab
-  label: string
-  icon: LucideIcon
-}
-
 interface CanvasLabelFilterTabItem extends PinnedWorktreeLabelTab {
-  icon: LucideIcon
+  icon: React.ComponentType<{ className?: string; style?: React.CSSProperties }>
 }
 
 type CanvasFilterTabItem =
   | CanvasPredefinedFilterTabItem
   | CanvasLabelFilterTabItem
 
-const CANVAS_FILTER_TABS: CanvasPredefinedFilterTabItem[] = [
-  { value: 'all', label: 'All', icon: Home },
-  { value: 'manual', label: 'Manual', icon: GitBranch },
-  { value: 'issues', label: 'Issues', icon: CircleDot },
-  { value: 'prs', label: 'PRs', icon: GitPullRequestArrow },
-  { value: 'security', label: 'Security', icon: ShieldAlert },
-]
-
-function isLabelFilterTab(
-  value: CanvasFilterTab
-): value is CanvasLabelFilterTab {
-  return value.startsWith('label:')
-}
-
 function isLabelFilterTabItem(
   tab: CanvasFilterTabItem
 ): tab is CanvasLabelFilterTabItem {
   return isLabelFilterTab(tab.value)
-}
-
-function isIssueWorktree(worktree: Worktree): boolean {
-  return (
-    worktree.issue_number != null || !!worktree.linear_issue_identifier?.trim()
-  )
-}
-
-function isPrWorktree(worktree: Worktree): boolean {
-  return worktree.pr_number != null
-}
-
-function isSecurityWorktree(worktree: Worktree): boolean {
-  return (
-    worktree.security_alert_number != null ||
-    !!worktree.advisory_ghsa_id?.trim()
-  )
-}
-
-function isManualWorktree(worktree: Worktree): boolean {
-  return (
-    !isBaseSession(worktree) &&
-    !isIssueWorktree(worktree) &&
-    !isPrWorktree(worktree) &&
-    !isSecurityWorktree(worktree)
-  )
-}
-
-function matchesCanvasFilterTab(
-  worktree: Worktree,
-  activeFilterTab: CanvasFilterTab
-): boolean {
-  if (isLabelFilterTab(activeFilterTab)) {
-    const labelName = activeFilterTab.slice('label:'.length).toLowerCase()
-    return getWorktreeLabels(worktree).some(
-      label => label.name.toLowerCase() === labelName
-    )
-  }
-
-  switch (activeFilterTab) {
-    case 'all':
-      return true
-    case 'manual':
-      return isManualWorktree(worktree)
-    case 'issues':
-      return isIssueWorktree(worktree)
-    case 'prs':
-      return isPrWorktree(worktree)
-    case 'security':
-      return isSecurityWorktree(worktree)
-  }
 }
 
 function getActiveStatus(cards: SessionCardData[]): ActiveStatus {
@@ -997,11 +925,12 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
     Record<CanvasPredefinedFilterTab, number>
   >(() => {
     return {
-      all: visibleWorktrees.length,
-      manual: visibleWorktrees.filter(isManualWorktree).length,
-      issues: visibleWorktrees.filter(isIssueWorktree).length,
-      prs: visibleWorktrees.filter(isPrWorktree).length,
-      security: visibleWorktrees.filter(isSecurityWorktree).length,
+      all: getCanvasFilterTabCount(visibleWorktrees, 'all'),
+      manual: getCanvasFilterTabCount(visibleWorktrees, 'manual'),
+      issues: getCanvasFilterTabCount(visibleWorktrees, 'issues'),
+      prs: getCanvasFilterTabCount(visibleWorktrees, 'prs'),
+      security: getCanvasFilterTabCount(visibleWorktrees, 'security'),
+      auto_fix: getCanvasFilterTabCount(visibleWorktrees, 'auto_fix'),
     }
   }, [visibleWorktrees])
 
@@ -3290,38 +3219,123 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
                 const count = isPinnedLabelTab
                   ? tab.count
                   : filterTabCounts[tab.value]
-                return (
-                  <button
-                    key={tab.value}
-                    type="button"
-                    role="tab"
-                    aria-selected={isActive}
-                    className={cn(
-                      'inline-flex shrink-0 items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors',
-                      isActive
-                        ? 'border-primary/30 bg-primary/10 text-primary'
-                        : 'border-transparent text-muted-foreground hover:bg-muted/60 hover:text-foreground'
-                    )}
-                    onClick={() => handleFilterTabChange(tab.value)}
-                  >
-                    <Icon
-                      className="h-3.5 w-3.5"
-                      style={
-                        isPinnedLabelTab ? { color: tab.color } : undefined
-                      }
-                    />
-                    <span>{tab.label}</span>
-                    <span
+                const settingsPane =
+                  'settingsPane' in tab ? tab.settingsPane : undefined
+                const settingsPlacement =
+                  'settingsPlacement' in tab ? tab.settingsPlacement : undefined
+                const badge = 'badge' in tab ? tab.badge : undefined
+                if (settingsPane && settingsPlacement === 'inside') {
+                  return (
+                    <div
+                      key={tab.value}
                       className={cn(
-                        'rounded-md px-1.5 py-0.5 text-[10px] leading-none',
+                        'inline-flex shrink-0 items-center overflow-hidden rounded-md border text-xs font-medium transition-colors',
                         isActive
-                          ? 'bg-primary/15 text-primary'
-                          : 'bg-muted text-muted-foreground'
+                          ? 'border-primary/30 bg-primary/10 text-primary'
+                          : 'border-transparent text-muted-foreground hover:bg-muted/60 hover:text-foreground'
                       )}
                     >
-                      {count}
-                    </span>
-                  </button>
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={isActive}
+                        className="inline-flex shrink-0 items-center gap-1.5 pl-3 py-1.5"
+                        onClick={() => handleFilterTabChange(tab.value)}
+                      >
+                        <Icon className="h-3.5 w-3.5" />
+                        <span>{tab.label}</span>
+                        {badge && (
+                          <span
+                            className={cn(
+                              'rounded border px-1 py-0 text-[9px] uppercase leading-4 tracking-wide',
+                              isActive
+                                ? 'border-primary/30 text-primary'
+                                : 'border-muted-foreground/20 text-muted-foreground'
+                            )}
+                          >
+                            {badge}
+                          </span>
+                        )}
+                        <span
+                          className={cn(
+                            'rounded-md px-1.5 py-0.5 text-[10px] leading-none',
+                            isActive
+                              ? 'bg-primary/15 text-primary'
+                              : 'bg-muted text-muted-foreground'
+                          )}
+                        >
+                          {count}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`Configure ${tab.label}`}
+                        title={`Configure ${tab.label}`}
+                        className={cn(
+                          'mx-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-colors',
+                          isActive
+                            ? 'text-primary hover:bg-primary/15'
+                            : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                        )}
+                        onClick={() =>
+                          useProjectsStore
+                            .getState()
+                            .openProjectSettings(projectId, settingsPane)
+                        }
+                      >
+                        <Settings className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  )
+                }
+                return (
+                  <div key={tab.value} className="inline-flex shrink-0 gap-0.5">
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={isActive}
+                      className={cn(
+                        'inline-flex shrink-0 items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors',
+                        isActive
+                          ? 'border-primary/30 bg-primary/10 text-primary'
+                          : 'border-transparent text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+                      )}
+                      onClick={() => handleFilterTabChange(tab.value)}
+                    >
+                      <Icon
+                        className="h-3.5 w-3.5"
+                        style={
+                          isPinnedLabelTab ? { color: tab.color } : undefined
+                        }
+                      />
+                      <span>{tab.label}</span>
+                      <span
+                        className={cn(
+                          'rounded-md px-1.5 py-0.5 text-[10px] leading-none',
+                          isActive
+                            ? 'bg-primary/15 text-primary'
+                            : 'bg-muted text-muted-foreground'
+                        )}
+                      >
+                        {count}
+                      </span>
+                    </button>
+                    {settingsPane && (
+                      <button
+                        type="button"
+                        aria-label={`Configure ${tab.label}`}
+                        title={`Configure ${tab.label}`}
+                        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-transparent text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+                        onClick={() =>
+                          useProjectsStore
+                            .getState()
+                            .openProjectSettings(projectId, settingsPane)
+                        }
+                      >
+                        <Settings className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
                 )
               })}
             </div>

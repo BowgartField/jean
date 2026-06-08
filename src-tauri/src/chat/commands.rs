@@ -1627,6 +1627,7 @@ pub async fn restore_session_with_base(
         pr_push_remote: None,
         pr_push_branch: None,
         order: 0,
+        origin: None,
         labels: Vec::new(),
         label: None,
         archived_at: None,
@@ -1961,6 +1962,7 @@ fn persist_salvaged_resume_id(session: &mut Session, backend: &Backend, sid: &st
 /// 5. Adds the assistant response
 /// 6. Saves the updated session
 /// 7. Returns the assistant message
+
 
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]

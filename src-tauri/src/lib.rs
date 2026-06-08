@@ -34,6 +34,7 @@ use tauri::{AppHandle, Emitter, Manager};
 #[cfg(target_os = "macos")]
 use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
 
+mod auto_fix;
 mod background_tasks;
 mod browser;
 mod chat;
@@ -3694,6 +3695,7 @@ pub fn run() {
             let task_manager = background_tasks::BackgroundTaskManager::new(app.handle().clone());
             task_manager.start();
             app.manage(task_manager);
+            auto_fix::scheduler::start_auto_fix_scheduler(app.handle().clone());
             log::trace!("Background task manager initialized");
 
             // Initialize HTTP server infrastructure

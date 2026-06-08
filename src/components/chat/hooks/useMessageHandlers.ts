@@ -43,6 +43,7 @@ import type {
   WorktreeCreateErrorEvent,
 } from '@/types/projects'
 import { clearPlanApprovalTransientState } from './plan-approval-state'
+import type { ApprovalModelOverride } from '../ApprovalModelSubmenu'
 
 /** Git commands to auto-approve for magic prompts (no permission prompts needed) */
 export const GIT_ALLOWED_TOOLS = [
@@ -130,13 +131,25 @@ interface MessageHandlers {
   handlePlanApprovalYolo: (messageId: string, updatedPlan?: string) => void
   handleStreamingPlanApproval: () => void
   handleStreamingPlanApprovalYolo: () => void
-  handleClearContextApproval: (messageId: string) => void
+  handleClearContextApproval: (
+    messageId: string,
+    override?: ApprovalModelOverride
+  ) => void
   handleStreamingClearContextApproval: () => void
-  handleClearContextApprovalBuild: (messageId: string) => void
+  handleClearContextApprovalBuild: (
+    messageId: string,
+    override?: ApprovalModelOverride
+  ) => void
   handleStreamingClearContextApprovalBuild: () => void
-  handleWorktreeBuildApproval: (messageId: string) => void
+  handleWorktreeBuildApproval: (
+    messageId: string,
+    override?: ApprovalModelOverride
+  ) => void
   handleStreamingWorktreeBuildApproval: () => void
-  handleWorktreeYoloApproval: (messageId: string) => void
+  handleWorktreeYoloApproval: (
+    messageId: string,
+    override?: ApprovalModelOverride
+  ) => void
   handleStreamingWorktreeYoloApproval: () => void
   handlePendingPlanApprovalCallback: () => void
   handlePermissionApproval: (
@@ -1126,7 +1139,14 @@ export function useMessageHandlers({
   // Handle clear context approval for persisted messages
   // Resolves plan content from message tool calls, marks approved, creates new session, sends plan
   const handleClearContextApproval = useCallback(
-    async (messageId: string, mode: 'yolo' | 'build' = 'yolo') => {
+    async (
+      messageId: string,
+      modeOrOverride: 'yolo' | 'build' | ApprovalModelOverride = 'yolo',
+      oneShotOverride?: ApprovalModelOverride
+    ) => {
+      const mode = typeof modeOrOverride === 'string' ? modeOrOverride : 'yolo'
+      const effectiveOverride =
+        typeof modeOrOverride === 'string' ? oneShotOverride : modeOrOverride
       const sessionId = activeSessionIdRef.current
       const worktreeId = activeWorktreeIdRef.current
       const worktreePath = activeWorktreePathRef.current
@@ -1223,16 +1243,21 @@ export function useMessageHandlers({
       const prefs = queryClient.getQueryData<AppPreferences>(
         preferencesQueryKeys.preferences()
       )
-      const modeBackendOverride = asSessionBackend(modeBackendRef.current)
+      const validatedOverrideBackend = asSessionBackend(
+        effectiveOverride?.backend
+      )
+      const modeBackendOverride =
+        validatedOverrideBackend ?? asSessionBackend(modeBackendRef.current)
       const resolvedBackend = modeBackendOverride
       const modelBackend = resolvedBackend ?? currentSessionBackend
       const resolvedModel =
+        effectiveOverride?.model ??
         modeModelRef.current ??
         (modeBackendOverride
           ? getDefaultModelForBackend(modelBackend, prefs)
           : selectedModelRef.current)
       const modeOverride =
-        modeModelRef.current || modeBackendOverride
+        effectiveOverride || modeModelRef.current || modeBackendOverride
           ? [resolvedBackend, resolvedModel].filter(Boolean).join(' / ')
           : ''
       const planMessage = modeOverride
@@ -1616,7 +1641,8 @@ export function useMessageHandlers({
   )
 
   const handleClearContextApprovalBuild = useCallback(
-    (messageId: string) => handleClearContextApproval(messageId, 'build'),
+    (messageId: string, override?: ApprovalModelOverride) =>
+      handleClearContextApproval(messageId, 'build', override),
     [handleClearContextApproval]
   )
 
@@ -1627,7 +1653,11 @@ export function useMessageHandlers({
 
   // Handle worktree approval (create new worktree + send plan)
   const handleWorktreeApproval = useCallback(
-    async (messageId: string, mode: 'yolo' | 'build' = 'build') => {
+    async (
+      messageId: string,
+      mode: 'yolo' | 'build' = 'build',
+      oneShotOverride?: ApprovalModelOverride
+    ) => {
       const sessionId = activeSessionIdRef.current
       const worktreeId = activeWorktreeIdRef.current
       const worktreePath = activeWorktreePathRef.current
@@ -1804,16 +1834,21 @@ export function useMessageHandlers({
       const prefs = queryClient.getQueryData<AppPreferences>(
         preferencesQueryKeys.preferences()
       )
-      const modeBackendOverride = asSessionBackend(modeBackendRef.current)
+      const validatedOverrideBackend = asSessionBackend(
+        oneShotOverride?.backend
+      )
+      const modeBackendOverride =
+        validatedOverrideBackend ?? asSessionBackend(modeBackendRef.current)
       const resolvedBackend = modeBackendOverride
       const modelBackend = resolvedBackend ?? currentSessionBackend
       const resolvedModel =
+        oneShotOverride?.model ??
         modeModelRef.current ??
         (modeBackendOverride
           ? getDefaultModelForBackend(modelBackend, prefs)
           : selectedModelRef.current)
       const modeOverride =
-        modeModelRef.current || modeBackendOverride
+        oneShotOverride || modeModelRef.current || modeBackendOverride
           ? [resolvedBackend, resolvedModel].filter(Boolean).join(' / ')
           : ''
       const planMessage = modeOverride
@@ -2256,12 +2291,14 @@ export function useMessageHandlers({
   )
 
   const handleWorktreeBuildApproval = useCallback(
-    (messageId: string) => handleWorktreeApproval(messageId, 'build'),
+    (messageId: string, override?: ApprovalModelOverride) =>
+      handleWorktreeApproval(messageId, 'build', override),
     [handleWorktreeApproval]
   )
 
   const handleWorktreeYoloApproval = useCallback(
-    (messageId: string) => handleWorktreeApproval(messageId, 'yolo'),
+    (messageId: string, override?: ApprovalModelOverride) =>
+      handleWorktreeApproval(messageId, 'yolo', override),
     [handleWorktreeApproval]
   )
 

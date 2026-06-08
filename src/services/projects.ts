@@ -460,6 +460,7 @@ export function useCreateWorktree() {
       advisoryContext,
       linearContext,
       customName,
+      origin,
       background: _background,
     }: {
       projectId: string
@@ -522,6 +523,8 @@ export function useCreateWorktree() {
       }
       /** Custom worktree name (used when retrying after path conflict) */
       customName?: string
+      /** Origin/category for the worktree */
+      origin?: Worktree['origin']
       /** When true, skip auto-navigation (CMD+Click from new session modal) */
       background?: boolean
     }): Promise<Worktree> => {
@@ -547,6 +550,7 @@ export function useCreateWorktree() {
         advisoryContext,
         linearContext,
         customName,
+        origin,
       })
       return worktree
     },
@@ -941,6 +945,7 @@ export function useWorktreeEvents() {
           issueNumber,
           securityAlertNumber,
           advisoryGhsaId,
+          origin,
         } = event.payload
         logger.info('Worktree creating (background started)', { id, name })
 
@@ -960,6 +965,7 @@ export function useWorktreeEvents() {
               issue_number: issueNumber,
               security_alert_number: securityAlertNumber,
               advisory_ghsa_id: advisoryGhsaId,
+              origin,
               created_at: Math.floor(Date.now() / 1000),
               status: 'pending' as const,
               session_type: 'worktree' as Worktree['session_type'],
@@ -2503,6 +2509,7 @@ export function useUpdateProjectSettings() {
       worktreesDir,
       linearApiKey,
       linearTeamId,
+      autoFixSettings,
     }: {
       projectId: string
       name?: string
@@ -2515,6 +2522,7 @@ export function useUpdateProjectSettings() {
       worktreesDir?: string
       linearApiKey?: string
       linearTeamId?: string
+      autoFixSettings?: Project['auto_fix_settings']
       linkedProjectIds?: string[]
     }): Promise<Project> => {
       if (!isTauri()) {
@@ -2538,6 +2546,7 @@ export function useUpdateProjectSettings() {
         worktreesDir,
         linearApiKey,
         linearTeamId,
+        autoFixSettings,
         linkedProjectIds,
       })
       logger.info('Project settings updated', { project })

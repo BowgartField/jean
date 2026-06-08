@@ -12,6 +12,7 @@ import {
   refetchInitialData,
   setAppDataDir,
   hasPreloadedData,
+  listen,
   type InitialData,
 } from '@/lib/transport'
 import { isNativeApp } from '@/lib/environment'
@@ -56,6 +57,13 @@ import {
 import { scheduleIdleWork } from './lib/idle'
 import { isWindows } from './lib/platform'
 import { checkWebClientVersion } from './lib/web-client-version'
+
+interface AutoFixStoppedEvent {
+  projectId: string
+  projectName: string
+  backend: string
+  error: string
+}
 
 /** Loading screen shown while preloading initial data (browser mode only). */
 function WebLoadingScreen() {
@@ -123,6 +131,21 @@ function App() {
   // Holds the update object so the title bar indicator can trigger install later
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const pendingUpdateRef = useRef<any>(null)
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined
+    listen<AutoFixStoppedEvent>('auto-fix:stopped', event => {
+      const { projectName, backend, error } = event.payload
+      toast.error(`Mr. Robot stopped for ${projectName}`, {
+        description: `${backend}: ${error}`,
+        duration: Infinity,
+        closeButton: true,
+      })
+    }).then(fn => {
+      unlisten = fn
+    })
+    return () => unlisten?.()
+  }, [])
 
   const installAppUpdate = useCallback(
     async (update: {

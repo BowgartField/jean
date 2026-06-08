@@ -187,6 +187,7 @@ pub async fn dispatch_command(
             let linear_context = field_opt(&args, "linearContext", "linear_context")?;
             let custom_name = field_opt(&args, "customName", "custom_name")?;
             let auto_open_in_jean = field_opt(&args, "autoOpenInJean", "auto_open_in_jean")?;
+            let origin = field_opt(&args, "origin", "origin")?;
             let result = crate::projects::create_worktree(
                 app.clone(),
                 project_id,
@@ -198,6 +199,7 @@ pub async fn dispatch_command(
                 linear_context,
                 custom_name,
                 auto_open_in_jean,
+                origin,
             )
             .await?;
             // No cache invalidation here — worktree creation uses event-based sync
@@ -239,6 +241,8 @@ pub async fn dispatch_command(
                 field_opt(&args, "linearTeamId", "linear_team_id")?;
             let linked_project_ids: Option<Vec<String>> =
                 field_opt(&args, "linkedProjectIds", "linked_project_ids")?;
+            let auto_fix_settings: Option<Option<crate::projects::types::ProjectAutoFixSettings>> =
+                field_nullable_option(&args, "autoFixSettings", "auto_fix_settings")?;
             let result = crate::projects::update_project_settings(
                 app.clone(),
                 project_id,
@@ -253,6 +257,7 @@ pub async fn dispatch_command(
                 linear_api_key,
                 linear_team_id,
                 linked_project_ids,
+                auto_fix_settings,
             )
             .await?;
             emit_cache_invalidation(app, &["projects"]);
@@ -3056,6 +3061,26 @@ fn field_opt<T: serde::de::DeserializeOwned>(
     from_field_opt(args, snake)
 }
 
+/// Try camelCase field first, then snake_case. For optional nullable fields.
+fn field_nullable_option<T: serde::de::DeserializeOwned>(
+    args: &Value,
+    camel: &str,
+    snake: &str,
+) -> Result<Option<Option<T>>, String> {
+    let (field_name, value) = match args.get(camel).or_else(|| args.get(snake)) {
+        None => return Ok(None),
+        Some(value) if args.get(camel).is_some() => (camel, value),
+        Some(value) => (snake, value),
+    };
+
+    match value {
+        Value::Null => Ok(Some(None)),
+        value => serde_json::from_value(value.clone())
+            .map(|value| Some(Some(value)))
+            .map_err(|e| format!("Invalid field '{field_name}': {e}")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3142,6 +3167,40 @@ mod tests {
                 terminal_id: "term-1".to_string(),
             }
         );
+    }
+
+    #[test]
+    fn field_nullable_option_preserves_missing_null_and_value() {
+        type Settings = crate::projects::types::ProjectAutoFixSettings;
+
+        let missing: Option<Option<Settings>> =
+            field_nullable_option(&json!({}), "autoFixSettings", "auto_fix_settings").unwrap();
+        assert_eq!(missing, None);
+
+        let explicit_null: Option<Option<Settings>> = field_nullable_option(
+            &json!({ "autoFixSettings": null }),
+            "autoFixSettings",
+            "auto_fix_settings",
+        )
+        .unwrap();
+        assert_eq!(explicit_null, Some(None));
+
+        let value: Option<Option<Settings>> = field_nullable_option(
+            &json!({
+                "auto_fix_settings": {
+                    "enabled": true,
+                    "interval_minutes": 30,
+                    "issue_limit": 4,
+                    "max_parallel_worktrees": 2,
+                    "planning_backend": "claude",
+                    "yolo_backend": "codex"
+                }
+            }),
+            "autoFixSettings",
+            "auto_fix_settings",
+        )
+        .unwrap();
+        assert_eq!(value.unwrap().unwrap().issue_limit, 4);
     }
 
     #[test]

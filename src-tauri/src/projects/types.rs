@@ -13,6 +13,37 @@ pub enum SessionType {
     Base,
 }
 
+/// Origin/category for a worktree.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum WorktreeOrigin {
+    Manual,
+    AutoFix,
+}
+
+/// Per-project automated issue fixing settings.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ProjectAutoFixSettings {
+    pub enabled: bool,
+    pub interval_minutes: u64,
+    pub issue_limit: u32,
+    pub max_parallel_worktrees: u32,
+    pub planning_backend: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub planning_model: Option<String>,
+    #[serde(default)]
+    pub auto_yolo_enabled: bool,
+    pub yolo_backend: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub yolo_model: Option<String>,
+    #[serde(default)]
+    pub active_hours_enabled: bool,
+    #[serde(default)]
+    pub active_hours_start: u8, // 0-23 local hour, inclusive
+    #[serde(default)]
+    pub active_hours_end: u8, // 0-23 local hour, exclusive
+}
+
 /// Type of merge operation for merging worktree to base
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -126,6 +157,9 @@ pub struct Project {
     /// IDs of linked projects for cross-project context sharing
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub linked_project_ids: Vec<String>,
+    /// Per-project automated issue fixing settings.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_fix_settings: Option<ProjectAutoFixSettings>,
 }
 
 /// A git worktree created for a project
@@ -231,6 +265,9 @@ pub struct Worktree {
     /// Display order within project (lower = higher in list, base sessions ignore this)
     #[serde(default)]
     pub order: u32,
+    /// Worktree origin/category.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<WorktreeOrigin>,
     /// User-assigned labels with colors (e.g. "In Progress").
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub labels: Vec<LabelData>,
@@ -464,6 +501,8 @@ pub struct WorktreeCreatingEvent {
     pub security_alert_number: Option<u64>,
     /// Advisory GHSA ID (if created from an advisory)
     pub advisory_ghsa_id: Option<String>,
+    /// Worktree origin/category.
+    pub origin: Option<WorktreeOrigin>,
     /// Whether Jean UI should auto-select/open this worktree when events arrive
     pub auto_open_in_jean: bool,
 }
@@ -694,5 +733,55 @@ mod label_tests {
                 { "name": "Pinned", "color": "#22c55e", "pinned": true }
             ])
         );
+    }
+
+    #[test]
+    fn project_auto_fix_settings_round_trip() {
+        let settings = ProjectAutoFixSettings {
+            enabled: true,
+            interval_minutes: 15,
+            issue_limit: 3,
+            max_parallel_worktrees: 2,
+            planning_backend: "claude".to_string(),
+            planning_model: Some("claude-opus-4-8[1m]".to_string()),
+            auto_yolo_enabled: true,
+            yolo_backend: "codex".to_string(),
+            yolo_model: Some("gpt-5.3-codex".to_string()),
+            active_hours_enabled: true,
+            active_hours_start: 20,
+            active_hours_end: 8,
+        };
+
+        let json = serde_json::to_string(&settings).unwrap();
+        assert!(json.contains("\"interval_minutes\":15"));
+        let parsed: ProjectAutoFixSettings = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed.issue_limit, 3);
+        assert!(parsed.auto_yolo_enabled);
+        assert_eq!(parsed.yolo_backend, "codex");
+    }
+
+    #[test]
+    fn project_auto_fix_settings_default_to_plan_only() {
+        let json = serde_json::json!({
+            "enabled": true,
+            "interval_minutes": 15,
+            "issue_limit": 3,
+            "max_parallel_worktrees": 2,
+            "planning_backend": "claude",
+            "yolo_backend": "codex"
+        });
+
+        let parsed: ProjectAutoFixSettings = serde_json::from_value(json).unwrap();
+
+        assert!(!parsed.auto_yolo_enabled);
+    }
+
+    #[test]
+    fn worktree_origin_serializes_as_auto_fix() {
+        let origin = WorktreeOrigin::AutoFix;
+        let json = serde_json::to_string(&origin).unwrap();
+
+        assert_eq!(json, "\"auto_fix\"");
     }
 }

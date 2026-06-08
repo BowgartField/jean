@@ -39,11 +39,11 @@ use super::release_notes::{
 };
 use super::storage::{get_project_worktrees_dir, load_projects_data, save_projects_data};
 use super::types::{
-    JeanConfig, MergeType, Project, SessionType, Worktree, WorktreeArchivedEvent,
-    WorktreeBranchExistsEvent, WorktreeCreateErrorEvent, WorktreeCreatedEvent,
-    WorktreeCreatingEvent, WorktreeDeleteErrorEvent, WorktreeDeletedEvent, WorktreeDeletingEvent,
-    WorktreePathExistsEvent, WorktreePermanentlyDeletedEvent, WorktreeSetupCompleteEvent,
-    WorktreeUnarchivedEvent,
+    JeanConfig, MergeType, Project, ProjectAutoFixSettings, SessionType, Worktree,
+    WorktreeArchivedEvent, WorktreeBranchExistsEvent, WorktreeCreateErrorEvent,
+    WorktreeCreatedEvent, WorktreeCreatingEvent, WorktreeDeleteErrorEvent, WorktreeDeletedEvent,
+    WorktreeDeletingEvent, WorktreeOrigin, WorktreePathExistsEvent,
+    WorktreePermanentlyDeletedEvent, WorktreeSetupCompleteEvent, WorktreeUnarchivedEvent,
 };
 use crate::chat::types::LabelData;
 use crate::claude_cli::resolve_cli_binary;
@@ -496,6 +496,7 @@ pub async fn add_project(
         linear_api_key: None,
         linear_team_id: None,
         linked_project_ids: Vec::new(),
+        auto_fix_settings: None,
     };
 
     data.add_project(project.clone());
@@ -654,6 +655,7 @@ pub async fn init_project(
         linear_api_key: None,
         linear_team_id: None,
         linked_project_ids: Vec::new(),
+        auto_fix_settings: None,
     };
 
     data.add_project(project.clone());
@@ -709,6 +711,7 @@ pub async fn clone_project(
         linear_api_key: None,
         linear_team_id: None,
         linked_project_ids: Vec::new(),
+        auto_fix_settings: None,
     };
 
     data.add_project(project.clone());
@@ -1000,6 +1003,7 @@ fn truncate_utf8(input: &str, max_bytes: usize) -> (String, bool) {
 /// - `worktree:created` - Emitted when creation completes successfully
 /// - `worktree:error` - Emitted if creation fails
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn create_worktree(
     app: AppHandle,
     project_id: String,
@@ -1011,10 +1015,12 @@ pub async fn create_worktree(
     linear_context: Option<LinearIssueContext>,
     custom_name: Option<String>,
     auto_open_in_jean: Option<bool>,
+    origin: Option<String>,
 ) -> Result<Worktree, String> {
     log::trace!("Creating worktree for project: {project_id}");
 
     let auto_open_in_jean = auto_open_in_jean.unwrap_or(true);
+    let worktree_origin = parse_worktree_origin(origin.as_deref())?;
 
     let data = load_projects_data(&app)?;
 
@@ -1151,6 +1157,7 @@ pub async fn create_worktree(
         issue_number: issue_context.as_ref().map(|ctx| ctx.number as u64),
         security_alert_number: security_context.as_ref().map(|ctx| ctx.number as u64),
         advisory_ghsa_id: advisory_context.as_ref().map(|ctx| ctx.ghsa_id.clone()),
+        origin: worktree_origin.clone(),
         auto_open_in_jean,
     };
     if let Err(e) = app.emit_all("worktree:creating", &creating_event) {
@@ -1198,6 +1205,7 @@ pub async fn create_worktree(
         pr_push_remote: None,
         pr_push_branch: None,
         order: 0, // Placeholder, actual order is set in background thread
+        origin: worktree_origin.clone(),
         archived_at: None,
         labels: Vec::new(),
         label: None,
@@ -1218,6 +1226,7 @@ pub async fn create_worktree(
     let security_context_clone = security_context.clone();
     let advisory_context_clone = advisory_context.clone();
     let linear_context_clone = linear_context.clone();
+    let worktree_origin_clone = worktree_origin.clone();
 
     // Spawn background thread for git operations
     thread::spawn(move || {
@@ -1754,6 +1763,7 @@ pub async fn create_worktree(
                     pr_push_remote: None,
                     pr_push_branch: None,
                     order: max_order + 1,
+                    origin: worktree_origin_clone.clone(),
                     archived_at: None,
                     labels: Vec::new(),
                     label: None,
@@ -1860,6 +1870,15 @@ pub async fn create_worktree(
     Ok(pending_worktree)
 }
 
+fn parse_worktree_origin(origin: Option<&str>) -> Result<Option<WorktreeOrigin>, String> {
+    match origin {
+        Some("auto_fix") => Ok(Some(WorktreeOrigin::AutoFix)),
+        Some("manual") => Ok(Some(WorktreeOrigin::Manual)),
+        None => Ok(None),
+        Some(other) => Err(format!("Unsupported worktree origin: {other}")),
+    }
+}
+
 /// Create a worktree from an existing branch (runs in background)
 ///
 /// This command is used when a branch already exists and the user wants to
@@ -1917,6 +1936,7 @@ pub async fn create_worktree_from_existing_branch(
         issue_number: issue_context.as_ref().map(|ctx| ctx.number as u64),
         security_alert_number: security_context.as_ref().map(|ctx| ctx.number as u64),
         advisory_ghsa_id: advisory_context.as_ref().map(|ctx| ctx.ghsa_id.clone()),
+        origin: None,
         auto_open_in_jean,
     };
     if let Err(e) = app.emit_all("worktree:creating", &creating_event) {
@@ -1964,6 +1984,7 @@ pub async fn create_worktree_from_existing_branch(
         pr_push_remote: None,
         pr_push_branch: None,
         order: 0, // Placeholder, actual order is set in background thread
+        origin: None,
         archived_at: None,
         labels: Vec::new(),
         label: None,
@@ -2352,6 +2373,7 @@ pub async fn create_worktree_from_existing_branch(
                     pr_push_remote: None,
                     pr_push_branch: None,
                     order: max_order + 1,
+                    origin: None,
                     archived_at: None,
                     labels: Vec::new(),
                     label: None,
@@ -2543,6 +2565,7 @@ pub async fn checkout_pr(
         issue_number: None,
         security_alert_number: None,
         advisory_ghsa_id: None,
+        origin: None,
         auto_open_in_jean: true,
     };
     if let Err(e) = app.emit_all("worktree:creating", &creating_event) {
@@ -2587,6 +2610,7 @@ pub async fn checkout_pr(
         pr_push_remote: None,
         pr_push_branch: None,
         order: 0, // Will be updated in background thread
+        origin: None,
         archived_at: None,
         labels: Vec::new(),
         label: None,
@@ -2911,6 +2935,7 @@ pub async fn checkout_pr(
                     pr_push_remote: None,
                     pr_push_branch: None,
                     order: max_order + 1,
+                    origin: None,
                     archived_at: None,
                     labels: Vec::new(),
                     label: None,
@@ -3249,6 +3274,7 @@ pub async fn create_base_session(app: AppHandle, project_id: String) -> Result<W
         pr_push_remote: None,
         pr_push_branch: None,
         order: 0, // Base sessions are always first
+        origin: None,
         archived_at: None,
         labels: Vec::new(),
         label: None,
@@ -3663,6 +3689,7 @@ pub async fn import_worktree(
         pr_push_remote: None,
         pr_push_branch: None,
         order: max_order + 1,
+        origin: None,
         archived_at: None,
         labels: Vec::new(),
         label: None,
@@ -4707,6 +4734,7 @@ pub async fn update_project_settings(
     linear_api_key: Option<String>,
     linear_team_id: Option<String>,
     linked_project_ids: Option<Vec<String>>,
+    auto_fix_settings: Option<Option<ProjectAutoFixSettings>>,
 ) -> Result<Project, String> {
     log::trace!("Updating settings for project: {project_id}");
 
@@ -4784,6 +4812,11 @@ pub async fn update_project_settings(
         } else {
             Some(team_id)
         };
+    }
+
+    if let Some(settings) = auto_fix_settings {
+        log::trace!("Updating Mr. Robot settings: {settings:?}");
+        project.auto_fix_settings = settings;
     }
 
     // Handle linked_project_ids with bidirectional sync
@@ -10000,6 +10033,7 @@ pub async fn create_folder(
         linear_api_key: None,
         linear_team_id: None,
         linked_project_ids: Vec::new(),
+        auto_fix_settings: None,
     };
 
     data.add_project(folder.clone());
@@ -11119,6 +11153,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn parse_worktree_origin_preserves_manual_origin() {
+        assert_eq!(
+            parse_worktree_origin(Some("manual")),
+            Ok(Some(WorktreeOrigin::Manual))
+        );
+    }
+
+    #[test]
     fn extract_json_object_plain() {
         let out = extract_json_object_from_text(r#"{"title":"a","body":"b"}"#).unwrap();
         assert_eq!(out, r#"{"title":"a","body":"b"}"#);
@@ -11295,6 +11337,7 @@ mod tests {
             linear_api_key: None,
             linear_team_id: None,
             linked_project_ids: Vec::new(),
+            auto_fix_settings: None,
         };
 
         attach_default_avatar(&mut project);
