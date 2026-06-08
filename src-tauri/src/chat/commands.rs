@@ -34,15 +34,6 @@ use crate::projects::types::SessionType;
 const QUEUE_DEFAULT_ALLOWED_TOOLS: [&str; 4] = ["Bash(git:*)", "Read", "Glob", "Grep"];
 const IMAGE_ONLY_DEFAULT_PROMPT: &str = "Please check this image and tell me what is wrong.";
 const TEXT_ONLY_DEFAULT_PROMPT: &str = "Please check the attached text as reference.";
-const CODEX_DEFAULT_PLAN_MODE_PROMPT: &str = "\
-## Plan Mode
-
-- Make the plan extremely concise. Sacrifice grammar for the sake of concision.
-- In planning mode, use the backend's native plan tool/UI call when available (Claude ExitPlanMode, Codex update_plan/CodexPlan, Cursor/OpenCode equivalent), not plain text only.
-- For unresolved questions in plan mode, prefer the backend-native interactive question UI instead of plain text when available: Claude AskUserQuestion, Codex request_user_input, OpenCode question.
-- For Codex specifically: after the user answers native `request_user_input`/open questions in plan mode, immediately call `update_plan`/emit `CodexPlan` again with the revised plan before any implementation.
-- Every Codex plan-mode response that contains or revises a plan must use `update_plan`/`CodexPlan`; do not provide plain-text-only plans.
-- Use a plain-text Unresolved Questions section only for non-actionable notes or when the backend cannot ask interactively.";
 const CODEX_DEFAULT_NOT_PLAN_MODE_PROMPT: &str = "\
 ## Not Plan Mode
 
@@ -91,12 +82,8 @@ fn codex_execution_mode_instruction(execution_mode: Option<&str>) -> Option<&'st
     }
 }
 
-fn codex_default_global_system_prompt(execution_mode: Option<&str>) -> String {
-    if execution_mode.unwrap_or("plan") == "plan" {
-        format!("{CODEX_DEFAULT_PLAN_MODE_PROMPT}\n\n{CODEX_DEFAULT_NOT_PLAN_MODE_PROMPT}")
-    } else {
-        CODEX_DEFAULT_NOT_PLAN_MODE_PROMPT.to_string()
-    }
+fn codex_default_global_system_prompt(_execution_mode: Option<&str>) -> String {
+    CODEX_DEFAULT_NOT_PLAN_MODE_PROMPT.to_string()
 }
 
 /// Resolve the default backend from preferences + project settings (sync).
@@ -2630,20 +2617,6 @@ pub async fn send_chat_message(
                     use crate::projects::storage::load_projects_data;
 
                     let mut system_prompt_parts: Vec<String> = Vec::new();
-
-                    // Codex plan mode: inject planning-only instructions
-                    if thread_execution_mode.as_deref() == Some("plan") {
-                        system_prompt_parts.push(
-                            "You are in PLANNING MODE (read-only sandbox). Create a detailed implementation plan. \
-                             Do NOT attempt to make any file changes — you are running in a read-only sandbox and writes will fail. \
-                             Describe exactly what changes you WOULD make: which files to create/modify, \
-                             what code to write, and in what order. Every plan-mode response that contains or revises a plan must call update_plan/emit CodexPlan; never provide a plain-text-only plan. \
-                             For unresolved questions, prefer Codex native request_user_input so Jean can render interactive question cards when the tool is available. \
-                             After the user answers request_user_input/open questions, immediately call update_plan/emit CodexPlan again with the revised plan before any implementation. \
-                             Use plain-text Unresolved Questions only for non-actionable notes or if request_user_input is unavailable."
-                                .to_string(),
-                        );
-                    }
 
                     if let Some(mode_instruction) =
                         codex_execution_mode_instruction(thread_execution_mode.as_deref())
@@ -7366,15 +7339,21 @@ mod tests {
     }
 
     #[test]
-    fn test_codex_default_prompt_includes_plan_rules_only_in_plan_mode() {
+    fn test_codex_default_prompt_does_not_inject_plan_mode_rules() {
         let plan_prompt = codex_default_global_system_prompt(Some("plan"));
-        assert!(plan_prompt.contains("## Plan Mode"));
-        assert!(plan_prompt.contains("update_plan"));
-        assert!(plan_prompt.contains("CodexPlan"));
+        assert!(!plan_prompt.contains("## Plan Mode"));
+        assert!(!plan_prompt.contains("PLANNING MODE"));
+        assert!(!plan_prompt.contains("Do NOT attempt to make any file changes"));
+        assert!(!plan_prompt.contains("update_plan"));
+        assert!(!plan_prompt.contains("CodexPlan"));
         assert!(plan_prompt.contains("## Not Plan Mode"));
+        assert!(plan_prompt.contains("Jean Worktree Policy"));
+        assert!(plan_prompt.contains("VERY IMPORTANT: Keep Code Simple"));
 
         let build_prompt = codex_default_global_system_prompt(Some("build"));
         assert!(!build_prompt.contains("## Plan Mode"));
+        assert!(!build_prompt.contains("PLANNING MODE"));
+        assert!(!build_prompt.contains("Do NOT attempt to make any file changes"));
         assert!(!build_prompt.contains("update_plan"));
         assert!(!build_prompt.contains("CodexPlan"));
         assert!(build_prompt.contains("## Not Plan Mode"));
@@ -7388,6 +7367,8 @@ mod tests {
 
         let yolo_prompt = codex_default_global_system_prompt(Some("yolo"));
         assert!(!yolo_prompt.contains("## Plan Mode"));
+        assert!(!yolo_prompt.contains("PLANNING MODE"));
+        assert!(!yolo_prompt.contains("Do NOT attempt to make any file changes"));
         assert!(!yolo_prompt.contains("update_plan"));
         assert!(!yolo_prompt.contains("CodexPlan"));
         assert!(yolo_prompt.contains("## Not Plan Mode"));
