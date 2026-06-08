@@ -21,10 +21,12 @@ import {
 import { usePatchPreferences, usePreferences } from '@/services/preferences'
 import { useAvailableOpencodeModels } from '@/services/opencode-cli'
 import { useAvailableCursorModels } from '@/services/cursor-cli'
+import { useAvailableCommandCodeModels } from '@/services/commandcode-cli'
 import { cn } from '@/lib/utils'
 import {
   getBackendIcon,
   getBackendPlainLabel,
+  isBetaBackend,
 } from '@/components/ui/backend-label'
 import {
   formatCursorModelLabel,
@@ -128,6 +130,9 @@ export function BackendModelPickerContent({
   const { data: availableCursorModels } = useAvailableCursorModels({
     enabled: installedBackends.includes('cursor'),
   })
+  const { data: availableCommandCodeModels } = useAvailableCommandCodeModels({
+    enabled: installedBackends.includes('commandcode'),
+  })
 
   const opencodeModelOptions = useMemo(
     () =>
@@ -145,6 +150,14 @@ export function BackendModelPickerContent({
       })),
     [availableCursorModels]
   )
+  const commandcodeModelOptions = useMemo(
+    () =>
+      availableCommandCodeModels?.map(model => ({
+        value: `commandcode/${model.id}`,
+        label: model.label,
+      })),
+    [availableCommandCodeModels]
+  )
 
   const { backendModelSections } = useToolbarDerivedState({
     selectedBackend,
@@ -152,6 +165,7 @@ export function BackendModelPickerContent({
     selectedModel,
     opencodeModelOptions,
     cursorModelOptions,
+    commandcodeModelOptions,
     customCliProfiles,
     installedBackends,
   })
@@ -203,7 +217,25 @@ export function BackendModelPickerContent({
       if (favoriteSet.has(favKey(activeBackend, opt.value))) favs.push(opt)
       else rest.push(opt)
     }
-    return [...favs, ...rest]
+    const result = [...favs, ...rest]
+    if (activeBackend === 'commandcode') {
+      const rawQuery = search.trim()
+      if (rawQuery) {
+        const suffix = rawQuery.startsWith('commandcode/')
+          ? rawQuery.slice('commandcode/'.length).trim()
+          : rawQuery
+        if (!suffix) return result
+        const customValue = `commandcode/${suffix}`
+        const customExists = result.some(option => option.value === customValue)
+        if (!customExists) {
+          result.unshift({
+            value: customValue,
+            label: `Use Command Code model "${rawQuery}"`,
+          })
+        }
+      }
+    }
+    return result
   }, [activeBackend, activeSection, favKey, favoriteSet, search])
 
   const getOptionCommandValue = useCallback(
@@ -627,7 +659,7 @@ function SidebarBackends({
                     {index + 1}
                   </span>
                 )}
-                {backend === 'cursor' && (
+                {isBetaBackend(backend) && (
                   <span
                     aria-hidden
                     className="absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-yellow-500"

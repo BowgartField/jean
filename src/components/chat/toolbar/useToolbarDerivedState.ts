@@ -7,18 +7,26 @@ import {
 import {
   CODEX_MODEL_OPTIONS,
   CURSOR_MODEL_OPTIONS,
+  COMMANDCODE_MODEL_OPTIONS,
   MODEL_OPTIONS,
   OPENCODE_MODEL_OPTIONS,
 } from '@/components/chat/toolbar/toolbar-options'
 
 interface UseToolbarDerivedStateArgs {
-  selectedBackend: 'claude' | 'codex' | 'opencode' | 'cursor'
+  selectedBackend: 'claude' | 'codex' | 'opencode' | 'cursor' | 'commandcode'
   selectedProvider: string | null
   selectedModel: string
   opencodeModelOptions?: { value: string; label: string }[]
   cursorModelOptions?: { value: string; label: string }[]
+  commandcodeModelOptions?: { value: string; label: string }[]
   customCliProfiles: CustomCliProfile[]
-  installedBackends?: ('claude' | 'codex' | 'opencode' | 'cursor')[]
+  installedBackends?: (
+    | 'claude'
+    | 'codex'
+    | 'opencode'
+    | 'cursor'
+    | 'commandcode'
+  )[]
   availableMcpServers?: { name: string; disabled?: boolean }[]
   enabledMcpServers?: string[]
 }
@@ -29,14 +37,16 @@ export function useToolbarDerivedState({
   selectedModel,
   opencodeModelOptions,
   cursorModelOptions,
+  commandcodeModelOptions,
   customCliProfiles,
-  installedBackends = ['claude', 'codex', 'opencode', 'cursor'],
+  installedBackends = ['claude', 'codex', 'opencode', 'cursor', 'commandcode'],
   availableMcpServers = [],
   enabledMcpServers = [],
 }: UseToolbarDerivedStateArgs) {
   const isCodex = selectedBackend === 'codex'
   const isOpencode = selectedBackend === 'opencode'
   const isCursor = selectedBackend === 'cursor'
+  const isCommandCode = selectedBackend === 'commandcode'
 
   const activeMcpCount = useMemo(() => {
     const availableNames = new Set(
@@ -84,10 +94,12 @@ export function useToolbarDerivedState({
   const resolvedOpencodeModelOptions =
     opencodeModelOptions ?? OPENCODE_MODEL_OPTIONS
   const resolvedCursorModelOptions = cursorModelOptions ?? CURSOR_MODEL_OPTIONS
+  const resolvedCommandCodeModelOptions =
+    commandcodeModelOptions ?? COMMANDCODE_MODEL_OPTIONS
 
   const backendModelSections = useMemo(() => {
     const sections: {
-      backend: 'claude' | 'codex' | 'opencode' | 'cursor'
+      backend: 'claude' | 'codex' | 'opencode' | 'cursor' | 'commandcode'
       label: string
       options: { value: string; label: string }[]
     }[] = []
@@ -117,6 +129,12 @@ export function useToolbarDerivedState({
           label: 'Cursor',
           options: resolvedCursorModelOptions,
         })
+      } else if (backend === 'commandcode') {
+        sections.push({
+          backend,
+          label: 'Command Code',
+          options: resolvedCommandCodeModelOptions,
+        })
       }
     }
 
@@ -126,6 +144,7 @@ export function useToolbarDerivedState({
     codexModelOptions,
     installedBackends,
     resolvedCursorModelOptions,
+    resolvedCommandCodeModelOptions,
     resolvedOpencodeModelOptions,
   ])
 
@@ -133,13 +152,16 @@ export function useToolbarDerivedState({
     if (isCodex) return codexModelOptions
     if (isOpencode) return resolvedOpencodeModelOptions
     if (isCursor) return resolvedCursorModelOptions
+    if (isCommandCode) return resolvedCommandCodeModelOptions
     return claudeModelOptions
   }, [
     claudeModelOptions,
     codexModelOptions,
     isCodex,
     isCursor,
+    isCommandCode,
     isOpencode,
+    resolvedCommandCodeModelOptions,
     resolvedCursorModelOptions,
     resolvedOpencodeModelOptions,
   ])
@@ -156,11 +178,13 @@ export function useToolbarDerivedState({
   return {
     isCodex,
     isCursor,
+    isCommandCode,
     isOpencode,
     activeMcpCount,
     backendModelSections,
     claudeModelOptions,
     cursorModelOptions: resolvedCursorModelOptions,
+    commandcodeModelOptions: resolvedCommandCodeModelOptions,
     filteredModelOptions,
     opencodeModelOptions: resolvedOpencodeModelOptions,
     selectedModelLabel,

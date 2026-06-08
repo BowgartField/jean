@@ -13,6 +13,7 @@ import {
 import { getModelFastInfo, type CustomCliProfile } from '@/types/preferences'
 import { useAvailableOpencodeModels } from '@/services/opencode-cli'
 import { useAvailableCursorModels } from '@/services/cursor-cli'
+import { useAvailableCommandCodeModels } from '@/services/commandcode-cli'
 import { cn } from '@/lib/utils'
 import { Kbd } from '@/components/ui/kbd'
 import { BackendLabel } from '@/components/ui/backend-label'
@@ -30,14 +31,20 @@ interface DesktopBackendModelPickerProps {
   sessionHasMessages?: boolean
   providerLocked?: boolean
   triggerClassName?: string
-  selectedBackend: 'claude' | 'codex' | 'opencode' | 'cursor'
+  selectedBackend: 'claude' | 'codex' | 'opencode' | 'cursor' | 'commandcode'
   selectedModel: string
   selectedProvider: string | null
-  installedBackends: ('claude' | 'codex' | 'opencode' | 'cursor')[]
+  installedBackends: (
+    | 'claude'
+    | 'codex'
+    | 'opencode'
+    | 'cursor'
+    | 'commandcode'
+  )[]
   customCliProfiles: CustomCliProfile[]
   onModelChange: (model: string) => void
   onBackendModelChange: (
-    backend: 'claude' | 'codex' | 'opencode' | 'cursor',
+    backend: 'claude' | 'codex' | 'opencode' | 'cursor' | 'commandcode',
     model: string
   ) => void
 }
@@ -69,6 +76,9 @@ export function DesktopBackendModelPicker({
   const { data: availableCursorModels } = useAvailableCursorModels({
     enabled: installedBackends.includes('cursor'),
   })
+  const { data: availableCommandCodeModels } = useAvailableCommandCodeModels({
+    enabled: installedBackends.includes('commandcode'),
+  })
 
   const opencodeModelOptions = useMemo(
     () =>
@@ -86,6 +96,14 @@ export function DesktopBackendModelPicker({
       })),
     [availableCursorModels]
   )
+  const commandcodeModelOptions = useMemo(
+    () =>
+      availableCommandCodeModels?.map(model => ({
+        value: `commandcode/${model.id}`,
+        label: model.label,
+      })),
+    [availableCommandCodeModels]
+  )
 
   const { backendModelSections, selectedModelLabel } = useToolbarDerivedState({
     selectedBackend,
@@ -93,6 +111,7 @@ export function DesktopBackendModelPicker({
     selectedModel,
     opencodeModelOptions,
     cursorModelOptions,
+    commandcodeModelOptions,
     customCliProfiles,
     installedBackends,
   })

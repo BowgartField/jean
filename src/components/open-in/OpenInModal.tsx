@@ -255,7 +255,13 @@ export function OpenInModal() {
     }
 
     return items
-  }, [loadedPRs, loadedIssues, loadedSecurityAlerts, loadedAdvisories, worktree])
+  }, [
+    loadedPRs,
+    loadedIssues,
+    loadedSecurityAlerts,
+    loadedAdvisories,
+    worktree,
+  ])
 
   useEffect(() => {
     if (!openInModalOpen) {

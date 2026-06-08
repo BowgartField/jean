@@ -127,11 +127,11 @@ export function getPinnedWorktreeLabelTabs(
     const seenOnWorktree = new Set<string>()
     for (const label of getWorktreeLabels(worktree)) {
       const key = label.name.toLowerCase()
-      if (!tabs.has(key) || seenOnWorktree.has(key)) continue
+      const tab = tabs.get(key)
+      if (!tab || seenOnWorktree.has(key)) continue
 
       seenOnWorktree.add(key)
-      const tab = tabs.get(key)
-      if (tab) tab.count += 1
+      tab.count += 1
     }
   }
 

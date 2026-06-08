@@ -253,8 +253,8 @@ function OnboardingDialogContent() {
     }
 
     setHistoryStack(h => {
-      if (h.length === 0) return h
-      const prev = h[h.length - 1]!
+      const prev = h.at(-1)
+      if (!prev) return h
       dbg('step: BACK', stepRef.current, '→', prev)
       // Reset transient per-CLI state so the user lands on a fresh screen
       // (re-shows the path/Jean-managed picker, clears any prior install error).
@@ -487,7 +487,12 @@ function OnboardingDialogContent() {
     })
 
     // On Windows, show WSL mode selection first if not yet chosen
-    if (isWindows && preferences && !preferences.wsl_mode_chosen && !onboardingStartStep) {
+    if (
+      isWindows &&
+      preferences &&
+      !preferences.wsl_mode_chosen &&
+      !onboardingStartStep
+    ) {
       dbg('init effect: Windows + WSL not chosen → wsl-setup')
       queueMicrotask(() => setStep('wsl-setup', { replace: true }))
       return
@@ -528,7 +533,9 @@ function OnboardingDialogContent() {
     // can change their WSL/native choice, then backend-select (via Continue
     // on the WSL step). Non-Windows goes straight to backend-select.
     if (onboardingManuallyTriggered) {
-      const firstStep: OnboardingStep = isWindows ? 'wsl-setup' : 'backend-select'
+      const firstStep: OnboardingStep = isWindows
+        ? 'wsl-setup'
+        : 'backend-select'
       dbg('init effect: manual trigger →', firstStep)
       queueMicrotask(() => setStep(firstStep, { replace: true }))
       return
@@ -788,7 +795,13 @@ function OnboardingDialogContent() {
         },
       }
     )
-  }, [preferences, patchPreferences, claudeSetup.status?.installed, claudeAuth, setStep])
+  }, [
+    preferences,
+    patchPreferences,
+    claudeSetup.status?.installed,
+    claudeAuth,
+    setStep,
+  ])
 
   const handleClaudePathSelect = useCallback(() => {
     dbg('handleClaudePathSelect: saving claude_cli_source=path')
@@ -832,7 +845,13 @@ function OnboardingDialogContent() {
         },
       }
     )
-  }, [preferences, patchPreferences, codexSetup.status?.installed, codexAuth, setStep])
+  }, [
+    preferences,
+    patchPreferences,
+    codexSetup.status?.installed,
+    codexAuth,
+    setStep,
+  ])
 
   const handleOpencodeJeanSelect = useCallback(() => {
     dbg('handleOpencodeJeanSelect: saving opencode_cli_source=jean')
@@ -854,7 +873,13 @@ function OnboardingDialogContent() {
         },
       }
     )
-  }, [preferences, patchPreferences, opencodeSetup.status?.installed, opencodeAuth, setStep])
+  }, [
+    preferences,
+    patchPreferences,
+    opencodeSetup.status?.installed,
+    opencodeAuth,
+    setStep,
+  ])
 
   const handleGhJeanSelect = useCallback(() => {
     dbg('handleGhJeanSelect: saving gh_cli_source=jean')
@@ -876,7 +901,13 @@ function OnboardingDialogContent() {
         },
       }
     )
-  }, [preferences, patchPreferences, ghSetup.status?.installed, ghAuth, setStep])
+  }, [
+    preferences,
+    patchPreferences,
+    ghSetup.status?.installed,
+    ghAuth,
+    setStep,
+  ])
 
   const handleCodexPathSelect = useCallback(() => {
     dbg('handleCodexPathSelect: saving codex_cli_source=path')

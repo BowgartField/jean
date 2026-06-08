@@ -161,6 +161,7 @@ const LinkedProjectsModal = lazy(() =>
     default: mod.LinkedProjectsModal,
   }))
 )
+const EMPTY_PINNED_LABELS: LabelData[] = []
 import type { DiffRequest } from '@/types/git-diff'
 import { toast } from 'sonner'
 import {
@@ -880,7 +881,9 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
       state.projectCanvasSettings[projectId]?.worktreeSortMode ?? 'created'
   )
   const projectPinnedLabels = useProjectsStore(
-    state => state.projectCanvasSettings[projectId]?.pinnedLabels ?? []
+    state =>
+      state.projectCanvasSettings[projectId]?.pinnedLabels ??
+      EMPTY_PINNED_LABELS
   )
 
   // Project action mutations

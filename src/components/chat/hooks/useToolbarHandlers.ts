@@ -1,9 +1,10 @@
 import { useCallback, type RefObject } from 'react'
 import { invoke } from '@/lib/transport'
-import { useChatStore, DEFAULT_MODEL } from '@/store/chat-store'
+import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
 import { useProjectsStore } from '@/store/projects-store'
 import { chatQueryKeys } from '@/services/chat'
+import { resolveDefaultModelForBackend } from '@/lib/session-defaults'
 import type { QueryClient } from '@tanstack/react-query'
 import type {
   ThinkingLevel,
@@ -22,8 +23,14 @@ interface UseToolbarHandlersParams {
   activeWorktreeIdRef: RefObject<string | null | undefined>
   activeWorktreePathRef: RefObject<string | null | undefined>
   enabledMcpServersRef: RefObject<string[]>
-  selectedBackend: 'claude' | 'codex' | 'opencode' | 'cursor'
-  installedBackends: ('claude' | 'codex' | 'opencode' | 'cursor')[]
+  selectedBackend: 'claude' | 'codex' | 'opencode' | 'cursor' | 'commandcode'
+  installedBackends: (
+    | 'claude'
+    | 'codex'
+    | 'opencode'
+    | 'cursor'
+    | 'commandcode'
+  )[]
   session: Session | null | undefined
   preferences:
     | {
@@ -31,6 +38,7 @@ interface UseToolbarHandlersParams {
         selected_codex_model?: string
         selected_opencode_model?: string
         selected_cursor_model?: string
+        selected_commandcode_model?: string
         custom_cli_profiles?: { name: string }[]
         default_execution_mode?: ExecutionMode
       }
@@ -80,7 +88,10 @@ export function useToolbarHandlers({
   setLoadContextModalOpen,
 }: UseToolbarHandlersParams) {
   const persistToolbarBackendAndModel = useCallback(
-    (backend: 'claude' | 'codex' | 'opencode' | 'cursor', model: string) => {
+    (
+      backend: 'claude' | 'codex' | 'opencode' | 'cursor' | 'commandcode',
+      model: string
+    ) => {
       const currentMode =
         (activeSessionId
           ? useChatStore.getState().executionModes[activeSessionId]
@@ -201,15 +212,8 @@ export function useToolbarHandlers({
   )
 
   const handleToolbarBackendChange = useCallback(
-    (backend: 'claude' | 'codex' | 'opencode' | 'cursor') => {
-      const model =
-        backend === 'codex'
-          ? (preferences?.selected_codex_model ?? 'gpt-5.5')
-          : backend === 'opencode'
-            ? (preferences?.selected_opencode_model ?? 'opencode/gpt-5.3-codex')
-            : backend === 'cursor'
-              ? (preferences?.selected_cursor_model ?? 'cursor/auto')
-              : ((preferences?.selected_model as string) ?? DEFAULT_MODEL)
+    (backend: 'claude' | 'codex' | 'opencode' | 'cursor' | 'commandcode') => {
+      const model = resolveDefaultModelForBackend(backend, preferences)
 
       persistToolbarBackendAndModel(backend, model)
     },
@@ -217,13 +221,17 @@ export function useToolbarHandlers({
       persistToolbarBackendAndModel,
       preferences?.selected_codex_model,
       preferences?.selected_cursor_model,
+      preferences?.selected_commandcode_model,
       preferences?.selected_model,
       preferences?.selected_opencode_model,
     ]
   )
 
   const handleToolbarBackendModelChange = useCallback(
-    (backend: 'claude' | 'codex' | 'opencode' | 'cursor', model: string) => {
+    (
+      backend: 'claude' | 'codex' | 'opencode' | 'cursor' | 'commandcode',
+      model: string
+    ) => {
       persistToolbarBackendAndModel(backend, model)
     },
     [persistToolbarBackendAndModel]

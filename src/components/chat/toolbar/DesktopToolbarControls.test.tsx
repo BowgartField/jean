@@ -165,6 +165,21 @@ describe('DesktopToolbarControls', () => {
     expect(screen.getByRole('button', { name: /magic/i })).toBeDisabled()
   })
 
+  it('hides reasoning control for Command Code on desktop', () => {
+    renderDesktopToolbarControls({
+      selectedBackend: 'commandcode',
+      selectedModel: 'commandcode/default',
+      isCodex: false,
+      useAdaptiveThinking: false,
+      hideThinkingLevel: false,
+    })
+
+    expect(
+      screen.queryByRole('button', { name: /think/i })
+    ).not.toBeInTheDocument()
+    expect(screen.queryByText('Effort')).not.toBeInTheDocument()
+  })
+
   it('hides Claude-only Max and Ultracode effort for Codex', () => {
     renderDesktopToolbarControls({
       isCodex: true,

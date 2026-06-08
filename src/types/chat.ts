@@ -35,9 +35,9 @@ export type EffortLevel =
   | 'ultracode'
 
 /**
- * Backend for a chat session (Claude CLI, Codex CLI, OpenCode, or Cursor)
+ * Backend for a chat session (Claude CLI, Codex CLI, OpenCode, Cursor, or Command Code)
  */
-export type Backend = 'claude' | 'codex' | 'opencode' | 'cursor'
+export type Backend = 'claude' | 'codex' | 'opencode' | 'cursor' | 'commandcode'
 
 /**
  * Execution mode for Claude CLI permission handling
@@ -208,6 +208,8 @@ export interface Session {
   opencode_session_id?: string
   /** Cursor chat ID for resuming conversations */
   cursor_chat_id?: string
+  /** Command Code uses standalone headless invocations; stores no native resume id */
+  commandcode_session_id?: string
   /** Selected model for this session */
   selected_model?: string
   /** Selected thinking level for this session */

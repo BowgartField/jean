@@ -189,6 +189,28 @@ describe('MobileSettingsMenu', () => {
     expect(screen.queryByText('Linked')).not.toBeInTheDocument()
   })
 
+  it('hides reasoning control for Command Code in mobile settings', async () => {
+    const user = userEvent.setup()
+
+    render(
+      <MobileSettingsMenu
+        {...baseProps}
+        selectedBackend="commandcode"
+        backendModelLabel="Command Code · CLI default"
+        backendModelLabelText="Command Code · CLI default"
+        useAdaptiveThinking={false}
+        isCodex={false}
+        hideThinkingLevel={false}
+      />
+    )
+
+    await user.click(screen.getByRole('button', { name: /settings/i }))
+
+    expect(screen.getByText('Model')).toBeInTheDocument()
+    expect(screen.queryByText('Thinking')).not.toBeInTheDocument()
+    expect(screen.queryByText('Effort')).not.toBeInTheDocument()
+  })
+
   it('hides Claude-only Max and Ultracode effort for Codex', async () => {
     const user = userEvent.setup()
 

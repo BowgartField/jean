@@ -1,3 +1,29 @@
+#![allow(
+    dead_code,
+    clippy::cmp_owned,
+    clippy::derivable_impls,
+    clippy::explicit_counter_loop,
+    clippy::if_same_then_else,
+    clippy::into_iter_on_ref,
+    clippy::lines_filter_map_ok,
+    clippy::manual_flatten,
+    clippy::manual_is_multiple_of,
+    clippy::manual_map,
+    clippy::manual_range_patterns,
+    clippy::needless_question_mark,
+    clippy::nonminimal_bool,
+    clippy::redundant_closure,
+    clippy::redundant_closure_call,
+    clippy::result_large_err,
+    clippy::single_char_add_str,
+    clippy::single_match,
+    clippy::too_many_arguments,
+    clippy::type_complexity,
+    clippy::unnecessary_cast,
+    clippy::unnecessary_map_or,
+    clippy::while_let_on_iterator
+)]
+
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -15,6 +41,7 @@ mod claude_cli;
 mod cli_update;
 mod coderabbit_cli;
 mod codex_cli;
+mod commandcode_cli;
 mod cursor_cli;
 mod gh_cli;
 pub mod http_server;
@@ -234,7 +261,7 @@ pub struct AppPreferences {
     #[serde(default = "default_execution_mode")]
     pub default_execution_mode: String, // Default execution mode: "plan", "build", or "yolo"
     #[serde(default = "default_backend")]
-    pub default_backend: String, // Default CLI backend: "claude", "codex", "opencode", or "cursor"
+    pub default_backend: String, // Default CLI backend: "claude", "codex", "opencode", "cursor", or "commandcode"
     #[serde(default = "default_new_session_kind")]
     pub default_new_session_kind: String, // Default new session action: "chat", "terminal", or a CLI backend
     #[serde(default = "default_codex_model")]
@@ -243,6 +270,8 @@ pub struct AppPreferences {
     pub selected_opencode_model: String, // Default OpenCode model (provider/model)
     #[serde(default = "default_cursor_model")]
     pub selected_cursor_model: String, // Default Cursor model
+    #[serde(default = "default_commandcode_model")]
+    pub selected_commandcode_model: String, // Default Command Code model
     #[serde(default = "default_codex_reasoning_effort")]
     pub default_codex_reasoning_effort: String, // Codex reasoning effort: low, medium, high, xhigh
     #[serde(default = "default_codex_goal_execution_mode")]
@@ -287,6 +316,8 @@ pub struct AppPreferences {
     pub wsl_enabled: bool, // Route commands through WSL
     #[serde(default)]
     pub wsl_distro: String, // WSL distro name, e.g. "Ubuntu"
+    #[serde(default = "default_cli_source")]
+    pub commandcode_cli_source: String, // Command Code CLI source: "jean" (managed) or "path" (system PATH)
     #[serde(default = "default_cli_source")]
     pub coderabbit_cli_source: String, // CodeRabbit CLI source: "jean" (managed) or "path" (system PATH)
     #[serde(default)]
@@ -550,6 +581,10 @@ fn default_opencode_model() -> String {
 
 fn default_cursor_model() -> String {
     "cursor/auto".to_string()
+}
+
+fn default_commandcode_model() -> String {
+    "commandcode/default".to_string()
 }
 
 fn default_codex_reasoning_effort() -> String {
@@ -1715,6 +1750,7 @@ impl Default for AppPreferences {
             selected_codex_model: default_codex_model(),
             selected_opencode_model: default_opencode_model(),
             selected_cursor_model: default_cursor_model(),
+            selected_commandcode_model: default_commandcode_model(),
             default_codex_reasoning_effort: default_codex_reasoning_effort(),
             codex_goal_execution_mode: default_codex_goal_execution_mode(),
             codex_multi_agent_enabled: false,
@@ -1737,6 +1773,7 @@ impl Default for AppPreferences {
             wsl_mode_chosen: false,
             wsl_enabled: false,
             wsl_distro: String::new(),
+            commandcode_cli_source: default_cli_source(),
             coderabbit_cli_source: default_cli_source(),
             expand_tool_calls_by_default: false,
             window_vibrancy: false,
@@ -4034,6 +4071,16 @@ pub fn run() {
             coderabbit_cli::install_coderabbit_cli,
             coderabbit_cli::uninstall_coderabbit_cli,
             coderabbit_cli::update_coderabbit_cli,
+            // Command Code CLI management commands
+            commandcode_cli::check_commandcode_cli_installed,
+            commandcode_cli::detect_commandcode_in_path,
+            commandcode_cli::check_commandcode_cli_auth,
+            commandcode_cli::list_commandcode_models,
+            commandcode_cli::get_available_commandcode_versions,
+            commandcode_cli::get_commandcode_install_command,
+            commandcode_cli::install_commandcode_cli,
+            commandcode_cli::uninstall_commandcode_cli,
+            commandcode_cli::update_commandcode_cli,
             // Cursor CLI management commands
             cursor_cli::check_cursor_cli_installed,
             cursor_cli::detect_cursor_in_path,

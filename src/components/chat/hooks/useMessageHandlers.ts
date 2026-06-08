@@ -97,7 +97,9 @@ interface UseMessageHandlersParams {
   yoloBackendRef: RefObject<string | null>
   yoloThinkingLevelRef: RefObject<string | null>
   yoloEffortLevelRef: RefObject<string | null>
-  selectedBackendRef: RefObject<'claude' | 'codex' | 'opencode' | 'cursor'>
+  selectedBackendRef: RefObject<
+    'claude' | 'codex' | 'opencode' | 'cursor' | 'commandcode'
+  >
   getCustomProfileName: () => string | undefined
   executionModeRef: RefObject<ExecutionMode>
   selectedThinkingLevelRef: RefObject<ThinkingLevel>
@@ -228,7 +230,29 @@ function getDefaultModelForBackend(
   if (backend === 'cursor') {
     return preferences?.selected_cursor_model ?? 'cursor/auto'
   }
+  if (backend === 'commandcode') {
+    return preferences?.selected_commandcode_model ?? 'commandcode/default'
+  }
   return preferences?.selected_model ?? 'claude-opus-4-8[1m]'
+}
+
+const SESSION_BACKENDS = new Set<Session['backend']>([
+  'claude',
+  'codex',
+  'opencode',
+  'cursor',
+  'commandcode',
+])
+
+function asSessionBackend(
+  value: string | null | undefined
+): Session['backend'] | undefined {
+  if (!value) return undefined
+  if (SESSION_BACKENDS.has(value as Session['backend'])) {
+    return value as Session['backend']
+  }
+  console.warn('[useMessageHandlers] Ignoring invalid backend override', value)
+  return undefined
 }
 
 /**
@@ -1194,9 +1218,8 @@ export function useMessageHandlers({
       const prefs = queryClient.getQueryData<AppPreferences>(
         preferencesQueryKeys.preferences()
       )
-      const modeBackendOverride =
-        (modeBackendRef.current as Session['backend']) ?? null
-      const resolvedBackend = modeBackendOverride ?? undefined
+      const modeBackendOverride = asSessionBackend(modeBackendRef.current)
+      const resolvedBackend = modeBackendOverride
       const modelBackend = resolvedBackend ?? currentSessionBackend
       const resolvedModel =
         modeModelRef.current ??
@@ -1217,10 +1240,7 @@ export function useMessageHandlers({
       store.setSelectedModel(newSession.id, resolvedModel)
       store.setExecutingMode(newSession.id, mode)
       if (resolvedBackend) {
-        store.setSelectedBackend(
-          newSession.id,
-          resolvedBackend as 'claude' | 'codex' | 'opencode' | 'cursor'
-        )
+        store.setSelectedBackend(newSession.id, resolvedBackend)
       }
       // Optimistically update TanStack Query cache so UI shows correct backend/model
       // immediately. Without this, session?.backend (from query cache) defaults to 'claude'
@@ -1435,9 +1455,8 @@ export function useMessageHandlers({
       const prefs = queryClient.getQueryData<AppPreferences>(
         preferencesQueryKeys.preferences()
       )
-      const modeBackendOverride =
-        (modeBackendRef.current as Session['backend']) ?? null
-      const resolvedBackend = modeBackendOverride ?? undefined
+      const modeBackendOverride = asSessionBackend(modeBackendRef.current)
+      const resolvedBackend = modeBackendOverride
       const modelBackend = resolvedBackend ?? currentSessionBackend
       const resolvedModel =
         modeModelRef.current ??
@@ -1458,10 +1477,7 @@ export function useMessageHandlers({
       store.setSelectedModel(newSession.id, resolvedModel)
       store.setExecutingMode(newSession.id, mode)
       if (resolvedBackend) {
-        store.setSelectedBackend(
-          newSession.id,
-          resolvedBackend as 'claude' | 'codex' | 'opencode' | 'cursor'
-        )
+        store.setSelectedBackend(newSession.id, resolvedBackend)
       }
       // Optimistically update TanStack Query cache so UI shows correct backend/model immediately.
       queryClient.setQueryData<Session>(
@@ -1781,9 +1797,8 @@ export function useMessageHandlers({
       const prefs = queryClient.getQueryData<AppPreferences>(
         preferencesQueryKeys.preferences()
       )
-      const modeBackendOverride =
-        (modeBackendRef.current as Session['backend']) ?? null
-      const resolvedBackend = modeBackendOverride ?? undefined
+      const modeBackendOverride = asSessionBackend(modeBackendRef.current)
+      const resolvedBackend = modeBackendOverride
       const modelBackend = resolvedBackend ?? currentSessionBackend
       const resolvedModel =
         modeModelRef.current ??
@@ -1804,10 +1819,7 @@ export function useMessageHandlers({
       store.setSelectedModel(newSession.id, resolvedModel)
       store.setExecutingMode(newSession.id, mode)
       if (resolvedBackend) {
-        store.setSelectedBackend(
-          newSession.id,
-          resolvedBackend as 'claude' | 'codex' | 'opencode' | 'cursor'
-        )
+        store.setSelectedBackend(newSession.id, resolvedBackend)
       }
       queryClient.setQueryData<Session>(
         chatQueryKeys.session(newSession.id),
@@ -2088,9 +2100,8 @@ export function useMessageHandlers({
       const prefs = queryClient.getQueryData<AppPreferences>(
         preferencesQueryKeys.preferences()
       )
-      const modeBackendOverride =
-        (modeBackendRef.current as Session['backend']) ?? null
-      const resolvedBackend = modeBackendOverride ?? undefined
+      const modeBackendOverride = asSessionBackend(modeBackendRef.current)
+      const resolvedBackend = modeBackendOverride
       const modelBackend = resolvedBackend ?? currentSessionBackend
       const resolvedModel =
         modeModelRef.current ??
@@ -2111,10 +2122,7 @@ export function useMessageHandlers({
       store.setSelectedModel(newSession.id, resolvedModel)
       store.setExecutingMode(newSession.id, mode)
       if (resolvedBackend) {
-        store.setSelectedBackend(
-          newSession.id,
-          resolvedBackend as 'claude' | 'codex' | 'opencode' | 'cursor'
-        )
+        store.setSelectedBackend(newSession.id, resolvedBackend)
       }
       queryClient.setQueryData<Session>(
         chatQueryKeys.session(newSession.id),

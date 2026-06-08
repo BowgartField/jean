@@ -2126,6 +2126,47 @@ pub async fn dispatch_command(
             crate::claude_cli::uninstall_claude_cli(app.clone()).await?;
             Ok(Value::Null)
         }
+
+        "check_commandcode_cli_installed" => {
+            let result =
+                crate::commandcode_cli::check_commandcode_cli_installed(app.clone()).await?;
+            to_value(result)
+        }
+        "detect_commandcode_in_path" => {
+            let result = crate::commandcode_cli::detect_commandcode_in_path(app.clone()).await?;
+            to_value(result)
+        }
+        "check_commandcode_cli_auth" => {
+            let result = crate::commandcode_cli::check_commandcode_cli_auth(app.clone()).await?;
+            to_value(result)
+        }
+        "list_commandcode_models" => {
+            let result = crate::commandcode_cli::list_commandcode_models(app.clone()).await?;
+            to_value(result)
+        }
+        "get_available_commandcode_versions" => {
+            let result =
+                crate::commandcode_cli::get_available_commandcode_versions(app.clone()).await?;
+            to_value(result)
+        }
+        "get_commandcode_install_command" => {
+            let result =
+                crate::commandcode_cli::get_commandcode_install_command(app.clone()).await?;
+            to_value(result)
+        }
+        "install_commandcode_cli" => {
+            let version: Option<String> = from_field_opt(&args, "version")?;
+            crate::commandcode_cli::install_commandcode_cli(app.clone(), version).await?;
+            Ok(Value::Null)
+        }
+        "uninstall_commandcode_cli" => {
+            crate::commandcode_cli::uninstall_commandcode_cli(app.clone()).await?;
+            Ok(Value::Null)
+        }
+        "update_commandcode_cli" => {
+            crate::commandcode_cli::update_commandcode_cli(app.clone()).await?;
+            Ok(Value::Null)
+        }
         "check_cursor_cli_installed" => {
             let result = crate::cursor_cli::check_cursor_cli_installed(app.clone()).await?;
             to_value(result)

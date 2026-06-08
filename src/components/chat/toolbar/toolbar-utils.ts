@@ -37,6 +37,7 @@ export function getSessionProviderDisplayName(
   if (selectedBackend === 'codex') return 'OpenAI'
   if (selectedBackend === 'opencode') return 'OpenCode'
   if (selectedBackend === 'cursor') return 'Cursor'
+  if (selectedBackend === 'commandcode') return 'Command Code'
   return getProviderDisplayName(selectedProvider ?? null)
 }
 
@@ -152,4 +153,40 @@ export function formatCursorModelLabel(raw: string): string {
   return (
     value.split('-').filter(Boolean).map(formatModelToken).join(' ') || value
   )
+}
+
+export function formatModelIdTailLabel(raw: string): string {
+  const modelId = raw.split('/').filter(Boolean).at(-1) ?? raw
+  const rawTokens = modelId.split('-').filter(Boolean)
+  const mergedTokens: string[] = []
+  for (let i = 0; i < rawTokens.length; i++) {
+    const current = rawTokens[i]
+    if (!current) continue
+    const next = rawTokens[i + 1]
+    if (/^\d$/.test(current) && /^\d$/.test(next ?? '')) {
+      mergedTokens.push(`${current}.${next}`)
+      i++
+      continue
+    }
+    mergedTokens.push(current)
+  }
+
+  return mergedTokens.map(formatModelToken).join(' ') || raw
+}
+
+export function formatCommandCodeModelLabel(raw: string): string {
+  const value = raw.startsWith('commandcode/')
+    ? raw.slice('commandcode/'.length)
+    : raw
+  if (value === 'default') return 'Command Code · CLI default'
+
+  return `Command Code · ${formatModelIdTailLabel(value)}`
+}
+
+export function formatOpenCodePromptModelLabel(raw: string): string {
+  const value = raw.startsWith('opencode/')
+    ? raw.slice('opencode/'.length)
+    : raw
+  if (!value) return raw
+  return formatModelIdTailLabel(value)
 }

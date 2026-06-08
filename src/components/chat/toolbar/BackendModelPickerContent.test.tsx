@@ -25,6 +25,18 @@ vi.mock('@/services/opencode-cli', () => ({
   }),
 }))
 
+vi.mock('@/services/cursor-cli', () => ({
+  useAvailableCursorModels: () => ({
+    data: [{ id: 'auto', label: 'Auto' }],
+  }),
+}))
+
+vi.mock('@/services/commandcode-cli', () => ({
+  useAvailableCommandCodeModels: () => ({
+    data: [{ id: 'auto', label: 'Auto' }],
+  }),
+}))
+
 const patchPreferencesMutate = vi.fn()
 let mockFavoriteModels: string[] = []
 let mockFastModeModels: string[] = []
@@ -118,6 +130,55 @@ describe('BackendModelPickerContent', () => {
     expect(onBackendModelChange).toHaveBeenCalledWith('codex', 'gpt-5.4')
     expect(onModelChange).not.toHaveBeenCalled()
     expect(onRequestClose).toHaveBeenCalled()
+  })
+
+  it('shows the beta sidebar dot on Command Code, not Cursor', () => {
+    render(
+      <BackendModelPickerContent
+        open
+        selectedBackend="cursor"
+        selectedModel="cursor/auto"
+        selectedProvider={null}
+        installedBackends={['cursor', 'commandcode']}
+        customCliProfiles={[]}
+        onModelChange={vi.fn()}
+        onBackendModelChange={vi.fn()}
+        onRequestClose={vi.fn()}
+      />
+    )
+
+    const cursorTab = screen.getByRole('tab', { name: 'Cursor' })
+    const commandCodeTab = screen.getByRole('tab', {
+      name: 'Command Code (Beta)',
+    })
+
+    expect(cursorTab.querySelector('.bg-yellow-500')).toBeNull()
+    expect(commandCodeTab.querySelector('.bg-yellow-500')).not.toBeNull()
+  })
+
+  it('does not add an empty custom Command Code model option', async () => {
+    const user = userEvent.setup()
+
+    render(
+      <BackendModelPickerContent
+        open
+        selectedBackend="commandcode"
+        selectedModel="commandcode/default"
+        selectedProvider={null}
+        installedBackends={['commandcode']}
+        customCliProfiles={[]}
+        onModelChange={vi.fn()}
+        onBackendModelChange={vi.fn()}
+        onRequestClose={vi.fn()}
+      />
+    )
+
+    const searchInput = screen.getByPlaceholderText(/search command code/i)
+    await user.type(searchInput, 'commandcode/')
+
+    expect(
+      screen.queryByText('Use Command Code model "commandcode/"')
+    ).toBeNull()
   })
 
   it('scopes search to active backend and supports same-backend model swap', async () => {

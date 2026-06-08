@@ -16,6 +16,7 @@ import { ghCliQueryKeys } from '@/services/gh-cli'
 import { codexCliQueryKeys } from '@/services/codex-cli'
 import { opencodeCliQueryKeys } from '@/services/opencode-cli'
 import { coderabbitCliQueryKeys } from '@/services/coderabbit-cli'
+import { commandcodeCliQueryKeys } from '@/services/commandcode-cli'
 import { githubQueryKeys } from '@/services/github'
 import {
   ClaudeCliReinstallModal,
@@ -23,6 +24,7 @@ import {
   CodexCliReinstallModal,
   OpenCodeCliReinstallModal,
   CodeRabbitCliReinstallModal,
+  CommandCodeCliReinstallModal,
 } from '@/components/preferences/CliReinstallModal'
 
 export function CliUpdateModal() {
@@ -45,6 +47,8 @@ export function CliUpdateModal() {
         queryClient.invalidateQueries({ queryKey: opencodeCliQueryKeys.all })
       } else if (cliUpdateModalType === 'coderabbit') {
         queryClient.invalidateQueries({ queryKey: coderabbitCliQueryKeys.all })
+      } else if (cliUpdateModalType === 'commandcode') {
+        queryClient.invalidateQueries({ queryKey: commandcodeCliQueryKeys.all })
       }
 
       // Dismiss any lingering update toast for this CLI type
@@ -76,6 +80,10 @@ export function CliUpdateModal() {
       />
       <CodeRabbitCliReinstallModal
         open={cliUpdateModalOpen && cliUpdateModalType === 'coderabbit'}
+        onOpenChange={handleOpenChange}
+      />
+      <CommandCodeCliReinstallModal
+        open={cliUpdateModalOpen && cliUpdateModalType === 'commandcode'}
         onOpenChange={handleOpenChange}
       />
     </>
