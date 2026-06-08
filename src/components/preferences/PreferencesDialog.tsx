@@ -151,7 +151,7 @@ const navigationEntries: (NavigationItem | NavigationSeparator)[] = [
   {
     type: 'item',
     id: 'grok',
-    name: 'Grok',
+    name: 'Grok (Beta)',
     icon: GrokIcon,
   },
   {

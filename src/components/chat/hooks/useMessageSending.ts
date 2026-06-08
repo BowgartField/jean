@@ -434,7 +434,9 @@ export function useMessageSending({
         executionMode: mode,
         thinkingLevel: thinkingLvl,
         effortLevel:
-          useAdaptiveThinkingRef.current || isCodexBackendRef.current
+          useAdaptiveThinkingRef.current ||
+          isCodexBackendRef.current ||
+          selectedBackendRef.current === 'grok'
             ? selectedEffortLevelRef.current
             : undefined,
         mcpConfig: buildMcpConfigJson(

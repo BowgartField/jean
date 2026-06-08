@@ -663,7 +663,7 @@ export function MagicModal() {
       case 'cursor':
         return 'Cursor'
       case 'grok':
-        return 'Grok'
+        return 'Grok (Beta)'
       default:
         return 'Claude'
     }
@@ -2176,7 +2176,7 @@ ${resolveInstructions}`
                           <SelectItem value="opencode">OpenCode</SelectItem>
                         )}
                         {installedBackends.includes('grok') && (
-                          <SelectItem value="grok">Grok</SelectItem>
+                          <SelectItem value="grok">Grok (Beta)</SelectItem>
                         )}
                       </SelectContent>
                     </Select>
@@ -2329,7 +2329,7 @@ ${resolveInstructions}`
                           <SelectItem value="opencode">OpenCode</SelectItem>
                         )}
                         {installedBackends.includes('grok') && (
-                          <SelectItem value="grok">Grok</SelectItem>
+                          <SelectItem value="grok">Grok (Beta)</SelectItem>
                         )}
                       </SelectContent>
                     </Select>

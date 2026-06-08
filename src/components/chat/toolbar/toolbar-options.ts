@@ -119,3 +119,9 @@ export const EFFORT_LEVEL_OPTIONS: {
 export const CODEX_EFFORT_LEVEL_OPTIONS = EFFORT_LEVEL_OPTIONS.filter(
   option => option.value !== 'max' && option.value !== 'ultracode'
 )
+
+// Grok supports low/medium/high/xhigh/max natively. ultracode is a Jean
+// main-loop concept (xHigh + workflows), not a Grok CLI effort level.
+export const GROK_EFFORT_LEVEL_OPTIONS = EFFORT_LEVEL_OPTIONS.filter(
+  option => option.value !== 'ultracode'
+)

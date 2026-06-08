@@ -1476,7 +1476,7 @@ export const backendOptions: { value: CliBackend; label: string }[] = [
   { value: 'opencode', label: 'OpenCode' },
   { value: 'cursor', label: 'Cursor' },
   { value: 'commandcode', label: 'Command Code' },
-  { value: 'grok', label: 'Grok' },
+  { value: 'grok', label: 'Grok (Beta)' },
 ]
 
 export type TerminalApp =
@@ -1565,7 +1565,7 @@ export const newSessionKindOptions: {
   { value: 'claude', label: 'Claude' },
   { value: 'opencode', label: 'OpenCode' },
   { value: 'cursor', label: 'Cursor' },
-  { value: 'grok', label: 'Grok' },
+  { value: 'grok', label: 'Grok (Beta)' },
 ]
 
 export function getNewSessionKindLabel(

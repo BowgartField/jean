@@ -651,6 +651,7 @@ fn build_grok_args(
     prompt: &str,
     model: Option<&str>,
     execution_mode: Option<&str>,
+    effort_level: Option<&str>,
     grok_session_id: Option<&str>,
     working_dir: &str,
 ) -> Vec<String> {
@@ -672,6 +673,10 @@ fn build_grok_args(
     if let Some(model) = raw_grok_model(model).filter(|model| !model.is_empty()) {
         args.push("--model".to_string());
         args.push(model.to_string());
+    }
+    if let Some(effort) = effort_level.filter(|effort| !effort.is_empty()) {
+        args.push("--effort".to_string());
+        args.push(effort.to_string());
     }
 
     match effective_mode {
@@ -718,6 +723,7 @@ pub struct GrokExecutionOptions<'a> {
     pub existing_grok_session_id: Option<&'a str>,
     pub model: Option<&'a str>,
     pub execution_mode: Option<&'a str>,
+    pub effort_level: Option<&'a str>,
     pub message: &'a str,
     pub system_prompt: Option<&'a str>,
     pub pid_callback: Option<Box<dyn FnOnce(u32) + Send>>,
@@ -732,6 +738,7 @@ pub fn execute_grok(options: GrokExecutionOptions<'_>) -> Result<GrokResponse, S
         existing_grok_session_id,
         model,
         execution_mode,
+        effort_level,
         message,
         system_prompt,
         pid_callback,
@@ -744,15 +751,12 @@ pub fn execute_grok(options: GrokExecutionOptions<'_>) -> Result<GrokResponse, S
     let grok_session_id = existing_grok_session_id
         .filter(|id| !id.is_empty())
         .unwrap_or(jean_session_id);
-    // DEBUG: system prompt temporarily disabled to test if it causes slow Grok responses.
-    let system_prompt_len = system_prompt.map(str::len).unwrap_or(0);
-    log::info!("[Grok] DEBUG system prompt DISABLED (was {system_prompt_len} chars)");
-    let _ = system_prompt;
-    let prepared_message = build_grok_message(message, None);
+    let prepared_message = build_grok_message(message, system_prompt);
     let args = build_grok_args(
         &prepared_message,
         model,
         execution_mode,
+        effort_level,
         Some(grok_session_id),
         &working_dir.to_string_lossy(),
     );
@@ -970,6 +974,7 @@ mod tests {
             "hello",
             Some("grok-composer-2.5-fast"),
             Some("plan"),
+            None,
             Some("session-1"),
             "/tmp/worktree",
         );
@@ -982,6 +987,7 @@ mod tests {
             "hello",
             Some("grok-composer-2.5-fast"),
             Some("plan"),
+            None,
             Some("session-1"),
             "/tmp/worktree",
         );
@@ -994,10 +1000,38 @@ mod tests {
             "hello",
             Some("grok-composer-2.5-fast"),
             Some("yolo"),
+            None,
             Some("session-1"),
             "/tmp/worktree",
         );
         assert!(yolo.contains(&"bypassPermissions".to_string()));
         assert!(yolo.contains(&"off".to_string()));
+    }
+
+    #[test]
+    fn build_grok_args_includes_effort_flag() {
+        let args = build_grok_args(
+            "hello",
+            Some("grok-composer-2.5-fast"),
+            Some("plan"),
+            Some("high"),
+            Some("session-1"),
+            "/tmp/worktree",
+        );
+        let idx = args.iter().position(|a| a == "--effort").expect("--effort flag present");
+        assert_eq!(args.get(idx + 1), Some(&"high".to_string()));
+    }
+
+    #[test]
+    fn build_grok_args_omits_effort_flag_when_none() {
+        let args = build_grok_args(
+            "hello",
+            Some("grok-composer-2.5-fast"),
+            Some("plan"),
+            None,
+            Some("session-1"),
+            "/tmp/worktree",
+        );
+        assert!(!args.contains(&"--effort".to_string()));
     }
 }

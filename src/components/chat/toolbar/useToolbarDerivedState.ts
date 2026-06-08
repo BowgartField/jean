@@ -145,7 +145,7 @@ export function useToolbarDerivedState({
       } else if (backend === 'grok') {
         sections.push({
           backend,
-          label: 'Grok',
+          label: 'Grok (Beta)',
           options: resolvedGrokModelOptions,
         })
       }

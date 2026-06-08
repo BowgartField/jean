@@ -148,7 +148,7 @@ describe('PreferencesDialog', () => {
       'OpenCode',
       'Cursor',
       'Command Code',
-      'Grok',
+      'Grok (Beta)',
       'GitHub CLI',
       'CodeRabbit CLI',
       'Terminal',

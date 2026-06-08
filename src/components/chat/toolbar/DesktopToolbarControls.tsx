@@ -54,6 +54,7 @@ import { cn } from '@/lib/utils'
 import {
   CODEX_EFFORT_LEVEL_OPTIONS,
   EFFORT_LEVEL_OPTIONS,
+  GROK_EFFORT_LEVEL_OPTIONS,
   THINKING_LEVEL_OPTIONS,
 } from '@/components/chat/toolbar/toolbar-options'
 import {
@@ -187,16 +188,21 @@ export function DesktopToolbarControls({
   handleViewLinear,
   handleViewSavedContext,
 }: DesktopToolbarControlsProps) {
+  const isGrok = selectedBackend === 'grok'
   const effortLevelOptions = isCodex
     ? CODEX_EFFORT_LEVEL_OPTIONS
-    : EFFORT_LEVEL_OPTIONS
+    : isGrok
+      ? GROK_EFFORT_LEVEL_OPTIONS
+      : EFFORT_LEVEL_OPTIONS
   const displayedEffortLevel = isCodex
     ? selectedEffortLevel === 'max'
       ? 'high'
       : selectedEffortLevel === 'ultracode'
         ? 'xhigh'
         : selectedEffortLevel
-    : selectedEffortLevel
+    : isGrok && selectedEffortLevel === 'ultracode'
+      ? 'max'
+      : selectedEffortLevel
   const displayedEffortLabel =
     effortLevelOptions.find(o => o.value === displayedEffortLevel)?.label ??
     displayedEffortLevel
@@ -620,7 +626,7 @@ export function DesktopToolbarControls({
         <div className="hidden @xl:block h-4 w-px bg-border/50" />
       )}
 
-      {hideReasoningControl ? null : useAdaptiveThinking || isCodex ? (
+      {hideReasoningControl ? null : useAdaptiveThinking || isCodex || isGrok ? (
         <DropdownMenu
           open={thinkingDropdownOpen}
           onOpenChange={setThinkingDropdownOpen}

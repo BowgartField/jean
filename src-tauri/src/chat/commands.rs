@@ -3630,6 +3630,19 @@ pub async fn send_chat_message(
                     }
                 };
 
+                // Map EffortLevel to Grok effort values.
+                // Grok supports max natively; ultracode is a Jean concept → max.
+                let grok_effort: Option<String> =
+                    thread_effort_level.as_ref().and_then(|e| match e {
+                        super::types::EffortLevel::Low => Some("low".to_string()),
+                        super::types::EffortLevel::Medium => Some("medium".to_string()),
+                        super::types::EffortLevel::High => Some("high".to_string()),
+                        super::types::EffortLevel::Xhigh => Some("xhigh".to_string()),
+                        super::types::EffortLevel::Max => Some("max".to_string()),
+                        super::types::EffortLevel::Ultracode => Some("max".to_string()),
+                        super::types::EffortLevel::Off => None,
+                    });
+
                 match super::grok::execute_grok(super::grok::GrokExecutionOptions {
                     app: &thread_app,
                     jean_session_id: &thread_session_id,
@@ -3638,6 +3651,7 @@ pub async fn send_chat_message(
                     existing_grok_session_id: thread_grok_session_id.as_deref(),
                     model: thread_model.as_deref(),
                     execution_mode: thread_execution_mode.as_deref(),
+                    effort_level: grok_effort.as_deref(),
                     message: &thread_message,
                     system_prompt: grok_system_prompt.as_deref(),
                     pid_callback: Some(make_pid_callback()),
