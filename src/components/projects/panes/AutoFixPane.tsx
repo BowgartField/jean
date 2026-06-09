@@ -512,7 +512,7 @@ export function AutoFixPane({ projectId }: { projectId: string }) {
           <div className="pt-4">
             <Field
               label="Excluded GitHub labels"
-              description="Issues with any of these labels are removed from the final Mr. Robot list. Separate labels with commas."
+              description="Issues with any of these labels are removed from the final Mr. Robot list."
             >
               <GitHubLabelMultiSelect
                 label="Excluded GitHub labels"
