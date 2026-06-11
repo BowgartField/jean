@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import userEvent from '@testing-library/user-event'
 import { render, screen, within } from '@/test/test-utils'
 import { DesktopBackendModelPicker } from './DesktopBackendModelPicker'
+import type * as EnvironmentModule from '@/lib/environment'
 
 class ResizeObserverMock {
   observe() {
@@ -31,7 +32,7 @@ const envMocks = vi.hoisted(() => ({
 }))
 
 vi.mock('@/lib/environment', async importOriginal => ({
-  ...(await importOriginal<typeof import('@/lib/environment')>()),
+  ...(await importOriginal<typeof EnvironmentModule>()),
   isNativeApp: () => envMocks.isNativeApp,
 }))
 

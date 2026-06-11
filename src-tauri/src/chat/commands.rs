@@ -7527,9 +7527,20 @@ async fn steer_text_into_codex_turn(
     Ok(())
 }
 
-/// A queued message can be steered into a running turn only when it carries
-/// no attachments (images/files/skills can't be injected mid-turn).
+/// A queued message can be steered into a running Codex turn only when:
+/// - it carries no attachments (images/files/skills can't be injected mid-turn), AND
+/// - its captured backend is Codex. A message queued with a different backend
+///   selected (the user switched mid-run) must NOT be injected into the Codex
+///   turn — it runs as its own backend once the current run finishes.
+///
+/// The `backend` field is omitted for the Claude default (see the frontend
+/// `QueuedMessage` capture), so a missing/null backend is treated as non-Codex.
 fn queued_message_is_steerable(msg: &serde_json::Value) -> bool {
+    let backend_is_codex = msg.get("backend").and_then(Value::as_str) == Some("codex");
+    if !backend_is_codex {
+        return false;
+    }
+
     const ATTACHMENT_KEYS: [&str; 4] = [
         "pendingImages",
         "pendingFiles",
@@ -7709,33 +7720,41 @@ mod tests {
     }
 
     #[test]
-    fn queued_message_steerable_only_without_attachments() {
-        let plain = serde_json::json!({ "id": "m1", "message": "hello" });
-        assert!(queued_message_is_steerable(&plain));
+    fn queued_message_steerable_requires_codex_backend_and_no_attachments() {
+        // Codex backend, no attachments → steerable
+        let codex_plain = serde_json::json!({
+            "id": "m1", "message": "hello", "backend": "codex",
+        });
+        assert!(queued_message_is_steerable(&codex_plain));
 
-        let empty_attachments = serde_json::json!({
+        let codex_empty_attachments = serde_json::json!({
             "id": "m2",
             "message": "hello",
+            "backend": "codex",
             "pendingImages": [],
             "pendingFiles": [],
             "pendingSkills": [],
             "pendingTextFiles": [],
         });
-        assert!(queued_message_is_steerable(&empty_attachments));
+        assert!(queued_message_is_steerable(&codex_empty_attachments));
 
-        let with_image = serde_json::json!({
+        // Codex backend but with attachments → not steerable
+        let codex_with_image = serde_json::json!({
             "id": "m3",
             "message": "hello",
+            "backend": "codex",
             "pendingImages": [{ "id": "img-1", "path": "/tmp/a.png" }],
         });
-        assert!(!queued_message_is_steerable(&with_image));
+        assert!(!queued_message_is_steerable(&codex_with_image));
 
-        let with_file = serde_json::json!({
-            "id": "m4",
-            "message": "hello",
-            "pendingFiles": [{ "id": "f-1", "relativePath": "src/a.ts" }],
+        // Different backend selected mid-run → never steer into the codex turn
+        let claude_default = serde_json::json!({ "id": "m4", "message": "hello" });
+        assert!(!queued_message_is_steerable(&claude_default));
+
+        let opencode = serde_json::json!({
+            "id": "m5", "message": "hello", "backend": "opencode",
         });
-        assert!(!queued_message_is_steerable(&with_file));
+        assert!(!queued_message_is_steerable(&opencode));
     }
 
     #[test]

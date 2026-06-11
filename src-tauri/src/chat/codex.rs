@@ -4605,6 +4605,7 @@ mod tests {
             execution_mode: Some("build".to_string()),
             thinking_level: None,
             effort_level: None,
+            backend: None,
             started_at: 1,
             ended_at: Some(2),
             status: RunStatus::Completed,
