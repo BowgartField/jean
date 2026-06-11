@@ -71,6 +71,35 @@ When specifying subagent_type for Task tool calls, always use the fully qualifie
 static BACKEND_QUEUE_DRAINING: Lazy<Mutex<HashSet<String>>> =
     Lazy::new(|| Mutex::new(HashSet::new()));
 
+/// Sessions with a `send_chat_message` call currently in flight.
+///
+/// The registry-based "actively managed" guard only catches duplicates after a
+/// process/turn is registered, leaving a window where two concurrent sends
+/// (frontend queue processor vs backend queue drain vs another client) both
+/// pass the check and spawn duplicate runs. This claim is taken atomically at
+/// `send_chat_message` entry and held for the whole call.
+static ACTIVE_SENDS: Lazy<Mutex<HashSet<String>>> = Lazy::new(|| Mutex::new(HashSet::new()));
+
+/// RAII claim on a session's send slot — released on drop (any return path).
+struct SendClaim(String);
+
+impl SendClaim {
+    fn try_acquire(session_id: &str) -> Option<Self> {
+        let mut active = ACTIVE_SENDS.lock().unwrap();
+        if active.insert(session_id.to_string()) {
+            Some(Self(session_id.to_string()))
+        } else {
+            None
+        }
+    }
+}
+
+impl Drop for SendClaim {
+    fn drop(&mut self) {
+        ACTIVE_SENDS.lock().unwrap().remove(&self.0);
+    }
+}
+
 fn codex_execution_mode_instruction(execution_mode: Option<&str>) -> Option<&'static str> {
     match execution_mode.unwrap_or("plan") {
         "build" => Some(
@@ -746,6 +775,9 @@ async fn drain_backend_queue(
 ) {
     loop {
         if super::registry::is_session_actively_managed(&session_id) {
+            // A Codex turn may be running — steer queued messages into it
+            // instead of waiting for the run to finish (preference-gated).
+            drain_queue_into_codex_turn(&app, &worktree_id, &session_id).await;
             log::trace!("[QueueDrain] session active, stop session={session_id}");
             return;
         }
@@ -827,6 +859,27 @@ async fn drain_backend_queue(
         )
         .await
         {
+            // Lost a send race against another consumer (frontend queue
+            // processor or another client). Re-insert at the queue front so
+            // the message is NOT lost — the active run's completion re-triggers
+            // the drain and retries it.
+            if e.contains("already has an active request") {
+                log::warn!(
+                    "[QueueDrain] send race lost, requeueing at front session={session_id} message_id={queued_id}"
+                );
+                let requeued = with_existing_metadata_mut(&app, &session_id, |metadata| {
+                    metadata.queued_messages.insert(0, queued.clone());
+                    metadata.queued_messages.clone()
+                });
+                if let Ok(queue) = requeued {
+                    app.emit_all(
+                        "queue:updated",
+                        &serde_json::json!({ "sessionId": session_id, "queue": queue }),
+                    )
+                    .ok();
+                }
+                return;
+            }
             log::error!(
                 "[QueueDrain] queued message failed session={session_id} message_id={queued_id}: {e}"
             );
@@ -2031,6 +2084,17 @@ pub async fn send_chat_message(
     if worktree_path.is_empty() {
         return Err("Worktree path cannot be empty".to_string());
     }
+
+    // Guard: atomically claim the session's send slot for the duration of this
+    // call. Closes the race window where two concurrent sends (queue processor
+    // vs backend drain vs another client) both pass the registry check below
+    // before either registers a process.
+    let Some(_send_claim) = SendClaim::try_acquire(&session_id) else {
+        log::warn!(
+            "[SendChat] REJECTED session={session_id} — concurrent send in flight (duplicate send)"
+        );
+        return Err("Session already has an active request".to_string());
+    };
 
     // Guard: reject if this session already has an active process being tailed.
     // Without this, a double-send (frontend race, page reload, etc.) creates
@@ -3909,6 +3973,9 @@ pub async fn send_chat_message(
                         super::types::ContentBlock::Thinking { thinking } => {
                             serde_json::json!({"type": "thinking", "thinking": thinking})
                         }
+                        super::types::ContentBlock::UserInput { text } => {
+                            serde_json::json!({"type": "user_input", "text": text})
+                        }
                     })
                     .collect();
                 let synthetic =
@@ -4589,6 +4656,14 @@ pub async fn cancel_chat_message(
 #[tauri::command]
 pub fn has_running_sessions() -> bool {
     !super::registry::get_running_sessions().is_empty()
+}
+
+/// Check if any running sessions would NOT survive Jean quitting.
+/// Detached Claude processes and (on Unix) detached Codex app-server turns
+/// keep running after exit and are recovered on next launch; OpenCode and
+/// piped CLI sessions are not.
+pub fn has_nonsurvivable_running_sessions() -> bool {
+    super::registry::has_nonsurvivable_running_sessions()
 }
 
 /// Save a cancelled message to chat history
@@ -6673,7 +6748,7 @@ pub async fn resume_session(
 
         // Register the PID in the in-memory process registry so cancel works
         // Returns false if a pending cancel was queued (process killed immediately)
-        if !super::registry::register_process(session_id.clone(), pid) {
+        if !super::registry::register_detached_process(session_id.clone(), pid) {
             log::warn!("Resume session {session_id} was cancelled before tailing started");
             return Ok(ResumeSessionResponse {
                 resumed: false,
@@ -7277,6 +7352,229 @@ pub async fn clear_message_queue(
     Ok(())
 }
 
+/// Move a specific queued message to the front of the queue by its `id` field.
+/// Returns `false` when the message is no longer queued (another client dequeued
+/// or removed it) — callers must abort their send-now flow in that case.
+/// Holds the metadata lock across the entire read-modify-write to prevent TOCTOU races.
+#[tauri::command]
+pub async fn move_queued_message_front(
+    app: AppHandle,
+    worktree_id: String,
+    worktree_path: String,
+    session_id: String,
+    message_id: String,
+) -> Result<bool, String> {
+    let (moved, queue) = with_existing_metadata_mut(&app, &session_id, |metadata| {
+        let idx = metadata
+            .queued_messages
+            .iter()
+            .position(|m| m.get("id").and_then(|v| v.as_str()) == Some(message_id.as_str()));
+        let moved = match idx {
+            Some(idx) => {
+                let msg = metadata.queued_messages.remove(idx);
+                metadata.queued_messages.insert(0, msg);
+                true
+            }
+            None => false,
+        };
+        (moved, metadata.queued_messages.clone())
+    })?;
+
+    if moved {
+        app.emit_all(
+            "queue:updated",
+            &serde_json::json!({ "sessionId": session_id, "queue": queue }),
+        )
+        .ok();
+
+        // A session that went idle mid-click should still pick up the promoted message.
+        trigger_backend_queue_drain(app.clone(), worktree_id, worktree_path, session_id);
+    }
+
+    Ok(moved)
+}
+
+/// Inject a user message into a running Codex turn via app-server `turn/steer`.
+/// The injected text becomes part of the current turn (the model sees it after
+/// the next tool call). Fails when the session has no active turn or the turn
+/// already ended — callers fall back to cancel+send.
+#[tauri::command]
+pub async fn steer_codex_turn(
+    app: AppHandle,
+    worktree_id: String,
+    session_id: String,
+    message: String,
+) -> Result<(), String> {
+    steer_text_into_codex_turn(&app, &worktree_id, &session_id, &message).await
+}
+
+/// Core steer implementation shared by the `steer_codex_turn` command and the
+/// queue auto-steer drain: sends `turn/steer`, persists the injected text into
+/// the run log, and broadcasts `chat:steered` for live display.
+async fn steer_text_into_codex_turn(
+    app: &AppHandle,
+    worktree_id: &str,
+    session_id: &str,
+    message: &str,
+) -> Result<(), String> {
+    let (thread_id, turn_id) = super::registry::get_codex_turn(session_id)
+        .ok_or_else(|| format!("No active Codex turn for session: {session_id}"))?;
+    // Turn registered with empty id before turn/started arrives — too early to steer.
+    if turn_id.is_empty() {
+        return Err("Codex turn not started yet".to_string());
+    }
+
+    let metadata = load_metadata(app, session_id)?
+        .ok_or_else(|| format!("No metadata found for session: {session_id}"))?;
+    let run_id = metadata
+        .runs
+        .iter()
+        .rev()
+        .find(|r| r.status == RunStatus::Running)
+        .map(|r| r.run_id.clone())
+        .ok_or_else(|| format!("No running run for session: {session_id}"))?;
+
+    // send_request blocks on a oneshot channel — must not run on the async runtime.
+    let params = super::codex::build_turn_steer_params(&thread_id, &turn_id, message);
+    tauri::async_runtime::spawn_blocking(move || {
+        super::codex_server::send_request("turn/steer", params)
+    })
+    .await
+    .map_err(|e| format!("Steer task failed: {e}"))??;
+
+    // Persist into the run log so transcript reconstruction keeps the injected
+    // text ordered between the surrounding tool calls. Appends are atomic per
+    // write, so this is safe alongside the live event writer.
+    match run_log::RunLogWriter::resume(app, session_id, &run_id) {
+        Ok(mut writer) => {
+            let line = serde_json::json!({
+                "type": "steered_user_message",
+                "text": message,
+            });
+            if let Err(e) = writer.write_line(&line.to_string()) {
+                log::warn!("Failed to persist steered message for session {session_id}: {e}");
+            }
+        }
+        Err(e) => log::warn!("Failed to open run log for steered message: {e}"),
+    }
+
+    // Live display on all clients (native + web).
+    app.emit_all(
+        "chat:steered",
+        &serde_json::json!({
+            "session_id": session_id,
+            "worktree_id": worktree_id,
+            "text": message,
+        }),
+    )
+    .ok();
+
+    Ok(())
+}
+
+/// A queued message can be steered into a running turn only when it carries
+/// no attachments (images/files/skills can't be injected mid-turn).
+fn queued_message_is_steerable(msg: &serde_json::Value) -> bool {
+    const ATTACHMENT_KEYS: [&str; 4] = [
+        "pendingImages",
+        "pendingFiles",
+        "pendingSkills",
+        "pendingTextFiles",
+    ];
+    ATTACHMENT_KEYS.iter().all(|key| {
+        msg.get(key)
+            .and_then(Value::as_array)
+            .map(|a| a.is_empty())
+            .unwrap_or(true)
+    })
+}
+
+/// Drain steerable queued messages straight into the running Codex turn
+/// (when the `codex_auto_steer_enabled` preference is on, default true).
+/// Pops from the queue front in FIFO order and stops at the first message
+/// that can't be steered (attachments) so queue order is preserved.
+async fn drain_queue_into_codex_turn(app: &AppHandle, worktree_id: &str, session_id: &str) {
+    let auto_steer = crate::load_preferences_sync(app)
+        .map(|p| p.codex_auto_steer_enabled)
+        .unwrap_or(true);
+    if !auto_steer {
+        return;
+    }
+
+    loop {
+        // Only steer while a started codex turn is registered.
+        let Some((_, turn_id)) = super::registry::get_codex_turn(session_id) else {
+            return;
+        };
+        if turn_id.is_empty() {
+            return;
+        }
+
+        let popped = match with_existing_metadata_mut(app, session_id, |metadata| {
+            match metadata.queued_messages.first() {
+                Some(front) if queued_message_is_steerable(front) => {
+                    let msg = metadata.queued_messages.remove(0);
+                    (Some(msg), metadata.queued_messages.clone())
+                }
+                _ => (None, metadata.queued_messages.clone()),
+            }
+        }) {
+            Ok((popped, queue)) => {
+                if popped.is_some() {
+                    app.emit_all(
+                        "queue:updated",
+                        &serde_json::json!({ "sessionId": session_id, "queue": queue }),
+                    )
+                    .ok();
+                }
+                popped
+            }
+            Err(e) => {
+                log::warn!("[CodexSteer] failed to read queue session={session_id}: {e}");
+                return;
+            }
+        };
+
+        let Some(msg) = popped else { return };
+        let text = msg
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if text.is_empty() {
+            continue;
+        }
+
+        log::info!("[CodexSteer] steering queued message into running turn session={session_id}");
+        if let Err(e) = steer_text_into_codex_turn(app, worktree_id, session_id, &text).await {
+            // Turn ended mid-drain — put the message back so the normal
+            // queue path sends it when the run completes.
+            log::warn!("[CodexSteer] steer failed, requeueing at front session={session_id}: {e}");
+            let requeued = with_existing_metadata_mut(app, session_id, |metadata| {
+                metadata.queued_messages.insert(0, msg.clone());
+                metadata.queued_messages.clone()
+            });
+            if let Ok(queue) = requeued {
+                app.emit_all(
+                    "queue:updated",
+                    &serde_json::json!({ "sessionId": session_id, "queue": queue }),
+                )
+                .ok();
+            }
+            return;
+        }
+    }
+}
+
+/// Fire-and-forget steer drain — called from the Codex `turn/started` handler
+/// so prompts queued before the turn became steerable get injected.
+pub(crate) fn trigger_codex_queue_steer(app: AppHandle, worktree_id: String, session_id: String) {
+    tauri::async_runtime::spawn(async move {
+        drain_queue_into_codex_turn(&app, &worktree_id, &session_id).await;
+    });
+}
+
 /// Cancel the pending ScheduleWakeup for a session (user-initiated).
 #[tauri::command]
 pub async fn cancel_session_wakeup(app: AppHandle, session_id: String) -> Result<bool, String> {
@@ -7353,6 +7651,36 @@ mod tests {
                 "/tmp/Main.kt".to_string()
             ]
         );
+    }
+
+    #[test]
+    fn queued_message_steerable_only_without_attachments() {
+        let plain = serde_json::json!({ "id": "m1", "message": "hello" });
+        assert!(queued_message_is_steerable(&plain));
+
+        let empty_attachments = serde_json::json!({
+            "id": "m2",
+            "message": "hello",
+            "pendingImages": [],
+            "pendingFiles": [],
+            "pendingSkills": [],
+            "pendingTextFiles": [],
+        });
+        assert!(queued_message_is_steerable(&empty_attachments));
+
+        let with_image = serde_json::json!({
+            "id": "m3",
+            "message": "hello",
+            "pendingImages": [{ "id": "img-1", "path": "/tmp/a.png" }],
+        });
+        assert!(!queued_message_is_steerable(&with_image));
+
+        let with_file = serde_json::json!({
+            "id": "m4",
+            "message": "hello",
+            "pendingFiles": [{ "id": "f-1", "relativePath": "src/a.ts" }],
+        });
+        assert!(!queued_message_is_steerable(&with_file));
     }
 
     #[test]

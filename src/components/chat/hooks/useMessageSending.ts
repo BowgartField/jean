@@ -7,6 +7,7 @@ import {
   chatQueryKeys,
   cancelChatMessage,
   persistEnqueue,
+  steerCodexTurn,
 } from '@/services/chat'
 import { skillQueryKeys } from '@/services/skills'
 import { buildMcpConfigJson } from '@/services/mcp'
@@ -48,6 +49,7 @@ interface UseMessageSendingParams {
         chrome_enabled?: boolean
         ai_language?: string
         codex_goal_execution_mode?: 'build' | 'yolo'
+        codex_auto_steer_enabled?: boolean
       }
     | undefined
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -455,6 +457,34 @@ export function useMessageSending({
         `[Send] handleSubmit sessionId=${activeSessionId} isSending=${isSendingNow}`
       )
       if (isSendingNow) {
+        // Codex auto-steer: inject the prompt into the running turn instead of
+        // queueing (picked up after the next tool call). Attachments can't be
+        // injected mid-turn; steer failures (turn ended / not started yet)
+        // fall back to the normal queue.
+        const hasAttachments =
+          images.length > 0 ||
+          files.length > 0 ||
+          textFiles.length > 0 ||
+          skills.length > 0
+        if (
+          selectedBackendRef.current === 'codex' &&
+          (preferences?.codex_auto_steer_enabled ?? true) &&
+          !hasAttachments
+        ) {
+          try {
+            await steerCodexTurn(
+              activeWorktreeId,
+              activeSessionId,
+              buildMessageWithRefs(queuedMessage)
+            )
+            console.log(`[Send] handleSubmit STEERED into running codex turn`)
+            return
+          } catch (err) {
+            console.log(
+              `[Send] handleSubmit steer failed, falling back to queue: ${err}`
+            )
+          }
+        }
         console.log(`[Send] handleSubmit ENQUEUING (session is sending)`)
         enqueueMessage(activeSessionId, queuedMessage)
         persistEnqueue(

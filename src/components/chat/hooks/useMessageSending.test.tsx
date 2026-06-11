@@ -3,6 +3,7 @@ import { QueryClient } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useChatStore } from '@/store/chat-store'
 import { useMessageSending } from './useMessageSending'
+import { persistEnqueue, steerCodexTurn } from '@/services/chat'
 import type { ExecutionMode, Session } from '@/types/chat'
 import type * as ChatService from '@/services/chat'
 
@@ -27,11 +28,14 @@ vi.mock('@/services/chat', async importOriginal => {
     ...actual,
     cancelChatMessage: vi.fn(),
     persistEnqueue: vi.fn(),
+    steerCodexTurn: vi.fn(),
   }
 })
 
 function renderUseMessageSending({
   goalMode,
+  autoSteer,
+  inputValue = '/goal Ship the feature',
   createSession = {
     mutateAsync: vi.fn(async () => ({
       id: 'new-session',
@@ -47,6 +51,8 @@ function renderUseMessageSending({
   },
 }: {
   goalMode?: 'build' | 'yolo'
+  autoSteer?: boolean
+  inputValue?: string
   createSession?: {
     mutateAsync: (args: {
       worktreeId: string
@@ -59,7 +65,7 @@ function renderUseMessageSending({
     defaultOptions: { queries: { retry: false } },
   })
   const inputRef = {
-    current: { value: '/goal Ship the feature' } as HTMLTextAreaElement,
+    current: { value: inputValue } as HTMLTextAreaElement,
   }
   const executionModeRef = { current: 'plan' as ExecutionMode }
 
@@ -81,6 +87,7 @@ function renderUseMessageSending({
       selectedBackendRef: { current: 'codex' },
       preferences: {
         codex_goal_execution_mode: goalMode,
+        codex_auto_steer_enabled: autoSteer,
       },
       sendMessage,
       createSession,
@@ -219,5 +226,91 @@ describe('useMessageSending git diff Add to prompt', () => {
     )
     expect(useChatStore.getState().executionModes['new-session']).toBe('yolo')
     expect(sendMessage.mutate).not.toHaveBeenCalled()
+  })
+})
+
+describe('useMessageSending Codex auto-steer', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockInvoke.mockResolvedValue(undefined)
+    useChatStore.setState({
+      inputDrafts: {},
+      pendingImages: {},
+      pendingFiles: {},
+      pendingTextFiles: {},
+      pendingSkills: {},
+      sendingSessionIds: { 'session-1': true },
+      executionModes: {},
+      selectedModels: {},
+      executingModes: {},
+      errors: {},
+      lastSentMessages: {},
+      reviewingSessions: {},
+      waitingForInputSessionIds: {},
+      messageQueues: {},
+      approvedTools: {},
+      streamingContents: {},
+      activeToolCalls: {},
+      streamingContentBlocks: {},
+      streamingThinkingContent: {},
+    })
+  })
+
+  it('steers the running codex turn instead of queueing by default', async () => {
+    vi.mocked(steerCodexTurn).mockResolvedValue(undefined)
+    const { result, sendMessage } = renderUseMessageSending({
+      inputValue: 'also check the tests',
+    })
+
+    await act(async () => {
+      await result.current.handleSubmit({
+        preventDefault: vi.fn(),
+      } as unknown as React.FormEvent)
+    })
+
+    expect(steerCodexTurn).toHaveBeenCalledWith(
+      'worktree-1',
+      'session-1',
+      'also check the tests'
+    )
+    expect(persistEnqueue).not.toHaveBeenCalled()
+    expect(
+      useChatStore.getState().messageQueues['session-1'] ?? []
+    ).toHaveLength(0)
+    expect(sendMessage.mutate).not.toHaveBeenCalled()
+  })
+
+  it('queues instead of steering when auto-steer is disabled', async () => {
+    const { result } = renderUseMessageSending({
+      autoSteer: false,
+      inputValue: 'also check the tests',
+    })
+
+    await act(async () => {
+      await result.current.handleSubmit({
+        preventDefault: vi.fn(),
+      } as unknown as React.FormEvent)
+    })
+
+    expect(steerCodexTurn).not.toHaveBeenCalled()
+    expect(persistEnqueue).toHaveBeenCalled()
+    expect(useChatStore.getState().messageQueues['session-1']).toHaveLength(1)
+  })
+
+  it('falls back to queueing when steering fails', async () => {
+    vi.mocked(steerCodexTurn).mockRejectedValue(new Error('turn ended'))
+    const { result } = renderUseMessageSending({
+      inputValue: 'also check the tests',
+    })
+
+    await act(async () => {
+      await result.current.handleSubmit({
+        preventDefault: vi.fn(),
+      } as unknown as React.FormEvent)
+    })
+
+    expect(steerCodexTurn).toHaveBeenCalled()
+    expect(persistEnqueue).toHaveBeenCalled()
+    expect(useChatStore.getState().messageQueues['session-1']).toHaveLength(1)
   })
 })

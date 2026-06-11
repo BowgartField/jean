@@ -1074,7 +1074,7 @@ pub fn execute_claude_detached(
     }
 
     // Register the process for cancellation (returns false if pending cancel exists)
-    if !super::registry::register_process(session_id.to_string(), pid) {
+    if !super::registry::register_detached_process(session_id.to_string(), pid) {
         // Process was killed by pending cancel — return cancelled response
         return Ok((
             pid,

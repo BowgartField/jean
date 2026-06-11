@@ -409,6 +409,7 @@ interface ChatUIState {
   // Actions - Content blocks (session-based, for inline tool rendering)
   addTextBlock: (sessionId: string, text: string) => void
   addToolBlock: (sessionId: string, toolCallId: string) => void
+  addUserInputBlock: (sessionId: string, text: string) => void
   addThinkingBlock: (sessionId: string, thinking: string) => void
   clearStreamingContentBlocks: (sessionId: string) => void
   getStreamingContentBlocks: (sessionId: string) => ContentBlock[]
@@ -550,6 +551,7 @@ interface ChatUIState {
   enqueueMessage: (sessionId: string, message: QueuedMessage) => void
   dequeueMessage: (sessionId: string) => QueuedMessage | undefined
   removeQueuedMessage: (sessionId: string, messageId: string) => void
+  moveQueuedMessageFront: (sessionId: string, messageId: string) => void
   clearQueue: (sessionId: string) => void
   getQueueLength: (sessionId: string) => number
   getQueuedMessages: (sessionId: string) => QueuedMessage[]
@@ -1564,6 +1566,22 @@ export const useChatStore = create<ChatUIState>()(
           'addToolBlock'
         ),
 
+      // User text injected into a running turn (Codex turn/steer)
+      addUserInputBlock: (sessionId, text) =>
+        set(
+          state => ({
+            streamingContentBlocks: {
+              ...state.streamingContentBlocks,
+              [sessionId]: [
+                ...(state.streamingContentBlocks[sessionId] ?? []),
+                { type: 'user_input', text },
+              ],
+            },
+          }),
+          undefined,
+          'addUserInputBlock'
+        ),
+
       addThinkingBlock: (sessionId, thinking) =>
         set(
           state => {
@@ -2433,6 +2451,30 @@ export const useChatStore = create<ChatUIState>()(
           }),
           undefined,
           'removeQueuedMessage'
+        ),
+
+      moveQueuedMessageFront: (sessionId, messageId) =>
+        set(
+          state => {
+            const queue = state.messageQueues[sessionId] ?? []
+            const idx = queue.findIndex(m => m.id === messageId)
+            if (idx <= 0) return state // Not found or already first — no-op
+            const msg = queue[idx]
+            if (!msg) return state
+            const reordered = [
+              msg,
+              ...queue.slice(0, idx),
+              ...queue.slice(idx + 1),
+            ]
+            return {
+              messageQueues: {
+                ...state.messageQueues,
+                [sessionId]: reordered,
+              },
+            }
+          },
+          undefined,
+          'moveQueuedMessageFront'
         ),
 
       clearQueue: sessionId =>

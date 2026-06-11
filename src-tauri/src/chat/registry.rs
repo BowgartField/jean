@@ -39,6 +39,10 @@ static CANCEL_FLAGS: Lazy<Mutex<HashMap<String, OpenCodeCancelEntry>>> =
 static CODEX_TURN_REGISTRY: Lazy<Mutex<HashMap<String, (String, String)>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
+/// Sessions in PROCESS_REGISTRY whose process is fully detached (survives Jean
+/// quitting). Claude CLI runs are detached; Pi/Cursor are piped children.
+static DETACHED_SESSIONS: Lazy<Mutex<HashSet<String>>> = Lazy::new(|| Mutex::new(HashSet::new()));
+
 fn lock_recover<'a, T>(mutex: &'a Mutex<T>, name: &str) -> std::sync::MutexGuard<'a, T> {
     match mutex.lock() {
         Ok(guard) => guard,
@@ -96,12 +100,25 @@ pub fn register_process(session_id: String, pid: u32) -> bool {
     true
 }
 
+/// Register a running detached process PID for a session (e.g. Claude CLI).
+/// Detached processes survive Jean quitting, so they don't block app exit.
+/// Returns `false` if the session was cancelled before registration.
+pub fn register_detached_process(session_id: String, pid: u32) -> bool {
+    let registered = register_process(session_id.clone(), pid);
+    if registered {
+        lock_recover(&DETACHED_SESSIONS, "DETACHED_SESSIONS").insert(session_id);
+    }
+    registered
+}
+
 /// Remove a process from the registry (called after completion or cancellation)
 pub fn unregister_process(session_id: &str) {
     let mut registry = lock_recover(&PROCESS_REGISTRY, "PROCESS_REGISTRY");
     if let Some(pid) = registry.remove(session_id) {
         log::trace!("Unregistered Claude process {pid} for session: {session_id}");
     }
+    drop(registry);
+    lock_recover(&DETACHED_SESSIONS, "DETACHED_SESSIONS").remove(session_id);
 }
 
 /// Register a cancellation flag for an OpenCode session.
@@ -205,9 +222,18 @@ pub fn unregister_codex_turn(session_id: &str) {
     lock_recover(&CODEX_TURN_REGISTRY, "CODEX_TURN_REGISTRY").remove(session_id);
 }
 
+/// Get the registered Codex (thread_id, turn_id) for a session, if any.
+/// Used by `turn/steer` to inject user input into the active turn.
+pub fn get_codex_turn(session_id: &str) -> Option<(String, String)> {
+    lock_recover(&CODEX_TURN_REGISTRY, "CODEX_TURN_REGISTRY")
+        .get(session_id)
+        .cloned()
+}
+
 /// Remove all registry state for a session after a backend crash or thread panic.
 pub fn cleanup_session_registrations(session_id: &str) {
     let removed_pid = lock_recover(&PROCESS_REGISTRY, "PROCESS_REGISTRY").remove(session_id);
+    lock_recover(&DETACHED_SESSIONS, "DETACHED_SESSIONS").remove(session_id);
     let removed_pending = lock_recover(&PENDING_CANCELS, "PENDING_CANCELS").remove(session_id);
     let removed_flag = lock_recover(&CANCEL_FLAGS, "CANCEL_FLAGS")
         .remove(session_id)
@@ -250,6 +276,27 @@ pub fn get_actively_managed_sessions() -> HashSet<String> {
             .cloned(),
     );
     sessions
+}
+
+/// Check if any running session would NOT survive Jean quitting.
+///
+/// Survivable: detached Claude CLI processes, and Codex app-server turns on
+/// Unix (the server is detached and runs turns independently of Jean).
+/// Non-survivable: OpenCode sessions (managed server dies with Jean), piped
+/// CLI children (Pi, Cursor), and Codex turns on Windows (stdio transport).
+pub fn has_nonsurvivable_running_sessions() -> bool {
+    if !lock_recover(&CANCEL_FLAGS, "CANCEL_FLAGS").is_empty() {
+        return true;
+    }
+
+    if cfg!(not(unix)) && !lock_recover(&CODEX_TURN_REGISTRY, "CODEX_TURN_REGISTRY").is_empty() {
+        return true;
+    }
+
+    let detached = lock_recover(&DETACHED_SESSIONS, "DETACHED_SESSIONS");
+    lock_recover(&PROCESS_REGISTRY, "PROCESS_REGISTRY")
+        .keys()
+        .any(|session_id| !detached.contains(session_id))
 }
 
 /// Check if a specific session is actively managed (has a running process, cancel flag, or codex turn).
@@ -303,6 +350,29 @@ mod tests {
     }
 
     #[test]
+    fn get_codex_turn_returns_registered_pair() {
+        let _guard = lock_recover(&TEST_LOCK, "TEST_LOCK");
+        clear_registries();
+
+        assert!(register_codex_turn(
+            "codex-session".to_string(),
+            "thread-1".to_string(),
+            "turn-1".to_string()
+        ));
+
+        assert_eq!(
+            get_codex_turn("codex-session"),
+            Some(("thread-1".to_string(), "turn-1".to_string()))
+        );
+        assert_eq!(get_codex_turn("unknown-session"), None);
+
+        unregister_codex_turn("codex-session");
+        assert_eq!(get_codex_turn("codex-session"), None);
+
+        clear_registries();
+    }
+
+    #[test]
     fn cleanup_session_registrations_clears_opencode_active_flag() {
         let _guard = lock_recover(&TEST_LOCK, "TEST_LOCK");
         clear_registries();
@@ -339,6 +409,7 @@ pub fn cancel_process(
         log::warn!("Registry state: {:?}", registry.iter().collect::<Vec<_>>());
         registry.remove(session_id)
     };
+    lock_recover(&DETACHED_SESSIONS, "DETACHED_SESSIONS").remove(session_id);
 
     if let Some(pid) = pid {
         // SAFETY: Never kill PID 0 (would kill our own process group) or PID 1 (init/launchd)
@@ -472,6 +543,7 @@ pub fn cancel_process_if_running(
         let mut registry = lock_recover(&PROCESS_REGISTRY, "PROCESS_REGISTRY");
         registry.remove(session_id)
     };
+    lock_recover(&DETACHED_SESSIONS, "DETACHED_SESSIONS").remove(session_id);
 
     if let Some(pid) = pid {
         if pid == 0 || pid == 1 {

@@ -679,6 +679,53 @@ describe('ChatStore', () => {
 
       expect(getQueueLength('session-1')).toBe(0)
     })
+
+    it('moves middle message to front', () => {
+      const { enqueueMessage, moveQueuedMessageFront, getQueuedMessages } =
+        useChatStore.getState()
+
+      enqueueMessage('session-1', createMockMessage('msg-1', 'First'))
+      enqueueMessage('session-1', createMockMessage('msg-2', 'Second'))
+      enqueueMessage('session-1', createMockMessage('msg-3', 'Third'))
+
+      moveQueuedMessageFront('session-1', 'msg-2')
+
+      expect(getQueuedMessages('session-1').map(m => m.id)).toEqual([
+        'msg-2',
+        'msg-1',
+        'msg-3',
+      ])
+    })
+
+    it('moves last message to front', () => {
+      const { enqueueMessage, moveQueuedMessageFront, getQueuedMessages } =
+        useChatStore.getState()
+
+      enqueueMessage('session-1', createMockMessage('msg-1', 'First'))
+      enqueueMessage('session-1', createMockMessage('msg-2', 'Second'))
+
+      moveQueuedMessageFront('session-1', 'msg-2')
+
+      expect(getQueuedMessages('session-1').map(m => m.id)).toEqual([
+        'msg-2',
+        'msg-1',
+      ])
+    })
+
+    it('move-to-front is a no-op for unknown id or already-first message', () => {
+      const { enqueueMessage, moveQueuedMessageFront } = useChatStore.getState()
+
+      enqueueMessage('session-1', createMockMessage('msg-1', 'First'))
+      enqueueMessage('session-1', createMockMessage('msg-2', 'Second'))
+
+      const before = useChatStore.getState().messageQueues['session-1']
+      moveQueuedMessageFront('session-1', 'unknown-id')
+      // Same reference — no subscribers notified
+      expect(useChatStore.getState().messageQueues['session-1']).toBe(before)
+
+      moveQueuedMessageFront('session-1', 'msg-1')
+      expect(useChatStore.getState().messageQueues['session-1']).toBe(before)
+    })
   })
 
   describe('permission approvals', () => {

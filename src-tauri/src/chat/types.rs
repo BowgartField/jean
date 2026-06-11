@@ -393,9 +393,19 @@ pub struct DeniedMessageContext {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ContentBlock {
-    Text { text: String },
-    ToolUse { tool_call_id: String },
-    Thinking { thinking: String },
+    Text {
+        text: String,
+    },
+    ToolUse {
+        tool_call_id: String,
+    },
+    Thinking {
+        thinking: String,
+    },
+    /// User text injected into a running turn (Codex `turn/steer`)
+    UserInput {
+        text: String,
+    },
 }
 
 /// A single chat message

@@ -263,6 +263,7 @@ export default function useStreamingEvents({
       addTextBlock,
       addToolBlock,
       addThinkingBlock,
+      addUserInputBlock,
       addSendingSession,
     } = useChatStore.getState()
 
@@ -446,6 +447,17 @@ export default function useStreamingEvents({
       if (thinkingRafId === null) {
         thinkingRafId = requestAnimationFrame(flushThinkingBuffer)
       }
+    })
+
+    // User text injected into a running turn (Codex turn/steer) — render
+    // inline in the streaming message as a user-style bubble.
+    const unlistenSteered = listen<{
+      session_id: string
+      worktree_id: string
+      text: string
+    }>('chat:steered', event => {
+      const { session_id, text } = event.payload
+      addUserInputBlock(session_id, text)
     })
 
     // Handle tool result events (tool execution output)
@@ -1949,6 +1961,7 @@ export default function useStreamingEvents({
       unlistenToolUse.then(f => f())
       unlistenToolBlock.then(f => f())
       unlistenThinking.then(f => f())
+      unlistenSteered.then(f => f())
       unlistenToolResult.then(f => f())
       unlistenToolEvent.then(f => f())
       unlistenPermissionDenied.then(f => f())

@@ -135,6 +135,7 @@ export type ContentBlock =
   | { type: 'text'; text: string }
   | { type: 'tool_use'; tool_call_id: string }
   | { type: 'thinking'; thinking: string }
+  | { type: 'user_input'; text: string }
 
 /**
  * A single chat message

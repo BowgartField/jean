@@ -972,6 +972,14 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
     }
   }
 
+  const handleCodexAutoSteerToggle = (enabled: boolean) => {
+    if (preferences) {
+      patchPreferences.mutate({
+        codex_auto_steer_enabled: enabled,
+      })
+    }
+  }
+
   const handleCodexMaxThreadsChange = (value: string) => {
     if (preferences) {
       const num = Math.max(1, Math.min(8, parseInt(value, 10) || 3))
@@ -2688,6 +2696,16 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
             </InlineField>
 
             <InlineField
+              label="Steer running turn"
+              description="Prompts sent while Codex is working are injected into the current turn (picked up after the next tool call) instead of queued"
+            >
+              <Switch
+                checked={preferences?.codex_auto_steer_enabled ?? true}
+                onCheckedChange={handleCodexAutoSteerToggle}
+              />
+            </InlineField>
+
+            <InlineField
               label="Multi-Agent"
               description="Allow Codex to spawn parallel subagents (experimental)"
             >
@@ -4096,7 +4114,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
             <AlertDialogAction
               onClick={handleDeleteAllArchives}
               disabled={isDeleting}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              className="bg-destructive text-white hover:bg-destructive/90"
             >
               {isDeleting ? 'Deleting...' : 'Delete All'}
             </AlertDialogAction>
@@ -4156,7 +4174,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
             <AlertDialogAction
               onClick={handleConfirmDeleteCli}
               disabled={isDeletingCli}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              className="bg-destructive text-white hover:bg-destructive/90"
             >
               {isDeletingCli ? 'Deleting...' : 'Delete'}
             </AlertDialogAction>

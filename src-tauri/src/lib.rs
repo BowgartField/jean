@@ -282,6 +282,8 @@ pub struct AppPreferences {
     pub codex_goal_execution_mode: String, // Codex /goal execution mode: build or yolo
     #[serde(default)]
     pub codex_multi_agent_enabled: bool, // Enable multi-agent collaboration (experimental)
+    #[serde(default = "default_codex_auto_steer")]
+    pub codex_auto_steer_enabled: bool, // Steer prompts into a running Codex turn instead of queueing (default: true)
     #[serde(default = "default_codex_max_agent_threads")]
     pub codex_max_agent_threads: u32, // Max concurrent agent threads (1-8)
     #[serde(default = "default_restore_last_session")]
@@ -361,6 +363,10 @@ fn default_true() -> Option<bool> {
 }
 
 fn default_restore_last_session() -> bool {
+    true
+}
+
+fn default_codex_auto_steer() -> bool {
     true
 }
 
@@ -1777,6 +1783,7 @@ impl Default for AppPreferences {
             default_codex_reasoning_effort: default_codex_reasoning_effort(),
             codex_goal_execution_mode: default_codex_goal_execution_mode(),
             codex_multi_agent_enabled: false,
+            codex_auto_steer_enabled: default_codex_auto_steer(),
             codex_max_agent_threads: default_codex_max_agent_threads(),
             restore_last_session: true,
             close_original_on_clear_context: true,
@@ -4044,6 +4051,8 @@ pub fn run() {
             chat::dequeue_message,
             chat::remove_queued_message,
             chat::clear_message_queue,
+            chat::move_queued_message_front,
+            chat::steer_codex_turn,
             chat::answer_opencode_question,
             // Chat commands - ScheduleWakeup support
             chat::cancel_session_wakeup,
@@ -4188,7 +4197,7 @@ pub fn run() {
                 eprintln!("[TERMINAL CLEANUP] Killed {killed} terminal(s)");
                 if has_running_sessions {
                     log::warn!(
-                        "RunEvent::Exit while sessions are running; skipping managed AI server shutdown"
+                        "RunEvent::Exit while sessions are running; skipping OpenCode shutdown"
                     );
                 } else {
                     match opencode_server::shutdown_managed_server() {
@@ -4196,8 +4205,10 @@ pub fn run() {
                         Ok(false) => {}
                         Err(e) => eprintln!("[OPENCODE CLEANUP] Failed during Exit: {e}"),
                     }
-                    chat::codex_server::shutdown_server();
                 }
+                // Safe with runs in flight: the detached codex app-server is
+                // preserved when incomplete Codex runs exist (Unix).
+                chat::codex_server::shutdown_server();
             }
             tauri::RunEvent::ExitRequested { api, .. } => {
                 // In headless mode, prevent exit when window closes
@@ -4205,13 +4216,16 @@ pub fn run() {
                     api.prevent_exit();
                     return;
                 }
-                if chat::has_running_sessions() {
+                // Only block exit for sessions that would die with Jean
+                // (OpenCode, piped CLIs). Detached Claude processes and Codex
+                // app-server turns keep running and are recovered on relaunch.
+                if chat::has_nonsurvivable_running_sessions() {
                     api.prevent_exit();
                     if let Some(window) = app_handle.get_webview_window("main") {
                         let _ = window.hide();
                     }
                     log::info!(
-                        "Prevented app exit while sessions are running; hid main window instead"
+                        "Prevented app exit while non-survivable sessions are running; hid main window instead"
                     );
                     return;
                 }
@@ -4242,13 +4256,13 @@ pub fn run() {
                     if headless {
                         return;
                     }
-                    if chat::has_running_sessions() {
+                    if chat::has_nonsurvivable_running_sessions() {
                         api.prevent_close();
                         if let Some(window) = app_handle.get_webview_window(label) {
                             let _ = window.hide();
                         }
                         log::info!(
-                            "Prevented window close while sessions are running; hid {label} instead"
+                            "Prevented window close while non-survivable sessions are running; hid {label} instead"
                         );
                         return;
                     }

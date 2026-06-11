@@ -106,7 +106,8 @@ import { SessionDebugPanel } from './SessionDebugPanel'
 import { ChatToolbar } from './ChatToolbar'
 import { ReviewResultsPanel } from './ReviewResultsPanel'
 import { ReviewMethodModal } from './ReviewMethodModal'
-import { QueuedMessagesList } from './QueuedMessageItem'
+import { QueuedPromptsPanel } from './QueuedPromptsPanel'
+import { useQueuedPromptActions } from './hooks/useQueuedPromptActions'
 import { FloatingButtons } from './FloatingButtons'
 import { PlanDialog } from './PlanDialog'
 import type { ApprovalModelOverride } from './ApprovalModelSubmenu'
@@ -2275,15 +2276,17 @@ export function ChatWindow({
     [pendingPlanMessage, handleWorktreeYoloApproval]
   )
 
-  // Pending attachment removal, slash command execution, queue management
+  // Queued prompts panel actions (remove / send-now)
+  const { handleRemoveQueuedMessage, handleSendQueuedNow } =
+    useQueuedPromptActions()
+
+  // Pending attachment removal, slash command execution
   const {
     handleRemovePendingImage,
     handleRemovePendingTextFile,
     handleRemovePendingSkill,
     handleRemovePendingFile,
     handleCommandExecute,
-    handleRemoveQueuedMessage,
-    handleForceSendQueued,
   } = usePendingAttachments({
     activeSessionId,
     activeWorktreeId,
@@ -2847,18 +2850,6 @@ export function ChatWindow({
                                 }
                               />
                             )}
-
-                            {/* Queued messages - shown inline after streaming/messages */}
-                            {activeSessionId && (
-                              <QueuedMessagesList
-                                messages={currentQueuedMessages}
-                                sessionId={activeSessionId}
-                                worktreePath={activeWorktreePath}
-                                onRemove={handleRemoveQueuedMessage}
-                                onForceSend={handleForceSendQueued}
-                                isSessionIdle={!isSending}
-                              />
-                            )}
                           </div>
                         </div>
                       </ScrollArea>
@@ -2907,12 +2898,27 @@ export function ChatWindow({
                     <div className="bg-background">
                       <div className="mx-auto max-w-7xl">
                         <div className="relative sm:mx-auto sm:mb-3 sm:max-w-3xl xl:max-w-4xl">
+                          {/* Queued prompts - rendered as an extension above the chat input */}
+                          {activeSessionId &&
+                            currentQueuedMessages.length > 0 && (
+                              <QueuedPromptsPanel
+                                key={activeSessionId}
+                                sessionId={activeSessionId}
+                                messages={currentQueuedMessages}
+                                isSessionBusy={isSending || isWaitingForInput}
+                                onRemove={handleRemoveQueuedMessage}
+                                onSendNow={handleSendQueuedNow}
+                              />
+                            )}
                           {/* Input area - unified container with textarea and toolbar */}
                           <form
                             ref={formRef}
                             onSubmit={handleSubmit}
                             className={cn(
                               'relative overflow-hidden border-t border-border bg-card transition-[background-color,box-shadow] duration-150 sm:rounded-lg sm:border',
+                              activeSessionId &&
+                                currentQueuedMessages.length > 0 &&
+                                'sm:rounded-t-none',
                               isDragging &&
                                 'ring-2 ring-primary ring-inset bg-primary/5'
                             )}

@@ -1572,6 +1572,9 @@ pub fn persist_partial_cancelled_content(
                 ContentBlock::Thinking { thinking } => {
                     blocks.push(serde_json::json!({"type": "thinking", "thinking": thinking}));
                 }
+                ContentBlock::UserInput { text } => {
+                    blocks.push(serde_json::json!({"type": "user_input", "text": text}));
+                }
             }
         }
     }
