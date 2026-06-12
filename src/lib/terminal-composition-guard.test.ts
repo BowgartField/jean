@@ -2,6 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { attachOrphanCompositionEndGuard } from './terminal-composition-guard'
 
+const NBSP = ' '
+const DEL = '\x7f'
+
 /**
  * Regression: WebKitGTK (Tauri Linux webview) + ibus commits composed
  * characters (é, ç on AZERTY) by firing `compositionend` WITHOUT a preceding
@@ -96,24 +99,31 @@ describe('attachOrphanCompositionEndGuard', () => {
 })
 
 /**
- * Regression for the residual intermittent duplication left after the orphan
- * `compositionend` swallow landed.
+ * Regression for the corruption left after the orphan `compositionend`
+ * swallow landed, root-caused from live WebKitGTK traces:
  *
- * With orphan ends swallowed, a composed char's ONLY delivery path is xterm's
- * `CompositionHelper._handleAnyTextareaChanges`: snapshot `textarea.value` on
- * keydown(229), send the diff in a `setTimeout(0)`. ibus is asynchronous, so
- * the keydown/input/compositionend triplets of consecutive keystrokes can
- * arrive in one burst (DBus latency, main-thread jank) before any timer runs:
+ * 1. WebKitGTK routes committed text through the input method, so the UA
+ *    inserts it into xterm's hidden textarea even though xterm called
+ *    preventDefault() on the keydown. Every typed space / shifted letter
+ *    accumulates there forever (xterm only clears on Enter/^C/blur).
+ * 2. xterm's `CompositionHelper._handleAnyTextareaChanges` (scheduled on
+ *    every keydown 229) compares a keydown-time snapshot with the value in a
+ *    setTimeout(0):
+ *      - grew      → sends the diff        (the original é → éé bug)
+ *      - shrank    → sends DEL             (erases the just-typed char)
+ *      - same length but different content → SENDS THE WHOLE TEXTAREA
+ *    WebKit's editing layer normalizes a trailing NBSP to a plain space when
+ *    committing a composed char right after it, which triggers that third
+ *    branch and flushes the accumulated junk to the PTY.
  *
- *   kd1 snap "" → in1 "é" → kd2 snap "é" → in2 "éé"
- *   → timer1 diff "éé", timer2 diff "é"  ⇒ "ééé" for two keystrokes.
- *
- * Fix: when `deliverOrphanData` is provided, the guard takes over delivery at
- * the `input` event (`insertFromComposition` outside any composition): it
- * strips the committed text from the textarea and delivers it exactly once,
- * so xterm's racy diff never sees composed chars at all.
+ * Fix: when `deliverOrphanData` is provided the guard snapshots the textarea
+ * value on `beforeinput` and restores it verbatim on `input`, both for orphan
+ * `insertFromComposition` commits (delivered exactly once via the callback)
+ * and for `insertText` echoes of keys xterm already delivered directly (last
+ * keydown ≠ 229). The diff timer then always sees oldValue === newValue and
+ * none of its branches can fire.
  */
-describe('attachOrphanCompositionEndGuard — orphan commit delivery', () => {
+describe('attachOrphanCompositionEndGuard — textarea hygiene & delivery', () => {
   let root: HTMLDivElement
   let textarea: HTMLTextAreaElement
   let delivered: string[]
@@ -127,15 +137,22 @@ describe('attachOrphanCompositionEndGuard — orphan commit delivery', () => {
     document.body.replaceChildren(root)
     delivered = []
     diffSent = []
-    // Faithful mimic of xterm's CompositionHelper._handleAnyTextareaChanges
-    // (the keydown-229 path): snapshot on keydown, send the diff at t+0.
-    textarea.addEventListener('keydown', () => {
+    // Faithful mimic of xterm's CompositionHelper._handleAnyTextareaChanges:
+    // scheduled on keydown(229) only, all three branches included.
+    textarea.addEventListener('keydown', event => {
+      if ((event as KeyboardEvent).keyCode !== 229) {
+        return
+      }
       const oldValue = textarea.value
       setTimeout(() => {
         const newValue = textarea.value
         const diff = newValue.replace(oldValue, '')
         if (newValue.length > oldValue.length) {
           diffSent.push(diff)
+        } else if (newValue.length < oldValue.length) {
+          diffSent.push(DEL)
+        } else if (newValue !== oldValue) {
+          diffSent.push(newValue)
         }
       }, 0)
     })
@@ -147,21 +164,47 @@ describe('attachOrphanCompositionEndGuard — orphan commit delivery', () => {
 
   const deliver = (data: string) => delivered.push(data)
 
-  // One WebKitGTK+ibus composed keystroke: keydown(229) + UA insertion +
-  // `input insertFromComposition` + orphan `compositionend`.
-  const commitComposedChar = (char: string) => {
-    textarea.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true }))
-    textarea.value += char
+  const keydown = (keyCode: number) => {
+    const event = new KeyboardEvent('keydown', { bubbles: true })
+    Object.defineProperty(event, 'keyCode', { value: keyCode })
+    textarea.dispatchEvent(event)
+  }
+
+  const fireInput = (
+    type: 'beforeinput' | 'input',
+    inputType: string,
+    data: string
+  ) => {
     textarea.dispatchEvent(
-      new InputEvent('input', {
-        bubbles: true,
-        data: char,
-        inputType: 'insertFromComposition',
-      })
+      new InputEvent(type, { bubbles: true, data, inputType })
     )
+  }
+
+  // One WebKitGTK+ibus composed keystroke: keydown(229), beforeinput, UA
+  // insertion, input, orphan compositionend. `mutate` reproduces how the UA
+  // actually changed the value (append by default).
+  const commitComposedChar = (
+    char: string,
+    mutate: () => void = () => {
+      textarea.value += char
+    }
+  ) => {
+    keydown(229)
+    fireInput('beforeinput', 'insertFromComposition', char)
+    mutate()
+    fireInput('input', 'insertFromComposition', char)
     textarea.dispatchEvent(
       new CompositionEvent('compositionend', { bubbles: true, data: char })
     )
+  }
+
+  // One ordinary keystroke whose key xterm already delivered directly on
+  // keydown; WebKitGTK's IM still echoes it into the textarea afterwards.
+  const echoDirectKey = (keyCode: number, data: string, inserted = data) => {
+    keydown(keyCode)
+    fireInput('beforeinput', 'insertText', data)
+    textarea.value += inserted
+    fireInput('input', 'insertText', data)
   }
 
   it('delivers each composed char exactly once when keystrokes arrive in one burst (é → ééé regression)', () => {
@@ -180,16 +223,11 @@ describe('attachOrphanCompositionEndGuard — orphan commit delivery', () => {
   it('delivers the char even when the diff timer fires before the async ibus commit', () => {
     attachOrphanCompositionEndGuard(root, deliver)
 
-    textarea.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true }))
+    keydown(229)
     vi.runAllTimers() // xterm's diff fires while the commit is still in flight
+    fireInput('beforeinput', 'insertFromComposition', 'é')
     textarea.value += 'é'
-    textarea.dispatchEvent(
-      new InputEvent('input', {
-        bubbles: true,
-        data: 'é',
-        inputType: 'insertFromComposition',
-      })
-    )
+    fireInput('input', 'insertFromComposition', 'é')
     textarea.dispatchEvent(
       new CompositionEvent('compositionend', { bubbles: true, data: 'é' })
     )
@@ -199,37 +237,68 @@ describe('attachOrphanCompositionEndGuard — orphan commit delivery', () => {
     expect(diffSent).toEqual([])
   })
 
-  it('leaves commits of a real (balanced) composition to xterm', () => {
+  it('restores the textarea when WebKit normalizes a trailing NBSP during the commit (junk-burst regression)', () => {
+    // Trace-proven: value [NBSP, NBSP] + é commit → WebKit rewrites it to
+    // [NBSP, " ", é]. After a suffix-strip the value has the same length but
+    // different content than the keydown snapshot, and xterm's third diff
+    // branch sends the ENTIRE textarea to the PTY.
     attachOrphanCompositionEndGuard(root, deliver)
 
-    textarea.dispatchEvent(
-      new CompositionEvent('compositionstart', { bubbles: true })
-    )
-    textarea.value += 'ふ'
-    textarea.dispatchEvent(
-      new InputEvent('input', {
-        bubbles: true,
-        data: 'ふ',
-        inputType: 'insertFromComposition',
-      })
-    )
+    textarea.value = `${NBSP}${NBSP}`
+    commitComposedChar('é', () => {
+      textarea.value = `${NBSP} é`
+    })
+    vi.runAllTimers()
 
-    expect(delivered).toEqual([])
-    expect(textarea.value).toBe('ふ')
+    expect(delivered).toEqual(['é'])
+    expect(diffSent).toEqual([])
+    expect(textarea.value).toBe(`${NBSP}${NBSP}`)
   })
 
-  it('ignores non-composition input events (insertText keeps the xterm diff path)', () => {
+  it('restores the textarea when the commit replaces a char instead of appending (DEL regression)', () => {
+    // Trace-proven: a stale WebKit composition range can make the commit
+    // REPLACE the last char. The value shrinks after delivery and xterm's
+    // diff branch then sends DEL, erasing the just-typed accent.
     attachOrphanCompositionEndGuard(root, deliver)
 
-    textarea.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true }))
+    textarea.value = '    '
+    commitComposedChar('é', () => {
+      textarea.value = '   é'
+    })
+    vi.runAllTimers()
+
+    expect(delivered).toEqual(['é'])
+    expect(diffSent).toEqual([])
+    expect(textarea.value).toBe('    ')
+  })
+
+  it('drains insertText echoes of keys xterm already delivered directly (space accumulation regression)', () => {
+    // Trace-proven: WebKitGTK inserts every typed space/shifted letter into
+    // the hidden textarea despite xterm's preventDefault. The echo sometimes
+    // inserts NBSP while event.data says " ", so the guard restores the
+    // beforeinput snapshot instead of matching the data suffix.
+    attachOrphanCompositionEndGuard(root, deliver)
+
+    echoDirectKey(32, ' ', NBSP)
+    echoDirectKey(77, 'M')
+    echoDirectKey(32, ' ', NBSP)
+    vi.runAllTimers()
+
+    expect(delivered).toEqual([])
+    expect(diffSent).toEqual([])
+    expect(textarea.value).toBe('')
+  })
+
+  it('keeps insertText after keydown(229) on the xterm diff path (IME-active punctuation)', () => {
+    // A digit/punctuation key pressed while an IME is active arrives as
+    // keydown(229) + insertText; xterm delivers it via the grow-diff. The
+    // guard must not drain it, or the char would be lost.
+    attachOrphanCompositionEndGuard(root, deliver)
+
+    keydown(229)
+    fireInput('beforeinput', 'insertText', '2')
     textarea.value += '2'
-    textarea.dispatchEvent(
-      new InputEvent('input', {
-        bubbles: true,
-        data: '2',
-        inputType: 'insertText',
-      })
-    )
+    fireInput('input', 'insertText', '2')
     vi.runAllTimers()
 
     expect(delivered).toEqual([])
@@ -237,20 +306,45 @@ describe('attachOrphanCompositionEndGuard — orphan commit delivery', () => {
     expect(textarea.value).toBe('2')
   })
 
-  it('falls back to swallow-only when the committed data is not the textarea suffix', () => {
+  it('leaves keydown-less insertText alone (emoji picker / dictation)', () => {
     attachOrphanCompositionEndGuard(root, deliver)
 
-    textarea.value = 'xy'
-    textarea.dispatchEvent(
-      new InputEvent('input', {
-        bubbles: true,
-        data: 'é',
-        inputType: 'insertFromComposition',
-      })
-    )
+    fireInput('beforeinput', 'insertText', '🎉')
+    textarea.value += '🎉'
+    fireInput('input', 'insertText', '🎉')
+    vi.runAllTimers()
 
     expect(delivered).toEqual([])
-    expect(textarea.value).toBe('xy')
+    expect(textarea.value).toBe('🎉')
+  })
+
+  it('leaves commits of a real (balanced) composition to xterm', () => {
+    attachOrphanCompositionEndGuard(root, deliver)
+
+    textarea.dispatchEvent(
+      new CompositionEvent('compositionstart', { bubbles: true })
+    )
+    fireInput('beforeinput', 'insertFromComposition', 'ふ')
+    textarea.value += 'ふ'
+    fireInput('input', 'insertFromComposition', 'ふ')
+
+    expect(delivered).toEqual([])
+    expect(textarea.value).toBe('ふ')
+  })
+
+  it('does not drain insertText while a composition is open', () => {
+    attachOrphanCompositionEndGuard(root, deliver)
+
+    textarea.dispatchEvent(
+      new CompositionEvent('compositionstart', { bubbles: true })
+    )
+    keydown(65)
+    fireInput('beforeinput', 'insertText', 'あ')
+    textarea.value += 'あ'
+    fireInput('input', 'insertText', 'あ')
+
+    expect(delivered).toEqual([])
+    expect(textarea.value).toBe('あ')
   })
 
   it('keeps the legacy swallow-only behavior when no delivery callback is given', () => {
@@ -263,18 +357,13 @@ describe('attachOrphanCompositionEndGuard — orphan commit delivery', () => {
     expect(textarea.value).toBe('é')
   })
 
-  it('stops delivering after cleanup', () => {
+  it('stops delivering and draining after cleanup', () => {
     const cleanup = attachOrphanCompositionEndGuard(root, deliver)
     cleanup()
 
+    fireInput('beforeinput', 'insertFromComposition', 'é')
     textarea.value += 'é'
-    textarea.dispatchEvent(
-      new InputEvent('input', {
-        bubbles: true,
-        data: 'é',
-        inputType: 'insertFromComposition',
-      })
-    )
+    fireInput('input', 'insertFromComposition', 'é')
 
     expect(delivered).toEqual([])
     expect(textarea.value).toBe('é')
