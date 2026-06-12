@@ -729,6 +729,15 @@ export const CompactMessageList = memo(
       const pendingPrependScrollHeightRef = useRef<number | null>(null)
       const pendingPrependMessagesLengthRef = useRef<number | null>(null)
 
+      // Stable accessor for the full message list. Kept in a ref so the
+      // identity handed to memoized rows never changes — "subsequent edits"
+      // stays lazy without busting per-row memoization.
+      const messagesRef = useRef(messages)
+      useEffect(() => {
+        messagesRef.current = messages
+      }, [messages])
+      const getMessages = useCallback(() => messagesRef.current, [])
+
       const lastIndex = messages.length - 1
       const hasHiddenPrompts = hiddenPromptCount > 0 && !!onShowHiddenPrompts
 
@@ -870,7 +879,7 @@ export const CompactMessageList = memo(
         ) => (
           <MessageItem
             message={item.message}
-            allMessages={messages}
+            getMessages={getMessages}
             messageIndex={item.globalIndex}
             totalMessages={totalMessages}
             lastPlanMessageIndex={lastPlanMessageIndex}

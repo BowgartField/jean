@@ -179,6 +179,15 @@ export const VirtualizedMessageList = memo(
       // messages the backend actually prepended (varies per response).
       const pendingPrependMessagesLengthRef = useRef<number | null>(null)
 
+      // Stable accessor for the full message list. Kept in a ref so the
+      // identity passed down to memoized rows never changes — computing
+      // "subsequent edits" stays lazy without busting per-row memoization.
+      const messagesRef = useRef(messages)
+      useEffect(() => {
+        messagesRef.current = messages
+      }, [messages])
+      const getMessages = useCallback(() => messagesRef.current, [])
+
       // Track how many messages to render (from the end)
       const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_COUNT)
 
@@ -401,7 +410,7 @@ export const VirtualizedMessageList = memo(
               >
                 <MessageItem
                   message={message}
-                  allMessages={messages}
+                  getMessages={getMessages}
                   messageIndex={globalIndex}
                   totalMessages={totalMessages}
                   lastPlanMessageIndex={lastPlanMessageIndex}

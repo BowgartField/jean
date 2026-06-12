@@ -41,14 +41,21 @@ function computeEditStats(
 interface EditedFilesDisplayProps {
   toolCalls: ToolCall[] | undefined
   worktreePath?: string
-  allMessages?: ChatMessage[]
+  /**
+   * Stable accessor for the full session message list. Used to compute
+   * "subsequent edits" lazily when the user opens a diff. Passing a stable
+   * function (rather than the `messages` array itself) keeps the memoized
+   * row from re-rendering whenever the session's message array identity
+   * changes — avoiding a per-row render cascade while scrolling.
+   */
+  getMessages?: () => ChatMessage[]
   messageIndex?: number
 }
 
 export const EditedFilesDisplay = memo(function EditedFilesDisplay({
   toolCalls,
   worktreePath,
-  allMessages,
+  getMessages,
   messageIndex,
 }: EditedFilesDisplayProps) {
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null)
@@ -90,14 +97,16 @@ export const EditedFilesDisplay = memo(function EditedFilesDisplay({
     [editTools, selectedFilePath]
   )
 
-  // All Edit tool calls on selectedFilePath from messages AFTER this one
+  // All Edit tool calls on selectedFilePath from messages AFTER this one.
+  // Computed lazily — only once the user opens a diff — by pulling the
+  // current message list through the stable `getMessages` accessor.
   const subsequentEdits = useMemo(() => {
-    if (!selectedFilePath || !allMessages || messageIndex == null) return []
-    return allMessages
+    if (!selectedFilePath || !getMessages || messageIndex == null) return []
+    return getMessages()
       .slice(messageIndex + 1)
       .flatMap(msg => (msg.tool_calls ?? []).filter(isEditTool))
       .filter(t => t.input.file_path === selectedFilePath)
-  }, [selectedFilePath, allMessages, messageIndex])
+  }, [selectedFilePath, getMessages, messageIndex])
 
   if (editTools.length === 0) return null
 
@@ -113,20 +122,23 @@ export const EditedFilesDisplay = memo(function EditedFilesDisplay({
         return (
           <Tooltip key={filePath}>
             <TooltipTrigger asChild>
-              <Badge
-                variant="outline"
-                className="cursor-pointer gap-1.5"
+              <button
+                type="button"
                 onClick={() => setSelectedFilePath(filePath)}
+                aria-label={`View changes to ${getFilename(filePath)}`}
+                className="inline-flex rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
-                {getFilename(filePath)}
-                {stats && (stats.additions > 0 || stats.deletions > 0) && (
-                  <span className="flex items-center font-mono text-xs opacity-80">
-                    <span className="text-green-500">+{stats.additions}</span>
-                    <span className="text-muted-foreground mx-0.5">/</span>
-                    <span className="text-red-500">-{stats.deletions}</span>
-                  </span>
-                )}
-              </Badge>
+                <Badge variant="outline" className="cursor-pointer gap-1.5">
+                  {getFilename(filePath)}
+                  {stats && (stats.additions > 0 || stats.deletions > 0) && (
+                    <span className="flex items-center font-mono text-xs opacity-80">
+                      <span className="text-green-500">+{stats.additions}</span>
+                      <span className="text-muted-foreground mx-0.5">/</span>
+                      <span className="text-red-500">-{stats.deletions}</span>
+                    </span>
+                  )}
+                </Badge>
+              </button>
             </TooltipTrigger>
             <TooltipContent>{filePath}</TooltipContent>
           </Tooltip>

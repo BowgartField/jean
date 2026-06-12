@@ -4,7 +4,7 @@ import { parsePatchFiles } from '@pierre/diffs'
 import { FileDiff } from '@pierre/diffs/react'
 import { FileText, Columns2, Rows3, Loader2, ExternalLink, X } from 'lucide-react'
 import { toast } from 'sonner'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import {
   Dialog,
   DialogContent,
@@ -58,6 +58,24 @@ export interface EditTool {
     old_string?: string
     new_string?: string
   }
+}
+
+/**
+ * Replace the LAST occurrence of `search` with `replacement`.
+ * Used for reverse-replaying edits: edits are undone newest-first, so the most
+ * recently inserted text is the last occurrence. First-match `String.replace`
+ * could revert the wrong instance when the inserted text is non-unique.
+ */
+function replaceLast(
+  haystack: string,
+  search: string,
+  replacement: string
+): string {
+  const idx = haystack.lastIndexOf(search)
+  if (idx === -1) return haystack
+  return (
+    haystack.slice(0, idx) + replacement + haystack.slice(idx + search.length)
+  )
 }
 
 type DiffStyle = 'split' | 'unified'
@@ -118,7 +136,7 @@ export function MessageDiffModal({
         const oldStr = edit.input.old_string ?? ''
         const newStr = edit.input.new_string ?? ''
         if (newStr && afterThis.includes(newStr)) {
-          afterThis = afterThis.replace(newStr, oldStr)
+          afterThis = replaceLast(afterThis, newStr, oldStr)
         }
       }
       // Step 2: undo this message's edits → get file state before THIS message
@@ -127,7 +145,7 @@ export function MessageDiffModal({
         const oldStr = edit.input.old_string ?? ''
         const newStr = edit.input.new_string ?? ''
         if (newStr && beforeThis.includes(newStr)) {
-          beforeThis = beforeThis.replace(newStr, oldStr)
+          beforeThis = replaceLast(beforeThis, newStr, oldStr)
         }
       }
       const patch = createPatch(relativePath, beforeThis, afterThis, '', '', { context: 3 })
@@ -206,17 +224,27 @@ export function MessageDiffModal({
     ]
   )
 
-  const handleOpenExternal = useCallback(async () => {
-    try {
-      await invoke('open_file_in_default_app', {
+  const openFileMutation = useMutation({
+    mutationFn: () =>
+      invoke('open_file_in_default_app', {
         path: filePath,
         editor: preferences?.editor,
-      })
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      toast.error(`Failed to open: ${message}`)
-    }
-  }, [filePath, preferences?.editor])
+      }),
+  })
+
+  const handleOpenExternal = useCallback(() => {
+    const id = toast.loading('Opening in editor…')
+    openFileMutation.mutate(undefined, {
+      onSuccess: () => toast.success('Opened in editor', { id }),
+      onError: err => {
+        const message = err instanceof Error ? err.message : String(err)
+        toast.error(`Failed to open: ${message}`, { id })
+      },
+    })
+  }, [openFileMutation])
+
+  // "All changes" relies on the git backend, only available in the native app
+  const allChangesAvailable = isTauri() && !!worktreePath
 
   return (
     <Dialog open={isOpen} onOpenChange={open => !open && onClose()}>
@@ -250,25 +278,27 @@ export function MessageDiffModal({
                 </span>
               )}
             </button>
-            <button
-              type="button"
-              onClick={() => setViewMode('all')}
-              className={cn(
-                'px-3 py-1 rounded-md text-xs font-medium transition-colors',
-                viewMode === 'all'
-                  ? 'bg-background shadow-sm text-foreground'
-                  : 'text-muted-foreground hover:text-foreground'
-              )}
-            >
-              All changes
-              {allStats && (allStats.additions > 0 || allStats.deletions > 0) && (
-                <span className="ml-1.5 font-mono opacity-80">
-                  <span className="text-green-500">+{allStats.additions}</span>
-                  <span className="mx-0.5">/</span>
-                  <span className="text-red-500">-{allStats.deletions}</span>
-                </span>
-              )}
-            </button>
+            {allChangesAvailable && (
+              <button
+                type="button"
+                onClick={() => setViewMode('all')}
+                className={cn(
+                  'px-3 py-1 rounded-md text-xs font-medium transition-colors',
+                  viewMode === 'all'
+                    ? 'bg-background shadow-sm text-foreground'
+                    : 'text-muted-foreground hover:text-foreground'
+                )}
+              >
+                All changes
+                {allStats && (allStats.additions > 0 || allStats.deletions > 0) && (
+                  <span className="ml-1.5 font-mono opacity-80">
+                    <span className="text-green-500">+{allStats.additions}</span>
+                    <span className="mx-0.5">/</span>
+                    <span className="text-red-500">-{allStats.deletions}</span>
+                  </span>
+                )}
+              </button>
+            )}
           </div>
 
           {/* Diff style toggle */}

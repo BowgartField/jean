@@ -1,4 +1,4 @@
-import { memo, useMemo } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef } from 'react'
 import type {
   ChatMessage,
   Question,
@@ -84,6 +84,15 @@ export const MessageList = memo(function MessageList({
   hideApproveButtons,
   completedDurationMs,
 }: MessageListProps) {
+  // Stable accessor for the full message list. Kept in a ref so the identity
+  // handed to memoized rows never changes — "subsequent edits" stays lazy
+  // without busting per-row memoization.
+  const messagesRef = useRef(messages)
+  useEffect(() => {
+    messagesRef.current = messages
+  }, [messages])
+  const getMessages = useCallback(() => messagesRef.current, [])
+
   // Pre-compute hasFollowUpMessage for all messages in O(n) instead of O(n²)
   const hasFollowUpMap = useMemo(() => {
     const map = new Map<number, boolean>()
@@ -115,7 +124,7 @@ export const MessageList = memo(function MessageList({
           <div key={message.id}>
             <MessageItem
               message={message}
-              allMessages={messages}
+              getMessages={getMessages}
               messageIndex={index}
               totalMessages={totalMessages}
               lastPlanMessageIndex={lastPlanMessageIndex}

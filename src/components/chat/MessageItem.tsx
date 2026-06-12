@@ -58,8 +58,12 @@ import type { ApprovalModelOverride } from './ApprovalModelSubmenu'
 interface MessageItemProps {
   /** The message to render */
   message: ChatMessage
-  /** All messages in the session (for computing subsequent edits) */
-  allMessages?: ChatMessage[]
+  /**
+   * Stable accessor for the full session message list, used to compute
+   * "subsequent edits" lazily when a diff is opened. Passing a stable
+   * function (not the array) preserves this row's memoization.
+   */
+  getMessages?: () => ChatMessage[]
   /** Index of this message in the message list */
   messageIndex: number
   /** Total number of messages (to determine if this is the last message) */
@@ -149,7 +153,7 @@ interface MessageItemProps {
  */
 export const MessageItem = memo(function MessageItem({
   message,
-  allMessages,
+  getMessages,
   messageIndex,
   totalMessages,
   lastPlanMessageIndex,
@@ -798,7 +802,7 @@ export const MessageItem = memo(function MessageItem({
           <EditedFilesDisplay
             toolCalls={message.tool_calls}
             worktreePath={worktreePath}
-            allMessages={allMessages}
+            getMessages={getMessages}
             messageIndex={messageIndex}
           />
         )}
