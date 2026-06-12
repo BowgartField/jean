@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import userEvent from '@testing-library/user-event'
+import { within } from '@testing-library/react'
 import { render, screen } from '@/test/test-utils'
 import { BackendModelPickerContent } from './BackendModelPickerContent'
 
@@ -91,6 +92,7 @@ describe('BackendModelPickerContent', () => {
       />
     )
 
+    expect(screen.getByText('Fable 5')).toBeInTheDocument()
     expect(screen.getByText('Opus 4.8 (1M)')).toBeInTheDocument()
     expect(screen.getByText('Opus 4.7 (1M)')).toBeInTheDocument()
     expect(screen.getByText('Opus 4.6 (1M)')).toBeInTheDocument()
@@ -357,6 +359,57 @@ describe('BackendModelPickerContent', () => {
     expect(opus46Index).toBeLessThan(opus48Index)
   })
 
+  it('does not show fast mode for Claude Fable 5', () => {
+    render(
+      <BackendModelPickerContent
+        open
+        selectedBackend="claude"
+        selectedModel="claude-fable-5"
+        selectedProvider={null}
+        installedBackends={['claude']}
+        customCliProfiles={[]}
+        onModelChange={vi.fn()}
+        onBackendModelChange={vi.fn()}
+        onRequestClose={vi.fn()}
+      />
+    )
+
+    const fableActions = screen.getByTestId(
+      'model-actions-claude-claude-fable-5'
+    )
+    expect(
+      within(fableActions).queryByRole('switch', { name: /fast mode/i })
+    ).not.toBeInTheDocument()
+  })
+
+  it('toggles favourite status for Claude Fable 5 via the star button', async () => {
+    const user = userEvent.setup()
+
+    render(
+      <BackendModelPickerContent
+        open
+        selectedBackend="claude"
+        selectedModel="claude-fable-5"
+        selectedProvider={null}
+        installedBackends={['claude']}
+        customCliProfiles={[]}
+        onModelChange={vi.fn()}
+        onBackendModelChange={vi.fn()}
+        onRequestClose={vi.fn()}
+      />
+    )
+
+    const starBtn = screen.getByRole('switch', {
+      name: /^favorite fable 5$/i,
+    })
+    expect(starBtn).toHaveAttribute('aria-checked', 'false')
+
+    await user.click(starBtn)
+    expect(patchPreferencesMutate).toHaveBeenCalledWith({
+      favorite_models: ['claude:claude-fable-5'],
+    })
+  })
+
   it('toggles favourite status via the star button', async () => {
     const user = userEvent.setup()
 
@@ -560,7 +613,7 @@ describe('BackendModelPickerContent', () => {
     )
   })
 
-  it('Cmd+digit ignored on locked session for non-selected backend', async () => {
+  it('Cmd+digit switches backend even after the session has messages', async () => {
     const user = userEvent.setup()
 
     render(
@@ -585,13 +638,13 @@ describe('BackendModelPickerContent', () => {
 
     await user.keyboard('{Meta>}1{/Meta}')
 
-    expect(screen.getByRole('tab', { name: 'Codex' })).toHaveAttribute(
+    expect(screen.getByRole('tab', { name: 'Claude' })).toHaveAttribute(
       'aria-selected',
       'true'
     )
   })
 
-  it('disables non-selected backend tabs once the session has messages', () => {
+  it('keeps backend tabs enabled once the session has messages', () => {
     render(
       <BackendModelPickerContent
         open
@@ -607,8 +660,8 @@ describe('BackendModelPickerContent', () => {
       />
     )
 
-    expect(screen.getByRole('tab', { name: 'Claude' })).toBeDisabled()
+    expect(screen.getByRole('tab', { name: 'Claude' })).not.toBeDisabled()
     expect(screen.getByRole('tab', { name: 'Codex' })).not.toBeDisabled()
-    expect(screen.getByRole('tab', { name: 'OpenCode' })).toBeDisabled()
+    expect(screen.getByRole('tab', { name: 'OpenCode' })).not.toBeDisabled()
   })
 })

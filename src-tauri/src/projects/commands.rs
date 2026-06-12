@@ -1216,6 +1216,7 @@ pub async fn create_worktree(
     let app_clone = app.clone();
     let project_path = project.path.clone();
     let project_name = project.name.clone();
+    let project_worktrees_dir_clone = project_worktrees_dir.clone();
     let worktree_id_clone = worktree_id.clone();
     let project_id_clone = project_id.clone();
     let name_clone = name.clone();
@@ -1236,6 +1237,8 @@ pub async fn create_worktree(
         let panic_app = app_clone.clone();
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+            let mut name_clone = name_clone;
+            let mut worktree_path_clone = worktree_path_clone;
             log::trace!("Background: Creating git worktree {name_clone} at {worktree_path_clone}");
 
             // Fetch base branch if enabled, use origin/<base> for up-to-date start point.
@@ -1263,6 +1266,52 @@ pub async fn create_worktree(
             } else {
                 format!("origin/{base_clone}")
             };
+
+            if should_auto_resolve_worktree_conflict(&worktree_origin_clone) {
+                let mut resolved = false;
+                for _ in 0..10 {
+                    let worktree_path = std::path::Path::new(&worktree_path_clone);
+                    let has_path_conflict = worktree_path.exists();
+                    let has_branch_conflict = pr_context_clone.is_none()
+                        && git::branch_exists(&project_path, &name_clone);
+
+                    if !has_path_conflict && !has_branch_conflict {
+                        resolved = true;
+                        break;
+                    }
+
+                    let data = load_projects_data(&app_clone).ok();
+                    let suggested_name = generate_unique_suffix_name(
+                        &name_clone,
+                        &project_path,
+                        &project_id_clone,
+                        data.as_ref(),
+                    );
+                    log::warn!(
+                        "Background: Auto-fix worktree conflict for {name_clone}; retrying with {suggested_name}"
+                    );
+                    name_clone = suggested_name;
+                    let next_path =
+                        project_worktrees_dir_clone.join(sanitize_folder_name(&name_clone));
+                    let Some(next_path_str) = next_path.to_str() else {
+                        log::error!("Background: Invalid auto-fix worktree path");
+                        break;
+                    };
+                    worktree_path_clone = next_path_str.to_string();
+                }
+
+                if !resolved {
+                    let error_event = WorktreeCreateErrorEvent {
+                        id: worktree_id_clone,
+                        project_id: project_id_clone,
+                        error: "Failed to auto-resolve worktree name conflict".to_string(),
+                    };
+                    if let Err(e) = app_clone.emit_all("worktree:error", &error_event) {
+                        log::error!("Failed to emit worktree:error event: {e}");
+                    }
+                    return;
+                }
+            }
 
             // Check if path already exists
             let worktree_path = std::path::Path::new(&worktree_path_clone);
@@ -1300,6 +1349,7 @@ pub async fn create_worktree(
                     issue_context: issue_context_clone.clone(),
                     security_context: security_context_clone.clone(),
                     advisory_context: advisory_context_clone.clone(),
+                    origin: worktree_origin_clone.clone(),
                 };
                 if let Err(e) = app_clone.emit_all("worktree:path_exists", &path_exists_event) {
                     log::error!("Failed to emit worktree:path_exists event: {e}");
@@ -1362,6 +1412,7 @@ pub async fn create_worktree(
                             pr_context: pr_context_clone.clone(),
                             security_context: security_context_clone.clone(),
                             advisory_context: advisory_context_clone.clone(),
+                            origin: worktree_origin_clone.clone(),
                         };
                         if let Err(e) =
                             app_clone.emit_all("worktree:branch_exists", &branch_exists_event)
@@ -1879,6 +1930,10 @@ fn parse_worktree_origin(origin: Option<&str>) -> Result<Option<WorktreeOrigin>,
     }
 }
 
+fn should_auto_resolve_worktree_conflict(origin: &Option<WorktreeOrigin>) -> bool {
+    matches!(origin, Some(WorktreeOrigin::AutoFix))
+}
+
 /// Create a worktree from an existing branch (runs in background)
 ///
 /// This command is used when a branch already exists and the user wants to
@@ -2051,6 +2106,7 @@ pub async fn create_worktree_from_existing_branch(
                     issue_context: issue_context_clone.clone(),
                     security_context: security_context_clone.clone(),
                     advisory_context: advisory_context_clone.clone(),
+                    origin: None,
                 };
                 if let Err(e) = app_clone.emit_all("worktree:path_exists", &path_exists_event) {
                     log::error!("Failed to emit worktree:path_exists event: {e}");
@@ -6852,12 +6908,14 @@ const COMMIT_MESSAGE_SCHEMA: &str = r#"{"type":"object","properties":{"message":
 const COMMIT_MESSAGE_PROMPT: &str = r#"Generate a conventional commit message for these staged changes.
 
 Rules:
-- Output a commit message about the actual staged code changes only.
-- Do not describe this prompt, commit-message guidance, instructions, inspection, or the act of generating a commit message.
-- Avoid vague subjects like "update files", "inspect changes", "adjust code", or "misc changes".
+- Output only the commit message text.
+- Describe the actual staged code changes only.
+- Base the subject on the staged diff and file summary, not on recent commits, repository instructions, agent skills, or this prompt.
+- Do not describe prompt text, commit-message guidance, instructions, inspection, skills, or the act of generating a commit message.
+- Avoid vague/meta subjects like "update files", "inspect changes", "inspect staged changes", "inspect commit-message skill", "generate commit message", "adjust code", or "misc changes".
 - Use a specific Conventional Commits subject: type(optional-scope): concrete behavior changed.
 - First line must be 72 characters or fewer.
-- If prompt/config files changed, name the product behavior affected, not "guidance".
+- If prompt/config files changed, name the user-facing behavior affected, not "guidance" or "prompt".
 
 Files changed:
 {diff_stat}
@@ -6865,10 +6923,10 @@ Files changed:
 Git status:
 {status}
 
-Diff:
+Staged diff:
 {diff}
 
-Recent commits (style reference):
+Recent commits (style reference only — do not summarize these commits):
 {recent_commits}"#;
 
 /// Structured response from commit message generation
@@ -6879,6 +6937,17 @@ struct CommitMessageResponse {
 
 fn commit_message_subject(message: &str) -> &str {
     message.lines().next().unwrap_or("").trim()
+}
+
+fn normalize_commit_subject_for_meta_checks(subject: &str) -> String {
+    subject
+        .to_lowercase()
+        .chars()
+        .map(|c| if c == '-' || c == '_' { ' ' } else { c })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn validate_commit_message(message: &str, _diff_stat: &str, _status: &str) -> Result<(), String> {
@@ -6900,15 +6969,27 @@ fn validate_commit_message(message: &str, _diff_stat: &str, _status: &str) -> Re
     }
 
     let lower_subject = subject.to_lowercase();
+    let normalized_subject = normalize_commit_subject_for_meta_checks(subject);
+    let normalized_description = normalized_subject
+        .split_once(": ")
+        .map(|(_, description)| description)
+        .unwrap_or(normalized_subject.as_str());
     let meta_terms = [
         "commit message guidance",
         "commit guidance",
         "message guidance",
         "commit message prompt",
+        "commit message skill",
         "prompt instructions",
         "inspect commit message",
+        "inspect staged changes",
+        "staged changes for commit message",
+        "generate commit message",
     ];
-    if meta_terms.iter().any(|term| lower_subject.contains(term)) {
+    if meta_terms
+        .iter()
+        .any(|term| normalized_subject.contains(term))
+    {
         return Err(
             "commit message is meta/generic instead of describing staged changes".to_string(),
         );
@@ -6917,7 +6998,27 @@ fn validate_commit_message(message: &str, _diff_stat: &str, _status: &str) -> Re
     let prompt_like_terms = ["guidance", "prompt", "instructions"];
     if prompt_like_terms
         .iter()
-        .any(|term| lower_subject.contains(term))
+        .any(|term| normalized_subject.contains(term))
+    {
+        return Err(
+            "commit message is meta/generic instead of describing staged changes".to_string(),
+        );
+    }
+
+    let meta_actions = ["inspect", "review", "summarize", "describe", "generate"];
+    let meta_objects = [
+        "commit message",
+        "staged changes",
+        "diff",
+        "prompt",
+        "skill",
+    ];
+    if meta_actions
+        .iter()
+        .any(|action| normalized_description.starts_with(action))
+        && meta_objects
+            .iter()
+            .any(|object| normalized_description.contains(object))
     {
         return Err(
             "commit message is meta/generic instead of describing staged changes".to_string(),
@@ -10285,19 +10386,46 @@ pub async fn fetch_worktrees_status(app: AppHandle, project_id: String) -> Resul
         project_id
     );
 
-    // Spawn threads to fetch status for each worktree in parallel
-    // Using std::thread since get_branch_status is synchronous (uses Command)
+    // Fetch status with a bounded worker pool. get_branch_status runs ~8-10 git
+    // subcommands (each a child process needing pipe fds); spawning one thread per
+    // worktree unbounded would, with 100+ worktrees, exhaust the process fd table
+    // (EMFILE) and silently break both git status and coinciding claude CLI spawns.
+    // Cap concurrency so fd usage stays flat regardless of worktree count.
     let base_branch = project.default_branch.clone();
+    let worker_count = worktrees.len().clamp(1, 8);
 
+    // Shared job queue: workers pull worktrees until the receiver is drained.
+    let (tx, rx) = mpsc::channel::<Worktree>();
     for worktree in worktrees {
+        // Send cannot fail: receiver lives until all workers finish below.
+        let _ = tx.send(worktree);
+    }
+    drop(tx); // Close the channel so workers exit once the queue is empty.
+
+    let rx = std::sync::Arc::new(Mutex::new(rx));
+
+    for _ in 0..worker_count {
         let app_clone = app.clone();
         let base_branch_clone = base_branch.clone();
+        let rx = std::sync::Arc::clone(&rx);
 
-        thread::spawn(move || {
+        thread::spawn(move || loop {
+            // Pull the next worktree job (lock only while dequeuing).
+            let worktree = {
+                let guard = match rx.lock() {
+                    Ok(g) => g,
+                    Err(_) => break,
+                };
+                match guard.recv() {
+                    Ok(w) => w,
+                    Err(_) => break, // Channel drained — worker done.
+                }
+            };
+
             let info = ActiveWorktreeInfo {
                 worktree_id: worktree.id.clone(),
                 worktree_path: worktree.path.clone(),
-                base_branch: base_branch_clone,
+                base_branch: base_branch_clone.clone(),
                 pr_number: worktree.pr_number,
                 pr_url: worktree.pr_url.clone(),
                 pr_push_remote: worktree.pr_push_remote.clone(),
@@ -10355,9 +10483,11 @@ pub async fn fetch_worktrees_status(app: AppHandle, project_id: String) -> Resul
         });
     }
 
-    // Don't wait for threads - fire and forget
+    // Don't wait for workers - fire and forget
     // Status updates will be emitted via events as they complete
-    log::trace!("[fetch_worktrees_status] Spawned status fetch threads for project: {project_id}");
+    log::trace!(
+        "[fetch_worktrees_status] Spawned {worker_count} status workers for project: {project_id}"
+    );
     Ok(())
 }
 
@@ -11161,6 +11291,17 @@ mod tests {
     }
 
     #[test]
+    fn auto_fix_origin_auto_resolves_worktree_conflicts() {
+        assert!(should_auto_resolve_worktree_conflict(&Some(
+            WorktreeOrigin::AutoFix
+        )));
+        assert!(!should_auto_resolve_worktree_conflict(&Some(
+            WorktreeOrigin::Manual
+        )));
+        assert!(!should_auto_resolve_worktree_conflict(&None));
+    }
+
+    #[test]
     fn extract_json_object_plain() {
         let out = extract_json_object_from_text(r#"{"title":"a","body":"b"}"#).unwrap();
         assert_eq!(out, r#"{"title":"a","body":"b"}"#);
@@ -11482,6 +11623,41 @@ Body
 
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("generic"));
+    }
+
+    #[test]
+    fn validate_commit_message_rejects_scoped_commit_message_skill_subject() {
+        let result = validate_commit_message(
+            "chore(commit): inspect commit-message skill",
+            "src-tauri/src/chat/codex.rs | 10 ++++++++++",
+            "M  src-tauri/src/chat/codex.rs",
+        );
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("meta"));
+    }
+
+    #[test]
+    fn validate_commit_message_rejects_staged_changes_inspection_subject() {
+        let result = validate_commit_message(
+            "chore: inspect staged changes for commit message",
+            "src-tauri/src/chat/claude.rs | 10 ++++++++++",
+            "M  src-tauri/src/chat/claude.rs",
+        );
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("meta"));
+    }
+
+    #[test]
+    fn validate_commit_message_allows_user_facing_commit_message_feature() {
+        let result = validate_commit_message(
+            "fix(commit): reject generic AI commit subjects",
+            "src-tauri/src/projects/commands.rs | 35 +++++++++++++++++++++++++",
+            "M  src-tauri/src/projects/commands.rs",
+        );
+
+        assert!(result.is_ok());
     }
 
     #[test]

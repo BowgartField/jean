@@ -5,6 +5,7 @@ import { useUIStore } from '@/store/ui-store'
 import { useProjectsStore } from '@/store/projects-store'
 import { chatQueryKeys } from '@/services/chat'
 import { resolveDefaultModelForBackend } from '@/lib/session-defaults'
+import type { ModelOption } from '@/lib/session-defaults'
 import type { QueryClient } from '@tanstack/react-query'
 import type {
   ThinkingLevel,
@@ -33,12 +34,14 @@ interface UseToolbarHandlersParams {
         selected_codex_model?: string
         selected_opencode_model?: string
         selected_cursor_model?: string
+        selected_pi_model?: string
         selected_commandcode_model?: string
         selected_grok_model?: string
         custom_cli_profiles?: { name: string }[]
         default_execution_mode?: ExecutionMode
       }
     | undefined
+  piModelOptions?: ModelOption[]
   queryClient: QueryClient
   worktreeProjectId: string | undefined
   // Mutations (use any for compatibility with TanStack Query mutation types)
@@ -73,6 +76,7 @@ export function useToolbarHandlers({
   installedBackends,
   session,
   preferences,
+  piModelOptions,
   queryClient,
   worktreeProjectId,
   setSessionModel,
@@ -206,7 +210,11 @@ export function useToolbarHandlers({
 
   const handleToolbarBackendChange = useCallback(
     (backend: CliBackend) => {
-      const model = resolveDefaultModelForBackend(backend, preferences)
+      const model = resolveDefaultModelForBackend(
+        backend,
+        preferences,
+        backend === 'pi' ? piModelOptions : undefined
+      )
 
       persistToolbarBackendAndModel(backend, model)
     },
@@ -218,6 +226,8 @@ export function useToolbarHandlers({
       preferences?.selected_grok_model,
       preferences?.selected_model,
       preferences?.selected_opencode_model,
+      preferences?.selected_pi_model,
+      piModelOptions,
     ]
   )
 
@@ -229,18 +239,12 @@ export function useToolbarHandlers({
   )
 
   const handleTabBackendSwitch = useCallback(() => {
-    if ((session?.messages?.length ?? 0) > 0) return
     if (installedBackends.length <= 1) return
     const currentIndex = installedBackends.indexOf(selectedBackend)
     const nextIndex = (currentIndex + 1) % installedBackends.length
     const nextBackend = installedBackends[nextIndex]
     if (nextBackend) handleToolbarBackendChange(nextBackend)
-  }, [
-    session?.messages?.length,
-    selectedBackend,
-    installedBackends,
-    handleToolbarBackendChange,
-  ])
+  }, [selectedBackend, installedBackends, handleToolbarBackendChange])
 
   const handleToolbarProviderChange = useCallback(
     (provider: string | null) => {

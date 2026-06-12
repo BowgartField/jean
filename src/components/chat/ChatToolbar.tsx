@@ -174,6 +174,7 @@ export const ChatToolbar = memo(function ChatToolbar({
     availablePiModels?.map(model => ({
       value: `pi/${model.id}`,
       label: model.label || formatPiModelLabel(model.id),
+      is_default: model.is_default,
     })) ?? PI_MODEL_OPTIONS
 
   const { isCodex, activeMcpCount, backendModelSections, selectedModelLabel } =
@@ -348,7 +349,7 @@ export const ChatToolbar = memo(function ChatToolbar({
         />
 
         <MobileToolbarMenu
-          isDisabled={hasPendingQuestions}
+          isDisabled={false}
           hasOpenPr={hasOpenPr}
           hasIssueContexts={loadedIssueContexts.length > 0}
           hasPrContexts={loadedPRContexts.length > 0}
@@ -367,7 +368,7 @@ export const ChatToolbar = memo(function ChatToolbar({
         />
 
         <MobileSettingsMenu
-          isDisabled={hasPendingQuestions}
+          isDisabled={false}
           providerLocked={providerLocked}
           selectedBackend={selectedBackend}
           selectedProvider={selectedProvider}

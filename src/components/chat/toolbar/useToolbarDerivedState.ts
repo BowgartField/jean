@@ -1,20 +1,23 @@
 import { useMemo } from 'react'
-import {
-  getModelFastInfo,
-  type ClaudeModel,
-  type CliBackend,
-  type CustomCliProfile,
+import type {
+  ClaudeModel,
+  CliBackend,
+  CustomCliProfile,
 } from '@/types/preferences'
 import {
-  CODEX_MODEL_OPTIONS,
   CURSOR_MODEL_OPTIONS,
   COMMANDCODE_MODEL_OPTIONS,
   GROK_MODEL_OPTIONS,
-  MODEL_OPTIONS,
   OPENCODE_MODEL_OPTIONS,
   PI_MODEL_OPTIONS,
 } from '@/components/chat/toolbar/toolbar-options'
 import { sortModelOptionsByRawModel } from '@/components/chat/toolbar/toolbar-utils'
+import {
+  getCatalogModelFastInfo,
+  getCatalogModelOptions,
+  useModelCatalog,
+} from '@/services/model-catalog'
+import { resolvePiDefaultModel } from '@/lib/session-defaults'
 
 interface UseToolbarDerivedStateArgs {
   selectedBackend: CliBackend
@@ -27,7 +30,7 @@ interface UseToolbarDerivedStateArgs {
   grokModelOptions?: { value: string; label: string }[]
   customCliProfiles: CustomCliProfile[]
   installedBackends?: CliBackend[]
-  availableMcpServers?: { name: string; disabled?: boolean }[]
+  availableMcpServers?: { name: string; backend?: string; disabled?: boolean }[]
   enabledMcpServers?: string[]
 }
 
@@ -124,16 +127,24 @@ export function useToolbarDerivedState({
   const isCommandCode = selectedBackend === 'commandcode'
   const isGrok = selectedBackend === 'grok'
 
+  const { data: modelCatalog } = useModelCatalog()
+
   const activeMcpCount = useMemo(() => {
-    const availableNames = new Set(
-      availableMcpServers.filter(s => !s.disabled).map(s => s.name)
-    )
+    const availableNames = new Set<string>()
+    for (const server of availableMcpServers) {
+      if (server.disabled) continue
+      availableNames.add(server.name)
+      availableNames.add(`${server.backend || 'claude'}:${server.name}`)
+    }
     return enabledMcpServers.filter(name => availableNames.has(name)).length
   }, [availableMcpServers, enabledMcpServers])
 
   const claudeModelOptions = useMemo(() => {
     if (!selectedProvider || selectedProvider === '__anthropic__') {
-      return MODEL_OPTIONS
+      return getCatalogModelOptions(modelCatalog, 'claude').map(option => ({
+        ...option,
+        label: option.label.replace(/^Claude\s+/, ''),
+      }))
     }
 
     const profile = customCliProfiles.find(p => p.name === selectedProvider)
@@ -161,10 +172,10 @@ export function useToolbarDerivedState({
       { value: 'sonnet' as ClaudeModel, label: `Sonnet${suffix(sonnetModel)}` },
       { value: 'haiku' as ClaudeModel, label: `Haiku${suffix(haikuModel)}` },
     ]
-  }, [selectedProvider, customCliProfiles])
+  }, [selectedProvider, customCliProfiles, modelCatalog])
 
   const codexModelOptions = sortModelOptionsByRawModel(
-    CODEX_MODEL_OPTIONS as { value: string; label: string }[]
+    getCatalogModelOptions(modelCatalog, 'codex')
   )
   const resolvedOpencodeModelOptions = sortModelOptionsByRawModel(
     opencodeModelOptions ?? OPENCODE_MODEL_OPTIONS
@@ -230,8 +241,18 @@ export function useToolbarDerivedState({
 
   // Fast variants share a label with their base model (the Zap indicator
   // distinguishes them visually). Applies to both Codex and Claude.
-  const fastInfo = getModelFastInfo(selectedBackend, selectedModel)
-  const labelLookupKey = fastInfo.isFast ? fastInfo.baseModel : selectedModel
+  const effectiveSelectedModel = isPi
+    ? resolvePiDefaultModel(selectedModel, resolvedPiModelOptions)
+    : selectedModel
+
+  const fastInfo = getCatalogModelFastInfo(
+    modelCatalog,
+    selectedBackend,
+    effectiveSelectedModel
+  )
+  const labelLookupKey = fastInfo.isFast
+    ? fastInfo.baseModel
+    : effectiveSelectedModel
 
   const selectedModelLabel =
     filteredModelOptions.find(o => o.value === labelLookupKey)?.label ??

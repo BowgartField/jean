@@ -59,6 +59,7 @@ import {
   CODEX_EFFORT_LEVEL_OPTIONS,
   EFFORT_LEVEL_OPTIONS,
   GROK_EFFORT_LEVEL_OPTIONS,
+  PI_EFFORT_LEVEL_OPTIONS,
   THINKING_LEVEL_OPTIONS,
 } from '@/components/chat/toolbar/toolbar-options'
 import {
@@ -169,21 +170,26 @@ export function MobileSettingsMenu({
   worktreeId,
   onAttach,
 }: MobileSettingsMenuProps) {
+  const isPi = selectedBackend === 'pi'
   const isGrok = selectedBackend === 'grok'
-  const effortLevelOptions = isCodex
-    ? CODEX_EFFORT_LEVEL_OPTIONS
-    : isGrok
-      ? GROK_EFFORT_LEVEL_OPTIONS
-      : EFFORT_LEVEL_OPTIONS
-  const displayedEffortLevel = isCodex
-    ? selectedEffortLevel === 'max'
-      ? 'high'
-      : selectedEffortLevel === 'ultracode'
-        ? 'xhigh'
+  const usesEffortControl = useAdaptiveThinking || isCodex || isPi || isGrok
+  const effortLevelOptions = isPi
+    ? PI_EFFORT_LEVEL_OPTIONS
+    : isCodex
+      ? CODEX_EFFORT_LEVEL_OPTIONS
+      : isGrok
+        ? GROK_EFFORT_LEVEL_OPTIONS
+        : EFFORT_LEVEL_OPTIONS
+  const displayedEffortLevel =
+    isCodex || isPi
+      ? selectedEffortLevel === 'max'
+        ? 'high'
+        : selectedEffortLevel === 'ultracode'
+          ? 'xhigh'
+          : selectedEffortLevel
+      : isGrok && selectedEffortLevel === 'ultracode'
+        ? 'max'
         : selectedEffortLevel
-    : isGrok && selectedEffortLevel === 'ultracode'
-      ? 'max'
-      : selectedEffortLevel
   const displayedEffortLabel =
     effortLevelOptions.find(o => o.value === displayedEffortLevel)?.label ??
     displayedEffortLevel
@@ -396,9 +402,7 @@ export function MobileSettingsMenu({
           )}
         </DropdownMenuItem>
 
-        {hideReasoningControl ? null : useAdaptiveThinking ||
-          isCodex ||
-          isGrok ? (
+        {hideReasoningControl ? null : usesEffortControl ? (
           <DropdownMenuSub>
             <DropdownMenuSubTrigger className="[&>svg:last-child]:!ml-2">
               <Brain className="mr-2 h-4 w-4 text-muted-foreground" />

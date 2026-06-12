@@ -55,6 +55,7 @@ import {
   CODEX_EFFORT_LEVEL_OPTIONS,
   EFFORT_LEVEL_OPTIONS,
   GROK_EFFORT_LEVEL_OPTIONS,
+  PI_EFFORT_LEVEL_OPTIONS,
   THINKING_LEVEL_OPTIONS,
 } from '@/components/chat/toolbar/toolbar-options'
 import {
@@ -188,21 +189,26 @@ export function DesktopToolbarControls({
   handleViewLinear,
   handleViewSavedContext,
 }: DesktopToolbarControlsProps) {
+  const isPi = selectedBackend === 'pi'
   const isGrok = selectedBackend === 'grok'
-  const effortLevelOptions = isCodex
-    ? CODEX_EFFORT_LEVEL_OPTIONS
-    : isGrok
-      ? GROK_EFFORT_LEVEL_OPTIONS
-      : EFFORT_LEVEL_OPTIONS
-  const displayedEffortLevel = isCodex
-    ? selectedEffortLevel === 'max'
-      ? 'high'
-      : selectedEffortLevel === 'ultracode'
-        ? 'xhigh'
+  const usesEffortControl = useAdaptiveThinking || isCodex || isPi || isGrok
+  const effortLevelOptions = isPi
+    ? PI_EFFORT_LEVEL_OPTIONS
+    : isCodex
+      ? CODEX_EFFORT_LEVEL_OPTIONS
+      : isGrok
+        ? GROK_EFFORT_LEVEL_OPTIONS
+        : EFFORT_LEVEL_OPTIONS
+  const displayedEffortLevel =
+    isCodex || isPi
+      ? selectedEffortLevel === 'max'
+        ? 'high'
+        : selectedEffortLevel === 'ultracode'
+          ? 'xhigh'
+          : selectedEffortLevel
+      : isGrok && selectedEffortLevel === 'ultracode'
+        ? 'max'
         : selectedEffortLevel
-    : isGrok && selectedEffortLevel === 'ultracode'
-      ? 'max'
-      : selectedEffortLevel
   const displayedEffortLabel =
     effortLevelOptions.find(o => o.value === displayedEffortLevel)?.label ??
     displayedEffortLevel
@@ -236,7 +242,6 @@ export function DesktopToolbarControls({
           <button
             type="button"
             aria-label="Magic"
-            disabled={hasPendingQuestions}
             className="hidden @xl:flex h-8 items-center gap-1 px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
             onClick={onOpenMagicModal}
           >
@@ -557,7 +562,6 @@ export function DesktopToolbarControls({
                   <DropdownMenuTrigger asChild>
                     <button
                       type="button"
-                      disabled={hasPendingQuestions}
                       className="hidden @xl:flex h-8 items-center gap-1.5 px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
                     >
                       <span>{providerDisplayName}</span>
@@ -609,7 +613,7 @@ export function DesktopToolbarControls({
       <div className="hidden @xl:block h-4 w-px bg-border/50" />
 
       <DesktopBackendModelPicker
-        disabled={hasPendingQuestions}
+        disabled={false}
         sessionHasMessages={sessionHasMessages}
         providerLocked={providerLocked}
         triggerClassName="rounded-none border-0 bg-transparent px-3"
@@ -626,9 +630,7 @@ export function DesktopToolbarControls({
         <div className="hidden @xl:block h-4 w-px bg-border/50" />
       )}
 
-      {hideReasoningControl ? null : useAdaptiveThinking ||
-        isCodex ||
-        isGrok ? (
+      {hideReasoningControl ? null : usesEffortControl ? (
         <DropdownMenu
           open={thinkingDropdownOpen}
           onOpenChange={setThinkingDropdownOpen}
@@ -638,7 +640,6 @@ export function DesktopToolbarControls({
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
-                  disabled={hasPendingQuestions}
                   className="hidden @xl:flex h-8 items-center gap-1.5 px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
                 >
                   <Brain className="h-3.5 w-3.5 text-purple-600 dark:text-purple-400" />
@@ -682,7 +683,6 @@ export function DesktopToolbarControls({
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
-                  disabled={hasPendingQuestions}
                   className="hidden @xl:flex h-8 items-center gap-1.5 px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
                 >
                   <Brain
@@ -735,7 +735,7 @@ export function DesktopToolbarControls({
       <ExecutionModeDropdown
         executionMode={executionMode}
         availableModes={availableExecutionModes}
-        disabled={hasPendingQuestions}
+        disabled={false}
         onSetExecutionMode={onSetExecutionMode}
         className="hidden @xl:flex"
         onCloseAutoFocus={focusChatInput}

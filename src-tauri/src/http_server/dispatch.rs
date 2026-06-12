@@ -580,6 +580,11 @@ pub async fn dispatch_command(
         // =====================================================================
         // GitHub Issues & PRs
         // =====================================================================
+        "list_github_labels" => {
+            let project_path: String = field(&args, "projectPath", "project_path")?;
+            let result = crate::projects::list_github_labels(app.clone(), project_path).await?;
+            to_value(result)
+        }
         "list_github_issues" => {
             let project_path: String = field(&args, "projectPath", "project_path")?;
             let state: Option<String> = from_field_opt(&args, "state")?;
@@ -2568,6 +2573,50 @@ pub async fn dispatch_command(
             let session_id: String = field(&args, "sessionId", "session_id")?;
             crate::chat::clear_message_queue(app.clone(), worktree_id, worktree_path, session_id)
                 .await?;
+            Ok(Value::Null)
+        }
+        "move_queued_message_front" => {
+            let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
+            let worktree_path: String = field(&args, "worktreePath", "worktree_path")?;
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let message_id: String = field(&args, "messageId", "message_id")?;
+            let result = crate::chat::move_queued_message_front(
+                app.clone(),
+                worktree_id,
+                worktree_path,
+                session_id,
+                message_id,
+            )
+            .await?;
+            to_value(result)
+        }
+        "steer_codex_turn" => {
+            let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let message: String = from_field(&args, "message")?;
+            crate::chat::steer_codex_turn(app.clone(), worktree_id, session_id, message).await?;
+            Ok(Value::Null)
+        }
+        "steer_opencode_turn" => {
+            let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
+            let worktree_path: String = field(&args, "worktreePath", "worktree_path")?;
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let message: String = from_field(&args, "message")?;
+            crate::chat::steer_opencode_turn(
+                app.clone(),
+                worktree_id,
+                worktree_path,
+                session_id,
+                message,
+            )
+            .await?;
+            Ok(Value::Null)
+        }
+        "steer_pi_turn" => {
+            let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let message: String = from_field(&args, "message")?;
+            crate::chat::steer_pi_turn(app.clone(), worktree_id, session_id, message).await?;
             Ok(Value::Null)
         }
         "answer_opencode_question" => {

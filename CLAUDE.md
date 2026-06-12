@@ -192,9 +192,18 @@ To diagnose unnecessary re-renders, temporarily install [why-did-you-render](htt
 
 **Read this before changing PI chat parsing** (`src-tauri/src/chat/pi.rs`).
 
-PI runs with `--mode json` and streams newline-delimited JSON. Jean persists its
-own session/run JSONL (run logs) — PI's format is only used to _parse_ PI CLI
-output before writing Jean history. Reference: https://pi.dev/docs/latest/session-format
+Interactive Jean chat runs PI through Jean's detached PI RPC host on Unix/macOS:
+Jean launches itself with `--jean-pi-rpc-host`; that host owns a `pi --mode rpc`
+child, keeps stdin open after Jean quits, writes PI stdout JSONL into Jean's
+run log, and accepts local socket commands for `prompt`, `steer`, and `abort`.
+The socket lives under Jean's app-data directory with a short filename to stay
+within macOS Unix socket path limits. This is required because PI RPC exits when
+stdin closes. Windows/non-detached fallbacks may still use direct child
+execution and are non-survivable.
+
+Jean persists its own session/run JSONL (run logs) — PI's event/session format
+is only used to parse PI output before writing Jean history. References:
+https://pi.dev/docs/latest/rpc and https://pi.dev/docs/latest/session-format
 
 - **Streaming assistant text** arrives as `message_update` / `assistant` events.
   Deltas are read from `assistantMessageEvent.delta` (type `text_delta`), or a
@@ -208,6 +217,13 @@ output before writing Jean history. Reference: https://pi.dev/docs/latest/sessio
   entry's `id`. This becomes Jean's `pi_session_id` resume id.
 - **Usage** is read from `usage` / `token_usage` on `message`, `message_end`,
   `turn_end`, `agent_end`, or `result` events.
+- **Steering** uses the RPC `steer` command through `steer_pi_turn`. Only plain
+  queued prompts (no files/images/skills/text attachments) are steerable.
+- **Background recovery** mirrors Codex's survivable app-server pattern:
+  host-backed PI runs store the host PID on the run, are treated as detached
+  survivable sessions, and `resume_session` tails the run JSONL with the PI
+  parser after Jean restarts. The host appends a synthetic `type: "result"`
+  marker after `agent_end` so completed-while-closed runs recover as completed.
 
 **Parsing is incremental:** `merge_pi_line()` merges one parsed line into the
 accumulating `PiResponse`. Both the batch parser (`parse_pi_json_stream_inner`)
@@ -390,7 +406,7 @@ Images pasted or dropped into chat are processed before saving (`process_image()
 
 Three files need updating when adding a new model option:
 
-1. **`src/types/preferences.ts`** — Add to `ClaudeModel` type union and `modelOptions` array (full labels like "Claude Sonnet 4.6"). Model IDs use short names: `opus`, `sonnet`, `haiku`
+1. **`src/types/preferences.ts`** — Add to `ClaudeModel` type union and `modelOptions` array (full labels like "Claude Fable 5" or "Claude Sonnet 4.6"). Current first-party Claude Code model IDs use API-style names such as `claude-fable-5`, `claude-opus-4-8[1m]`, and `claude-sonnet-4-6[1m]`; legacy/provider aliases may still use `opus`, `sonnet`, or `haiku`.
 2. **`src/store/chat-store.ts`** — Add to duplicated `ClaudeModel` type union (line ~27)
 3. **`src/components/chat/ChatToolbar.tsx`** — Add to `MODEL_OPTIONS` array (short labels like "Sonnet 4.6")
 

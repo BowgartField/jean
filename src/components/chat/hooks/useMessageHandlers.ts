@@ -1316,10 +1316,14 @@ export function useMessageHandlers({
       if (isThinkingLevel(modeThinkingRef.current)) {
         resolvedThinkingLevel = modeThinkingRef.current
       }
-      if (effectiveBackend === 'codex') {
+      if (effectiveBackend === 'codex' || effectiveBackend === 'pi') {
         resolvedThinkingLevel = 'off'
       }
-      if (effectiveBackend === 'codex' || useAdaptiveThinkingRef.current) {
+      if (
+        effectiveBackend === 'codex' ||
+        effectiveBackend === 'pi' ||
+        useAdaptiveThinkingRef.current
+      ) {
         resolvedEffortLevel =
           mapCodexReasoningToEffort(modeEffortRef.current) ??
           selectedEffortLevelRef.current
@@ -1555,10 +1559,14 @@ export function useMessageHandlers({
       if (isThinkingLevel(modeThinkingRef.current)) {
         resolvedThinkingLevel = modeThinkingRef.current
       }
-      if (effectiveBackend === 'codex') {
+      if (effectiveBackend === 'codex' || effectiveBackend === 'pi') {
         resolvedThinkingLevel = 'off'
       }
-      if (effectiveBackend === 'codex' || useAdaptiveThinkingRef.current) {
+      if (
+        effectiveBackend === 'codex' ||
+        effectiveBackend === 'pi' ||
+        useAdaptiveThinkingRef.current
+      ) {
         resolvedEffortLevel =
           mapCodexReasoningToEffort(modeEffortRef.current) ??
           selectedEffortLevelRef.current
@@ -1902,10 +1910,14 @@ export function useMessageHandlers({
       if (isThinkingLevel(modeThinkingRef.current)) {
         resolvedThinkingLevel = modeThinkingRef.current
       }
-      if (effectiveBackend === 'codex') {
+      if (effectiveBackend === 'codex' || effectiveBackend === 'pi') {
         resolvedThinkingLevel = 'off'
       }
-      if (effectiveBackend === 'codex' || useAdaptiveThinkingRef.current) {
+      if (
+        effectiveBackend === 'codex' ||
+        effectiveBackend === 'pi' ||
+        useAdaptiveThinkingRef.current
+      ) {
         resolvedEffortLevel =
           mapCodexReasoningToEffort(modeEffortRef.current) ??
           selectedEffortLevelRef.current
@@ -2212,10 +2224,14 @@ export function useMessageHandlers({
       if (isThinkingLevel(modeThinkingRef.current)) {
         resolvedThinkingLevel = modeThinkingRef.current
       }
-      if (effectiveBackend === 'codex') {
+      if (effectiveBackend === 'codex' || effectiveBackend === 'pi') {
         resolvedThinkingLevel = 'off'
       }
-      if (effectiveBackend === 'codex' || useAdaptiveThinkingRef.current) {
+      if (
+        effectiveBackend === 'codex' ||
+        effectiveBackend === 'pi' ||
+        useAdaptiveThinkingRef.current
+      ) {
         resolvedEffortLevel =
           mapCodexReasoningToEffort(modeEffortRef.current) ??
           selectedEffortLevelRef.current

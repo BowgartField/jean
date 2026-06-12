@@ -128,12 +128,15 @@ import {
   TooltipContent,
 } from '@/components/ui/tooltip'
 import { usePreferences, usePatchPreferences } from '@/services/preferences'
+import {
+  getCatalogDefaultModelOptions,
+  getCatalogModelOptions,
+  useModelCatalog,
+} from '@/services/model-catalog'
 import type { AppPreferences } from '@/types/preferences'
 import {
-  modelOptions,
   thinkingLevelOptions,
   effortLevelOptions,
-  codexDefaultModelOptions,
   codexReasoningOptions,
   backendOptions,
   terminalOptions,
@@ -185,6 +188,7 @@ import {
 } from '@/services/git-status'
 import { getPathUpdateAction } from '@/lib/cli-update'
 import { SettingsSection } from '../SettingsSection'
+import { resolvePiDefaultModel } from '@/lib/session-defaults'
 
 interface CleanupResult {
   deleted_worktrees: number
@@ -228,6 +232,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
   const isGeneralScope = scope === 'general'
   const queryClient = useQueryClient()
   const { data: preferences } = usePreferences()
+  const { data: modelCatalog } = useModelCatalog()
   const patchPreferences = usePatchPreferences()
   const isWebAccessView = !isNativeApp()
   const webAccessSoundsEnabled = preferences?.web_access_sounds_enabled ?? true
@@ -245,6 +250,15 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
     | null
   >(null)
   const [isDeletingCli, setIsDeletingCli] = useState(false)
+
+  const remoteClaudeModelOptions = useMemo(
+    () => getCatalogModelOptions(modelCatalog, 'claude'),
+    [modelCatalog]
+  )
+  const remoteCodexDefaultModelOptions = useMemo(
+    () => getCatalogDefaultModelOptions(modelCatalog, 'codex'),
+    [modelCatalog]
+  )
 
   // PATH detection
   const { data: pathDetection } = useClaudePathDetection()
@@ -968,18 +982,31 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
     effectiveBackend) as CliBackend
   const effectiveYoloBackend = (preferences?.yolo_backend ??
     effectiveBackend) as CliBackend
-  const selectedPiModel = preferences?.selected_pi_model ?? 'pi/sonnet'
-  const piModelOptions: { value: PiModel; label: string }[] = (
+  const piModelOptions: {
+    value: PiModel
+    label: string
+    is_default?: boolean
+  }[] = (
     availablePiModels?.length
       ? availablePiModels.map(model => ({
           value: `pi/${model.id}` as PiModel,
           label: model.label || formatPiModelLabel(model.id),
+          is_default: model.is_default,
         }))
-      : (PI_MODEL_OPTIONS as { value: PiModel; label: string }[])
+      : (PI_MODEL_OPTIONS as {
+          value: PiModel
+          label: string
+          is_default?: boolean
+        }[])
   ).map(option => ({
     value: option.value,
     label: option.label || formatPiModelLabel(option.value),
+    is_default: option.is_default,
   }))
+  const selectedPiModel = resolvePiDefaultModel(
+    preferences?.selected_pi_model,
+    piModelOptions
+  ) as PiModel
   const selectedPiModelLabel =
     piModelOptions.find(option => option.value === selectedPiModel)?.label ??
     formatPiModelLabel(selectedPiModel)
@@ -1010,6 +1037,30 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
     if (preferences) {
       patchPreferences.mutate({
         codex_multi_agent_enabled: enabled,
+      })
+    }
+  }
+
+  const handleCodexAutoSteerToggle = (enabled: boolean) => {
+    if (preferences) {
+      patchPreferences.mutate({
+        codex_auto_steer_enabled: enabled,
+      })
+    }
+  }
+
+  const handleOpenCodeAutoSteerToggle = (enabled: boolean) => {
+    if (preferences) {
+      patchPreferences.mutate({
+        opencode_auto_steer_enabled: enabled,
+      })
+    }
+  }
+
+  const handlePiAutoSteerToggle = (enabled: boolean) => {
+    if (preferences) {
+      patchPreferences.mutate({
+        pi_auto_steer_enabled: enabled,
       })
     }
   }
@@ -2593,7 +2644,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {modelOptions.map(option => (
+                  {remoteClaudeModelOptions.map(option => (
                     <SelectItem key={option.value} value={option.value}>
                       {option.label}
                     </SelectItem>
@@ -2681,7 +2732,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {codexDefaultModelOptions.map(option => (
+                  {remoteCodexDefaultModelOptions.map(option => (
                     <SelectItem key={option.value} value={option.value}>
                       {option.label}
                     </SelectItem>
@@ -2727,6 +2778,16 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                   <SelectItem value="yolo">Yolo</SelectItem>
                 </SelectContent>
               </Select>
+            </InlineField>
+
+            <InlineField
+              label="Steer running turn"
+              description="Prompts sent while Codex is working are injected into the current turn instead of queued"
+            >
+              <Switch
+                checked={preferences?.codex_auto_steer_enabled ?? true}
+                onCheckedChange={handleCodexAutoSteerToggle}
+              />
             </InlineField>
 
             <InlineField
@@ -2824,6 +2885,15 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                   </Command>
                 </PopoverContent>
               </Popover>
+            </InlineField>
+            <InlineField
+              label="Steer running turn"
+              description="Prompts sent while OpenCode is working are sent to the running session instead of queued"
+            >
+              <Switch
+                checked={preferences?.opencode_auto_steer_enabled ?? true}
+                onCheckedChange={handleOpenCodeAutoSteerToggle}
+              />
             </InlineField>
           </div>
         </SettingsSection>
@@ -2982,6 +3052,15 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                   </Command>
                 </PopoverContent>
               </Popover>
+            </InlineField>
+            <InlineField
+              label="Steer running turn"
+              description="Prompts sent while PI is working are injected into the current turn instead of queued"
+            >
+              <Switch
+                checked={preferences?.pi_auto_steer_enabled ?? true}
+                onCheckedChange={handlePiAutoSteerToggle}
+              />
             </InlineField>
           </div>
         </SettingsSection>
@@ -3366,10 +3445,10 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                       <SelectContent>
                         <SelectItem value="default">Default model</SelectItem>
                         {(effectiveBuildBackend === 'codex'
-                          ? codexDefaultModelOptions
+                          ? remoteCodexDefaultModelOptions
                           : effectiveBuildBackend === 'commandcode'
                             ? commandCodeModelOptions
-                            : modelOptions
+                            : remoteClaudeModelOptions
                         ).map(option => (
                           <SelectItem key={option.value} value={option.value}>
                             {option.label}
@@ -3610,10 +3689,10 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                       <SelectContent>
                         <SelectItem value="default">Default model</SelectItem>
                         {(effectiveYoloBackend === 'codex'
-                          ? codexDefaultModelOptions
+                          ? remoteCodexDefaultModelOptions
                           : effectiveYoloBackend === 'commandcode'
                             ? commandCodeModelOptions
-                            : modelOptions
+                            : remoteClaudeModelOptions
                         ).map(option => (
                           <SelectItem key={option.value} value={option.value}>
                             {option.label}
@@ -4216,7 +4295,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
             <AlertDialogAction
               onClick={handleDeleteAllArchives}
               disabled={isDeleting}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              className="bg-destructive text-white hover:bg-destructive/90"
             >
               {isDeleting ? 'Deleting...' : 'Delete All'}
             </AlertDialogAction>
@@ -4276,7 +4355,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
             <AlertDialogAction
               onClick={handleConfirmDeleteCli}
               disabled={isDeletingCli}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              className="bg-destructive text-white hover:bg-destructive/90"
             >
               {isDeletingCli ? 'Deleting...' : 'Delete'}
             </AlertDialogAction>

@@ -138,7 +138,7 @@ fn is_wsl_available() -> bool {
 pub struct AppPreferences {
     pub theme: String,
     #[serde(default = "default_model")]
-    pub selected_model: String, // Claude model: claude-opus-4-8[1m], claude-opus-4-7[1m], haiku
+    pub selected_model: String, // Claude model: claude-fable-5, claude-opus-4-8[1m], claude-opus-4-7[1m], haiku
     #[serde(default = "default_thinking_level")]
     pub thinking_level: String, // Thinking level: off, think, megathink, ultrathink
     #[serde(default = "default_effort_level")]
@@ -158,11 +158,11 @@ pub struct AppPreferences {
     #[serde(default = "default_auto_branch_naming")]
     pub auto_branch_naming: bool, // Automatically generate branch names from first message
     #[serde(default = "default_branch_naming_model")]
-    pub branch_naming_model: String, // Model for generating branch names: haiku, sonnet, claude-opus-4-8, claude-opus-4-7
+    pub branch_naming_model: String, // Model for generating branch names: haiku, sonnet, claude-fable-5, claude-opus-4-8, claude-opus-4-7
     #[serde(default = "default_auto_session_naming")]
     pub auto_session_naming: bool, // Automatically generate session names from first message
     #[serde(default = "default_session_naming_model")]
-    pub session_naming_model: String, // Model for generating session names: haiku, sonnet, claude-opus-4-8, claude-opus-4-7
+    pub session_naming_model: String, // Model for generating session names: haiku, sonnet, claude-fable-5, claude-opus-4-8, claude-opus-4-7
     #[serde(default = "default_font_size")]
     pub ui_font_size: u32, // Font size for UI text in pixels (10-24)
     #[serde(default = "default_font_size")]
@@ -285,6 +285,12 @@ pub struct AppPreferences {
     pub codex_goal_execution_mode: String, // Codex /goal execution mode: build or yolo
     #[serde(default)]
     pub codex_multi_agent_enabled: bool, // Enable multi-agent collaboration (experimental)
+    #[serde(default = "default_codex_auto_steer")]
+    pub codex_auto_steer_enabled: bool, // Steer prompts into a running Codex turn instead of queueing (default: true)
+    #[serde(default = "default_opencode_auto_steer")]
+    pub opencode_auto_steer_enabled: bool, // Steer prompts into a running OpenCode session instead of queueing (default: true)
+    #[serde(default = "default_pi_auto_steer")]
+    pub pi_auto_steer_enabled: bool, // Steer prompts into a running PI turn instead of queueing (default: true)
     #[serde(default = "default_codex_max_agent_threads")]
     pub codex_max_agent_threads: u32, // Max concurrent agent threads (1-8)
     #[serde(default = "default_restore_last_session")]
@@ -366,6 +372,18 @@ fn default_true() -> Option<bool> {
 }
 
 fn default_restore_last_session() -> bool {
+    true
+}
+
+fn default_codex_auto_steer() -> bool {
+    true
+}
+
+fn default_opencode_auto_steer() -> bool {
+    true
+}
+
+fn default_pi_auto_steer() -> bool {
     true
 }
 
@@ -678,8 +696,8 @@ mod tests {
 
         assert!(prompt.contains("backend-native interactive question UI"));
         assert!(prompt.contains("Codex request_user_input"));
-        assert!(prompt.contains("after the user answers native `request_user_input`"));
-        assert!(prompt.contains("Every Codex plan-mode response"));
+        assert!(prompt.contains("when the current execution mode is plan: after the user answers native `request_user_input`"));
+        assert!(prompt.contains("Every Codex response that contains or revises a plan while the current execution mode is plan"));
         assert!(prompt.contains("Claude AskUserQuestion"));
         assert!(prompt.contains("OpenCode question"));
         assert!(prompt.contains("Use a plain-text Unresolved Questions section only"));
@@ -881,6 +899,8 @@ pub struct MagicPrompts {
     #[serde(default)]
     pub global_system_prompt: Option<String>,
     #[serde(default)]
+    pub provider_switch_handoff: Option<String>,
+    #[serde(default)]
     pub investigate_security_alert: Option<String>,
     #[serde(default)]
     pub investigate_advisory: Option<String>,
@@ -998,8 +1018,22 @@ fn default_pr_content_prompt() -> String {
         .to_string()
 }
 
-fn default_commit_message_prompt() -> String {
-    r#"<task>Generate a commit message for the following changes</task>
+fn legacy_commit_message_prompts() -> [&'static str; 2] {
+    [
+        "Generate a conventional commit message for these staged changes.
+
+Files changed:
+{diff_stat}
+
+Git status:
+{status}
+
+Diff:
+{diff}
+
+Recent commits (style reference):
+{recent_commits}",
+        r#"<task>Generate a commit message for the following changes</task>
 
 <git_status>
 {status}
@@ -1015,7 +1049,34 @@ fn default_commit_message_prompt() -> String {
 
 <remote_info>
 {remote_info}
-</remote_info>"#
+</remote_info>"#,
+    ]
+}
+
+fn default_commit_message_prompt() -> String {
+    r#"Generate a conventional commit message for these staged changes.
+
+Rules:
+- Output only the commit message text.
+- Describe the actual staged code changes only.
+- Base the subject on the staged diff and file summary, not on recent commits, repository instructions, agent skills, or this prompt.
+- Do not describe prompt text, commit-message guidance, instructions, inspection, skills, or the act of generating a commit message.
+- Avoid vague/meta subjects like "update files", "inspect changes", "inspect staged changes", "inspect commit-message skill", "generate commit message", "adjust code", or "misc changes".
+- Use a specific Conventional Commits subject: type(optional-scope): concrete behavior changed.
+- First line must be 72 characters or fewer.
+- If prompt/config files changed, name the user-facing behavior affected, not "guidance" or "prompt".
+
+Files changed:
+{diff_stat}
+
+Git status:
+{status}
+
+Staged diff:
+{diff}
+
+Recent commits (style reference only — do not summarize these commits):
+{recent_commits}"#
         .to_string()
 }
 
@@ -1340,6 +1401,11 @@ Address the following review comments from PR #{prNumber}
 3. Make the requested changes to address each comment
 4. If a comment is unclear or you disagree with it, explain your reasoning
 5. After making changes, briefly summarize what you changed for each comment
+6. After the requested changes are implemented and verified, resolve each matching GitHub PR review conversation
+   - Look for unresolved review threads from coderabbitai when the comment came from CodeRabbit
+   - Match threads by PR #{prNumber}, file path, line number, reviewer, and comment body
+   - Use GitHub GraphQL mutation resolveReviewThread on the matching PullRequestReviewThread
+   - Do not resolve a thread if you cannot complete or verify the fix
 
 </instructions>
 
@@ -1366,16 +1432,16 @@ When specifying subagent_type for Task tool calls, always use the fully qualifie
 }
 
 fn default_global_system_prompt() -> String {
-    r#"### 1. Plan Mode Default
-- Enter plan mode for ANY non-trivial task (3+ steps or architectural decisions)
+    r#"### 1. Planning Guidance
+- For non-trivial tasks (3+ steps or architectural decisions), prefer planning before implementation when the current execution mode has not already authorized execution.
 - If something goes sideways, STOP and re-plan immediately - don't keep pushing
-- Use plan mode for verification steps, not just building
+- Use plan mode for verification steps when the current execution mode is plan; in build/yolo, verify directly after implementing.
 - Write detailed specs upfront to reduce ambiguity
 - Make the plan extremely concise. Sacrifice grammar for the sake of concision.
-- In planning mode, use the backend's native plan tool/UI call when available (Claude ExitPlanMode, Codex update_plan/CodexPlan, Cursor/OpenCode equivalent), not plain text only.
-- For unresolved questions in plan mode, prefer the backend-native interactive question UI instead of plain text when available: Claude AskUserQuestion, Codex request_user_input, OpenCode question.
-- For Codex specifically: after the user answers native `request_user_input`/open questions in plan mode, immediately call `update_plan`/emit `CodexPlan` again with the revised plan before any implementation.
-- Every Codex plan-mode response that contains or revises a plan must use `update_plan`/`CodexPlan`; do not provide plain-text-only plans.
+- When the current execution mode is plan, use the backend's native plan tool/UI call when available (Claude ExitPlanMode, Codex update_plan/CodexPlan, Cursor/OpenCode equivalent), not plain text only.
+- For unresolved questions while planning, prefer the backend-native interactive question UI instead of plain text when available: Claude AskUserQuestion, Codex request_user_input, OpenCode question.
+- For Codex specifically, when the current execution mode is plan: after the user answers native `request_user_input`/open questions, immediately call `update_plan`/emit `CodexPlan` again with the revised plan before any implementation.
+- Every Codex response that contains or revises a plan while the current execution mode is plan must use `update_plan`/`CodexPlan`; do not provide plain-text-only plans.
 - Use a plain-text Unresolved Questions section only for non-actionable notes or when the backend cannot ask interactively.
 
 ### 2. Documentation First
@@ -1437,6 +1503,22 @@ fn default_global_system_prompt() -> String {
 ## Important!
 
 - After each finished task, please write a few bullet points on how to test the changes."#
+        .to_string()
+}
+
+pub(crate) fn default_provider_switch_handoff_prompt() -> String {
+    r#"You are continuing a Jean chat session after the user switched AI backends.
+
+Jean-local history is the source of truth because provider-owned server history may be incomplete after backend switches.
+
+Previous backend: {previous_backend}
+Current backend: {current_backend}
+
+Use the Jean-local history below to reconstruct context before answering the user's latest message. Do not mention this hidden handoff unless it is directly relevant.
+
+<jean_local_history>
+{history}
+</jean_local_history>"#
         .to_string()
 }
 
@@ -1665,7 +1747,7 @@ impl MagicPrompts {
     /// This ensures users who never customized a prompt get auto-updated defaults.
     fn migrate_defaults(&mut self) {
         type DefaultEntry<'a> = (fn() -> String, &'a mut Option<String>);
-        let defaults: [DefaultEntry; 16] = [
+        let defaults: [DefaultEntry; 17] = [
             (
                 default_investigate_issue_prompt,
                 &mut self.investigate_issue,
@@ -1691,6 +1773,10 @@ impl MagicPrompts {
             ),
             (default_global_system_prompt, &mut self.global_system_prompt),
             (
+                default_provider_switch_handoff_prompt,
+                &mut self.provider_switch_handoff,
+            ),
+            (
                 default_investigate_security_alert_prompt,
                 &mut self.investigate_security_alert,
             ),
@@ -1710,6 +1796,15 @@ impl MagicPrompts {
                 if value == &default_fn() {
                     *field = None;
                 }
+            }
+        }
+
+        if let Some(ref value) = self.commit_message {
+            if legacy_commit_message_prompts()
+                .iter()
+                .any(|legacy| value == legacy)
+            {
+                self.commit_message = None;
             }
         }
     }
@@ -1793,6 +1888,9 @@ impl Default for AppPreferences {
             default_codex_reasoning_effort: default_codex_reasoning_effort(),
             codex_goal_execution_mode: default_codex_goal_execution_mode(),
             codex_multi_agent_enabled: false,
+            codex_auto_steer_enabled: default_codex_auto_steer(),
+            opencode_auto_steer_enabled: default_opencode_auto_steer(),
+            pi_auto_steer_enabled: default_pi_auto_steer(),
             codex_max_agent_threads: default_codex_max_agent_threads(),
             restore_last_session: true,
             close_original_on_clear_context: true,
@@ -3270,6 +3368,69 @@ fn parse_cli_args() -> CliArgs {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+#[cfg(test)]
+mod magic_prompt_tests {
+    use super::*;
+
+    #[test]
+    fn migrate_defaults_clears_legacy_commit_message_prompt() {
+        let mut prompts = MagicPrompts {
+            commit_message: Some(
+                "Generate a conventional commit message for these staged changes.
+
+Files changed:
+{diff_stat}
+
+Git status:
+{status}
+
+Diff:
+{diff}
+
+Recent commits (style reference):
+{recent_commits}"
+                    .to_string(),
+            ),
+            ..Default::default()
+        };
+
+        prompts.migrate_defaults();
+
+        assert_eq!(prompts.commit_message, None);
+    }
+
+    #[test]
+    fn migrate_defaults_clears_legacy_xml_commit_message_prompt() {
+        let mut prompts = MagicPrompts {
+            commit_message: Some(
+                r#"<task>Generate a commit message for the following changes</task>
+
+<git_status>
+{status}
+</git_status>
+
+<staged_diff>
+{diff}
+</staged_diff>
+
+<recent_commits>
+{recent_commits}
+</recent_commits>
+
+<remote_info>
+{remote_info}
+</remote_info>"#
+                    .to_string(),
+            ),
+            ..Default::default()
+        };
+
+        prompts.migrate_defaults();
+
+        assert_eq!(prompts.commit_message, None);
+    }
+}
+
 pub fn run() {
     if std::env::args().any(|arg| arg == jean_mcp_core::JEAN_MCP_STDIO_ARG) {
         if let Err(e) = jean_mcp_stdio::run_stdio_server() {
@@ -3278,6 +3439,19 @@ pub fn run() {
         }
         return;
     }
+    if std::env::args().any(|arg| arg == chat::pi::PI_RPC_HOST_ARG) {
+        if let Err(e) = chat::pi::run_pi_rpc_host_from_args() {
+            eprintln!("Jean PI RPC host failed: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
+
+    // Raise the open-file-descriptor soft limit to the hard limit. macOS GUI apps
+    // start with a low default (often 256); bulk git-status refresh across many
+    // worktrees plus child CLI spawns can exhaust it (EMFILE), silently breaking
+    // claude CLI runs. Must run before any subprocess work. No-op on Windows.
+    crate::platform::raise_fd_limit();
 
     let cli_args = parse_cli_args();
     let headless = cli_args.headless;
@@ -3915,6 +4089,7 @@ pub fn run() {
             projects::list_cursor_skills,
             projects::list_plugin_skills,
             // GitHub issues commands
+            projects::list_github_labels,
             projects::list_github_issues,
             projects::search_github_issues,
             projects::get_github_issue,
@@ -4054,6 +4229,10 @@ pub fn run() {
             chat::dequeue_message,
             chat::remove_queued_message,
             chat::clear_message_queue,
+            chat::move_queued_message_front,
+            chat::steer_codex_turn,
+            chat::steer_opencode_turn,
+            chat::steer_pi_turn,
             chat::answer_opencode_question,
             // Chat commands - ScheduleWakeup support
             chat::cancel_session_wakeup,
@@ -4205,7 +4384,7 @@ pub fn run() {
                 eprintln!("[TERMINAL CLEANUP] Killed {killed} terminal(s)");
                 if has_running_sessions {
                     log::warn!(
-                        "RunEvent::Exit while sessions are running; skipping managed AI server shutdown"
+                        "RunEvent::Exit while sessions are running; skipping OpenCode shutdown"
                     );
                 } else {
                     match opencode_server::shutdown_managed_server() {
@@ -4213,8 +4392,10 @@ pub fn run() {
                         Ok(false) => {}
                         Err(e) => eprintln!("[OPENCODE CLEANUP] Failed during Exit: {e}"),
                     }
-                    chat::codex_server::shutdown_server();
                 }
+                // Safe with runs in flight: the detached codex app-server is
+                // preserved when incomplete Codex runs exist (Unix).
+                chat::codex_server::shutdown_server();
             }
             tauri::RunEvent::ExitRequested { api, .. } => {
                 // In headless mode, prevent exit when window closes
@@ -4222,13 +4403,16 @@ pub fn run() {
                     api.prevent_exit();
                     return;
                 }
-                if chat::has_running_sessions() {
+                // Only block exit for sessions that would die with Jean
+                // (OpenCode, piped CLIs). Detached Claude processes and Codex
+                // app-server turns keep running and are recovered on relaunch.
+                if chat::has_nonsurvivable_running_sessions() {
                     api.prevent_exit();
                     if let Some(window) = app_handle.get_webview_window("main") {
                         let _ = window.hide();
                     }
                     log::info!(
-                        "Prevented app exit while sessions are running; hid main window instead"
+                        "Prevented app exit while non-survivable sessions are running; hid main window instead"
                     );
                     return;
                 }
@@ -4259,13 +4443,13 @@ pub fn run() {
                     if headless {
                         return;
                     }
-                    if chat::has_running_sessions() {
+                    if chat::has_nonsurvivable_running_sessions() {
                         api.prevent_close();
                         if let Some(window) = app_handle.get_webview_window(label) {
                             let _ = window.hide();
                         }
                         log::info!(
-                            "Prevented window close while sessions are running; hid {label} instead"
+                            "Prevented window close while non-survivable sessions are running; hid {label} instead"
                         );
                         return;
                     }

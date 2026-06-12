@@ -136,6 +136,7 @@ export type ContentBlock =
   | { type: 'text'; text: string }
   | { type: 'tool_use'; tool_call_id: string }
   | { type: 'thinking'; thinking: string }
+  | { type: 'user_input'; text: string }
 
 /**
  * A single chat message
@@ -451,6 +452,7 @@ export interface ChunkEvent {
   session_id: string
   worktree_id: string // Kept for backward compatibility
   content: string
+  run_id?: string
 }
 
 /**
@@ -510,6 +512,7 @@ export interface CancelledEvent {
   worktree_id: string // Kept for backward compatibility
   undo_send: boolean // True if user message should be restored to input (instant cancellation)
   emitted_at_ms: number
+  run_id?: string
 }
 
 /**
