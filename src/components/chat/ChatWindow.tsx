@@ -1858,6 +1858,7 @@ export function ChatWindow({
     handleCommitAndPush,
     handlePull,
     handlePush,
+    handleRevertLastCommit,
     handleOpenPr,
     handleReview,
     handleCodeRabbitReview,
@@ -1881,6 +1882,11 @@ export function ChatWindow({
     setSessionModel,
     setSessionBackend,
     setSessionProvider,
+    sendMessage,
+    selectedThinkingLevelRef,
+    selectedEffortLevelRef,
+    mcpServersDataRef,
+    enabledMcpServersRef,
   })
 
   // Wrap push/pull/commit-and-push with remote picker for multi-remote repos
@@ -2035,6 +2041,7 @@ export function ChatWindow({
     handleCommitAndPush: handleCommitAndPushWithPicker,
     handlePull: handlePullWithPicker,
     handlePush: handlePushWithPicker,
+    handleRevertLastCommit,
     handleOpenPr,
     handleReview,
     handleMerge,
