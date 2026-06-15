@@ -18,6 +18,10 @@ import { useWorktreeMenuActions } from './useWorktreeMenuActions'
 import { CloseWorktreeDialog } from '@/components/chat/CloseWorktreeDialog'
 import { useSessionArchive } from '@/components/chat/hooks/useSessionArchive'
 import { middleClickClose } from '@/lib/middle-click'
+import {
+  decideWorktreeMiddleClose,
+  decideSessionMiddleClose,
+} from './worktree-close-decision'
 import { useRenameWorktree } from '@/services/projects'
 import { useSessions } from '@/services/chat'
 import { isAskUserQuestion, isPlanToolCall, type Session } from '@/types/chat'
@@ -448,7 +452,10 @@ export function WorktreeItem({
   // Middle-click closes the worktree, mirroring the canvas/session-tab close —
   // including the confirmation dialog when `confirm_session_close` is enabled.
   const handleWorktreeMiddleClose = useCallback(() => {
-    if (preferences?.confirm_session_close !== false) {
+    if (
+      decideWorktreeMiddleClose(preferences?.confirm_session_close) ===
+      'confirm'
+    ) {
       setCloseConfirm({ mode: 'worktree' })
     } else {
       handleArchiveOrClose()
@@ -460,22 +467,25 @@ export function WorktreeItem({
   const handleSessionMiddleClose = useCallback(
     (session: Session) => {
       // The row is rendered from sessionsData, so the count is reliable here.
-      const activeCount = (sessionsData?.sessions ?? []).filter(
+      const activeSessionCount = (sessionsData?.sessions ?? []).filter(
         s => !s.archived_at
       ).length
-      const isLastSession = activeCount <= 1
-      const sessionIsEmpty = !session.message_count
-      if (
-        isLastSession &&
-        preferences?.confirm_session_close !== false &&
-        !sessionIsEmpty
-      ) {
+      const decision = decideSessionMiddleClose({
+        activeSessionCount,
+        sessionIsEmpty: !session.message_count,
+        confirmSessionClose: preferences?.confirm_session_close,
+      })
+      if (decision === 'confirm') {
         setCloseConfirm({ mode: 'session', sessionId: session.id })
       } else {
         handleDeleteSession(session.id)
       }
     },
-    [sessionsData?.sessions, handleDeleteSession, preferences?.confirm_session_close]
+    [
+      sessionsData?.sessions,
+      handleDeleteSession,
+      preferences?.confirm_session_close,
+    ]
   )
 
   const handleDoubleClick = useCallback(
