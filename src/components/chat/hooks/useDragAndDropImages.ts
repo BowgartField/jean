@@ -190,7 +190,7 @@ export function useDragAndDropImages(
 /**
  * Process a dropped SVG file by reading its text content and saving as a text file.
  */
-async function processDroppedSvg(
+export async function processDroppedSvg(
   sourcePath: string,
   sessionId: string
 ): Promise<void> {
@@ -227,7 +227,7 @@ async function processDroppedSvg(
 /**
  * Process a dropped image file by saving it via Tauri and adding to pending images.
  */
-async function processDroppedImage(
+export async function processDroppedImage(
   sourcePath: string,
   sessionId: string
 ): Promise<void> {
