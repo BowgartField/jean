@@ -109,7 +109,8 @@ Additional systems (no dedicated docs yet):
      `terminal_id`. The frontend is a viewer; refresh never kills the PTY.
 
   2. **Event replay buffer** (`src-tauri/src/http_server/mod.rs`,
-     `TERMINAL_BUFFER_CAP = 12000` events/terminal, ~3MB each) holds the most
+     `TERMINAL_BUFFER_MAX_EVENTS = 12000` events/terminal and
+     `TERMINAL_BUFFER_MAX_BYTES = 3MB` per terminal) holds the most
      recent `terminal:output` and `terminal:started` envelopes with monotonic
      sequence numbers. On WebSocket reconnect — and on full-page refresh via
      `requestTerminalReplay` — the frontend asks for events after a given
