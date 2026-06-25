@@ -479,10 +479,11 @@ export function useMessageSending({
             : backend === 'pi'
               ? (preferences?.pi_auto_steer_enabled ?? true)
               : (preferences?.codex_auto_steer_enabled ?? true)
+        const canSteerWithAttachments = backend === 'codex'
         if (
           (backend === 'codex' || backend === 'opencode' || backend === 'pi') &&
           autoSteerEnabled &&
-          !hasAttachments
+          (!hasAttachments || canSteerWithAttachments)
         ) {
           try {
             const steerMessage = buildMessageWithRefs(queuedMessage)
@@ -496,11 +497,20 @@ export function useMessageSending({
                 steerMessage
               )
             } else {
-              await steerCodexTurn(
-                activeWorktreeId,
-                activeSessionId,
-                steerMessage
-              )
+              if (hasAttachments) {
+                await steerCodexTurn(
+                  activeWorktreeId,
+                  activeSessionId,
+                  steerMessage,
+                  queuedMessage
+                )
+              } else {
+                await steerCodexTurn(
+                  activeWorktreeId,
+                  activeSessionId,
+                  steerMessage
+                )
+              }
             }
             console.log(
               `[Send] handleSubmit STEERED into running ${backend} turn`

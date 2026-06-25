@@ -198,6 +198,8 @@ pub struct AppPreferences {
     #[serde(default)]
     pub magic_prompt_efforts: MagicPromptReasoningEfforts, // Per-prompt reasoning effort overrides
     #[serde(default)]
+    pub magic_prompt_modes: MagicPromptModes, // Per-prompt execution modes for chat-style magic prompts
+    #[serde(default)]
     pub magic_models_auto_initialized: bool, // Whether magic prompt models were auto-set based on installed backends
     #[serde(default = "default_file_edit_mode")]
     pub file_edit_mode: String, // How to edit files: inline (CodeMirror) or external (VS Code, etc.)
@@ -832,6 +834,13 @@ mod tests {
                 "review_comments_effort": "medium",
             }),
         );
+        object.insert(
+            "magic_prompt_modes".to_string(),
+            json!({
+                "investigate_issue_mode": "yolo",
+                "review_comments_mode": "plan"
+            }),
+        );
 
         let prefs: AppPreferences = serde_json::from_value(prefs_json).unwrap();
 
@@ -854,6 +863,8 @@ mod tests {
             prefs.magic_prompt_efforts.review_comments_effort.as_deref(),
             Some("medium")
         );
+        assert_eq!(prefs.magic_prompt_modes.investigate_issue_mode, "yolo");
+        assert_eq!(prefs.magic_prompt_modes.review_comments_mode, "plan");
     }
 }
 
@@ -900,6 +911,8 @@ pub struct MagicPrompts {
     pub investigate_workflow_run: Option<String>,
     #[serde(default)]
     pub release_notes: Option<String>,
+    #[serde(default)]
+    pub release_post: Option<String>,
     #[serde(default)]
     pub session_naming: Option<String>,
     #[serde(default)]
@@ -1365,6 +1378,26 @@ fn default_release_notes_prompt() -> String {
         .to_string()
 }
 
+fn default_release_post_prompt() -> String {
+    r#"Write one short release announcement for Twitter/X, Mastodon, Bluesky, LinkedIn, and similar platforms.
+
+Release: {release_name}
+Tag: {tag}
+GitHub release link: {release_url}
+
+Release notes:
+{release_body}
+
+Instructions:
+- Be a bit more generous than a terse tweet, but keep the full post under 280 characters including the GitHub release link.
+- Include the exact GitHub release link.
+- Put each feature, fix, or improvement on its own line.
+- Mention the most user-facing changes or theme.
+- Keep it clear, upbeat, and not hype-heavy.
+- Do not use markdown headings."#
+        .to_string()
+}
+
 fn default_session_naming_prompt() -> String {
     r#"<task>Generate a short, human-friendly name for this chat session based on the user's request.</task>
 
@@ -1552,6 +1585,8 @@ pub struct MagicPromptModels {
     #[serde(default = "default_sonnet_model")]
     pub release_notes_model: String,
     #[serde(default = "default_sonnet_model")]
+    pub release_post_model: String,
+    #[serde(default = "default_sonnet_model")]
     pub session_naming_model: String,
     #[serde(default = "default_model")]
     pub investigate_security_alert_model: String,
@@ -1579,6 +1614,7 @@ impl Default for MagicPromptModels {
             context_summary_model: default_model(),
             resolve_conflicts_model: default_model(),
             release_notes_model: default_sonnet_model(),
+            release_post_model: default_sonnet_model(),
             session_naming_model: default_sonnet_model(),
             investigate_security_alert_model: default_model(),
             investigate_advisory_model: default_model(),
@@ -1673,6 +1709,8 @@ pub struct MagicPromptProviders {
     #[serde(default)]
     pub release_notes_provider: Option<String>,
     #[serde(default)]
+    pub release_post_provider: Option<String>,
+    #[serde(default)]
     pub session_naming_provider: Option<String>,
     #[serde(default)]
     pub investigate_security_alert_provider: Option<String>,
@@ -1705,6 +1743,8 @@ pub struct MagicPromptBackends {
     pub resolve_conflicts_backend: Option<String>,
     #[serde(default)]
     pub release_notes_backend: Option<String>,
+    #[serde(default)]
+    pub release_post_backend: Option<String>,
     #[serde(default)]
     pub session_naming_backend: Option<String>,
     #[serde(default)]
@@ -1739,6 +1779,8 @@ pub struct MagicPromptReasoningEfforts {
     #[serde(default)]
     pub release_notes_effort: Option<String>,
     #[serde(default)]
+    pub release_post_effort: Option<String>,
+    #[serde(default)]
     pub session_naming_effort: Option<String>,
     #[serde(default)]
     pub investigate_security_alert_effort: Option<String>,
@@ -1750,12 +1792,56 @@ pub struct MagicPromptReasoningEfforts {
     pub review_comments_effort: Option<String>,
 }
 
+fn default_magic_prompt_plan_mode() -> String {
+    "plan".to_string()
+}
+
+fn default_magic_prompt_yolo_mode() -> String {
+    "yolo".to_string()
+}
+
+/// Per-prompt execution mode overrides for magic prompts that send chat turns
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MagicPromptModes {
+    #[serde(default = "default_magic_prompt_plan_mode")]
+    pub investigate_issue_mode: String,
+    #[serde(default = "default_magic_prompt_plan_mode")]
+    pub investigate_pr_mode: String,
+    #[serde(default = "default_magic_prompt_yolo_mode")]
+    pub investigate_workflow_run_mode: String,
+    #[serde(default = "default_magic_prompt_plan_mode")]
+    pub investigate_security_alert_mode: String,
+    #[serde(default = "default_magic_prompt_plan_mode")]
+    pub investigate_advisory_mode: String,
+    #[serde(default = "default_magic_prompt_plan_mode")]
+    pub investigate_linear_issue_mode: String,
+    #[serde(default = "default_magic_prompt_plan_mode")]
+    pub review_comments_mode: String,
+    #[serde(default = "default_magic_prompt_yolo_mode")]
+    pub resolve_conflicts_mode: String,
+}
+
+impl Default for MagicPromptModes {
+    fn default() -> Self {
+        Self {
+            investigate_issue_mode: default_magic_prompt_plan_mode(),
+            investigate_pr_mode: default_magic_prompt_plan_mode(),
+            investigate_workflow_run_mode: default_magic_prompt_yolo_mode(),
+            investigate_security_alert_mode: default_magic_prompt_plan_mode(),
+            investigate_advisory_mode: default_magic_prompt_plan_mode(),
+            investigate_linear_issue_mode: default_magic_prompt_plan_mode(),
+            review_comments_mode: default_magic_prompt_plan_mode(),
+            resolve_conflicts_mode: default_magic_prompt_yolo_mode(),
+        }
+    }
+}
+
 impl MagicPrompts {
     /// Migrate prompts that match the current default to None.
     /// This ensures users who never customized a prompt get auto-updated defaults.
     fn migrate_defaults(&mut self) {
         type DefaultEntry<'a> = (fn() -> String, &'a mut Option<String>);
-        let defaults: [DefaultEntry; 17] = [
+        let defaults: [DefaultEntry; 18] = [
             (
                 default_investigate_issue_prompt,
                 &mut self.investigate_issue,
@@ -1774,6 +1860,7 @@ impl MagicPrompts {
                 &mut self.investigate_workflow_run,
             ),
             (default_release_notes_prompt, &mut self.release_notes),
+            (default_release_post_prompt, &mut self.release_post),
             (default_session_naming_prompt, &mut self.session_naming),
             (
                 default_parallel_execution_prompt,
@@ -1851,6 +1938,7 @@ impl Default for AppPreferences {
             magic_prompt_providers: MagicPromptProviders::default(),
             magic_prompt_backends: MagicPromptBackends::default(),
             magic_prompt_efforts: MagicPromptReasoningEfforts::default(),
+            magic_prompt_modes: MagicPromptModes::default(),
             magic_models_auto_initialized: false,
             file_edit_mode: default_file_edit_mode(),
             ai_language: String::new(),
@@ -4050,6 +4138,7 @@ pub fn run() {
             projects::cancel_review_with_ai,
             projects::list_github_releases,
             projects::generate_release_notes,
+            projects::generate_release_post,
             projects::commit_changes,
             projects::open_project_on_github,
             projects::open_branch_on_github,

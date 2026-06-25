@@ -311,7 +311,9 @@ describe('CompactMessageList', () => {
 
     expect(copyButtons).toHaveLength(2)
 
-    fireEvent.click(copyButtons[1]!)
+    const secondCopyButton = copyButtons[1]
+    if (!secondCopyButton) throw new Error('Expected second copy button')
+    fireEvent.click(secondCopyButton)
 
     expect(onCopyToInput).toHaveBeenCalledTimes(1)
     expect(onCopyToInput).toHaveBeenCalledWith(
