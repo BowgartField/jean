@@ -31,6 +31,7 @@ const toastMock = toast as unknown as {
 
 describe('prefetchSessions', () => {
   beforeEach(() => {
+    ;(window as unknown as Record<string, unknown>).__JEAN_E2E_MOCK__ = true
     useChatStore.setState({
       sessionWorktreeMap: {},
       worktreePaths: {},
@@ -108,6 +109,7 @@ describe('reconnectNativeCliSession', () => {
     toastMock.success.mockClear()
     toastMock.error.mockClear()
     const { invoke } = await import('@/lib/transport')
+    ;(invoke as ReturnType<typeof vi.fn>).mockClear()
     ;(invoke as ReturnType<typeof vi.fn>).mockResolvedValue(undefined)
     useUIStore.setState({ sessionPrimarySurface: {}, sessionTerminalIds: {} })
     useTerminalStore.setState({ terminals: {}, modalTerminalOpen: {} })
@@ -143,6 +145,7 @@ describe('reconnectNativeCliSession', () => {
     await reconnectNativeCliSession(terminalSession, 'wt-1', {
       openModal: false,
       showToast: false,
+      markOpened: false,
     })
 
     // Terminal still restored...
@@ -150,5 +153,19 @@ describe('reconnectNativeCliSession', () => {
     // ...but no floating drawer pops and no toast fires.
     expect(useTerminalStore.getState().modalTerminalOpen['wt-1']).toBeUndefined()
     expect(toastMock.success).not.toHaveBeenCalled()
+  })
+
+  it('does not mark the session opened when markOpened is false', async () => {
+    const { invoke } = await import('@/lib/transport')
+
+    await reconnectNativeCliSession(terminalSession, 'wt-1', {
+      openModal: false,
+      showToast: false,
+      markOpened: false,
+    })
+
+    expect(invoke).not.toHaveBeenCalledWith('set_session_last_opened', {
+      sessionId: 'session-1',
+    })
   })
 })

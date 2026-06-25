@@ -475,6 +475,7 @@ export function ChatWindow({
     void reconnectNativeCliSession(session, activeWorktreeId, {
       openModal: false,
       showToast: false,
+      markOpened: false,
     })
       .catch(error => {
         logger.error('Auto-reconnect of terminal session failed', { error })

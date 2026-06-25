@@ -122,13 +122,16 @@ export function canReconnectSession(session: Session): boolean {
  * because the full-screen `FullScreenTerminalSurface` renders inline.
  * `options.showToast` controls the "Reconnecting…" toast (default true); the
  * auto-restore silences it to avoid noise on every relaunch.
+ * `options.markOpened` controls whether reconnecting refreshes the session's
+ * last-opened timestamp (default true for manual reconnect; false for silent
+ * startup restore).
  */
 export async function reconnectNativeCliSession(
   session: Session,
   worktreeId: string,
-  options?: { openModal?: boolean; showToast?: boolean }
+  options?: { openModal?: boolean; showToast?: boolean; markOpened?: boolean }
 ): Promise<void> {
-  const { openModal = true, showToast = true } = options ?? {}
+  const { openModal = true, showToast = true, markOpened = true } = options ?? {}
   const resume = getResumeArgs(session)
   const launch = resume ?? {
     command: session.terminal_command ?? '',
@@ -166,7 +169,9 @@ export async function reconnectNativeCliSession(
   uiStore.setSessionPrimarySurface(session.id, 'terminal')
   uiStore.setSessionTerminalId(session.id, newTerminalId)
   if (openModal) terminalStore.setModalTerminalOpen(worktreeId, true)
-  useChatStore.getState().setActiveSession(worktreeId, session.id)
+  useChatStore.getState().setActiveSession(worktreeId, session.id, {
+    markOpened,
+  })
 
   if (showToast) toast.success('Reconnecting session…')
 }
