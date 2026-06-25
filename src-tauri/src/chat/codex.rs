@@ -589,14 +589,26 @@ pub fn build_turn_start_params(
 /// The request fails server-side when `expectedTurnId` no longer matches the
 /// active turn (turn ended), which callers treat as a fallback signal.
 pub fn build_turn_steer_params(thread_id: &str, turn_id: &str, text: &str) -> serde_json::Value {
-    serde_json::json!({
-        "threadId": thread_id,
-        "expectedTurnId": turn_id,
-        "input": [{
+    build_turn_steer_params_with_input(
+        thread_id,
+        turn_id,
+        vec![serde_json::json!({
             "type": "text",
             "text": text,
             "text_elements": [],
-        }],
+        })],
+    )
+}
+
+pub fn build_turn_steer_params_with_input(
+    thread_id: &str,
+    turn_id: &str,
+    input: Vec<serde_json::Value>,
+) -> serde_json::Value {
+    serde_json::json!({
+        "threadId": thread_id,
+        "expectedTurnId": turn_id,
+        "input": input,
     })
 }
 
@@ -4631,6 +4643,7 @@ mod tests {
             thinking_level: None,
             effort_level: None,
             backend: None,
+            custom_profile_name: None,
             started_at: 1,
             ended_at: Some(2),
             status: RunStatus::Cancelled,
@@ -4643,6 +4656,7 @@ mod tests {
             codex_thread_id: None,
             codex_turn_id: None,
             cursor_chat_id: None,
+            grok_session_id: None,
         };
 
         let message = parse_codex_run_to_message(&lines, &run).expect("message");
@@ -4685,6 +4699,7 @@ mod tests {
             thinking_level: None,
             effort_level: None,
             backend: None,
+            custom_profile_name: None,
             started_at: 1,
             ended_at: Some(2),
             status: RunStatus::Completed,
@@ -4697,6 +4712,7 @@ mod tests {
             codex_thread_id: None,
             codex_turn_id: None,
             cursor_chat_id: None,
+            grok_session_id: None,
         };
 
         let message = parse_codex_run_to_message(&lines, &run).expect("message");
@@ -4736,6 +4752,7 @@ mod tests {
             thinking_level: None,
             effort_level: None,
             backend: None,
+            custom_profile_name: None,
             started_at: 1,
             ended_at: Some(2),
             status: RunStatus::Completed,
@@ -4748,6 +4765,7 @@ mod tests {
             codex_thread_id: None,
             codex_turn_id: None,
             cursor_chat_id: None,
+            grok_session_id: None,
         };
 
         let message = parse_codex_run_to_message(&lines, &run).expect("message");
@@ -4790,6 +4808,7 @@ mod tests {
             thinking_level: None,
             effort_level: None,
             backend: None,
+            custom_profile_name: None,
             started_at: 1,
             ended_at: Some(2),
             status: RunStatus::Completed,
@@ -4802,6 +4821,7 @@ mod tests {
             codex_thread_id: None,
             codex_turn_id: None,
             cursor_chat_id: None,
+            grok_session_id: None,
         };
 
         let message = parse_codex_run_to_message(&lines, &run).expect("message");
@@ -4883,6 +4903,7 @@ mod tests {
             thinking_level: None,
             effort_level: None,
             backend: None,
+            custom_profile_name: None,
             started_at: 1,
             ended_at: Some(2),
             status: RunStatus::Completed,
@@ -4895,6 +4916,7 @@ mod tests {
             codex_thread_id: None,
             codex_turn_id: None,
             cursor_chat_id: None,
+            grok_session_id: None,
         };
 
         let message = parse_codex_run_to_message(&lines, &run).expect("message");
@@ -4937,6 +4959,7 @@ mod tests {
             thinking_level: None,
             effort_level: None,
             backend: None,
+            custom_profile_name: None,
             started_at: 1,
             ended_at: Some(2),
             status: RunStatus::Completed,
@@ -4949,6 +4972,7 @@ mod tests {
             codex_thread_id: None,
             codex_turn_id: None,
             cursor_chat_id: None,
+            grok_session_id: None,
         };
 
         let message = parse_codex_run_to_message(&lines, &run).expect("message");
@@ -4996,6 +5020,7 @@ mod tests {
             thinking_level: None,
             effort_level: None,
             backend: None,
+            custom_profile_name: None,
             started_at: 1,
             ended_at: Some(2),
             status: RunStatus::Completed,
@@ -5008,6 +5033,7 @@ mod tests {
             codex_thread_id: None,
             codex_turn_id: None,
             cursor_chat_id: None,
+            grok_session_id: None,
         };
 
         let message = parse_codex_run_to_message(&lines, &run).expect("message");
@@ -5036,6 +5062,7 @@ mod tests {
             thinking_level: None,
             effort_level: None,
             backend: None,
+            custom_profile_name: None,
             started_at: 1,
             ended_at: Some(2),
             status: RunStatus::Completed,
@@ -5048,6 +5075,7 @@ mod tests {
             codex_thread_id: None,
             codex_turn_id: None,
             cursor_chat_id: None,
+            grok_session_id: None,
         };
 
         let message = parse_codex_run_to_message(&lines, &run).expect("message");

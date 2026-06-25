@@ -6031,6 +6031,97 @@ fn extract_structured_output(output: &str) -> Result<String, String> {
     Err("No structured output found in Claude response".to_string())
 }
 
+fn extract_claude_stream_error(stdout: &str) -> Option<String> {
+    let mut assistant_text = String::new();
+
+    for line in stdout.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+
+        let parsed: serde_json::Value = match serde_json::from_str(line) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
+        if parsed.get("type").and_then(|t| t.as_str()) == Some("result")
+            && parsed.get("is_error").and_then(|v| v.as_bool()) == Some(true)
+        {
+            if parsed.get("subtype").and_then(|v| v.as_str()) == Some("error_max_turns") {
+                return Some("reached max turns before producing structured output".to_string());
+            }
+
+            if let Some(result) = parsed.get("result").and_then(|v| v.as_str()) {
+                let result = result.trim();
+                if !result.is_empty() {
+                    return Some(result.to_string());
+                }
+            }
+        }
+
+        if parsed.get("type").and_then(|t| t.as_str()) == Some("assistant") {
+            if let Some(content) = parsed
+                .get("message")
+                .and_then(|m| m.get("content"))
+                .and_then(|c| c.as_array())
+            {
+                for block in content {
+                    if block.get("type").and_then(|t| t.as_str()) == Some("text") {
+                        if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
+                            assistant_text.push_str(text);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let assistant_text = assistant_text.trim();
+    let lower = assistant_text.to_lowercase();
+    let looks_like_error = lower.contains("error")
+        || lower.contains("failed")
+        || lower.contains("authenticate")
+        || lower.contains("unauthorized");
+
+    if assistant_text.is_empty() || !looks_like_error {
+        None
+    } else {
+        Some(assistant_text.to_string())
+    }
+}
+
+fn truncate_error_context(value: &str) -> String {
+    const MAX_ERROR_CHARS: usize = 600;
+    let value = value.trim();
+    if value.chars().count() <= MAX_ERROR_CHARS {
+        value.to_string()
+    } else {
+        format!(
+            "{}…",
+            value.chars().take(MAX_ERROR_CHARS).collect::<String>()
+        )
+    }
+}
+
+fn format_claude_cli_failure(stderr: &str, stdout: &str) -> String {
+    if let Some(error) = extract_claude_stream_error(stdout) {
+        return format!("Claude CLI failed: {error}");
+    }
+
+    let stderr = stderr.trim();
+    if !stderr.is_empty() {
+        return format!("Claude CLI failed: {}", truncate_error_context(stderr));
+    }
+
+    let stdout = stdout.trim();
+    if !stdout.is_empty() {
+        return format!("Claude CLI failed: {}", truncate_error_context(stdout));
+    }
+
+    "Claude CLI failed with no output".to_string()
+}
+
 /// Extract the first complete, balanced top-level JSON object from arbitrary
 /// text (PI/other CLIs may wrap JSON in prose). Brace-counts while respecting
 /// string literals and escapes, so braces inside strings don't break bounds.
@@ -6102,11 +6193,9 @@ fn build_claude_structured_output_args(model: &str, tools: &str, schema: &str) -
         "--tools".to_string(),
         tools.to_string(),
         "--max-turns".to_string(),
-        "2".to_string(),
+        "3".to_string(),
         "--json-schema".to_string(),
         schema.to_string(),
-        "--permission-mode".to_string(),
-        "plan".to_string(),
     ]
 }
 
@@ -6809,6 +6898,24 @@ fn generate_pr_content_from_inputs(
         return Ok(response);
     }
 
+    if backend == crate::chat::types::Backend::Grok {
+        log::trace!("Generating PR content with Grok");
+        let json_str = crate::chat::grok::execute_one_shot_grok(
+            app,
+            &prompt,
+            model_str,
+            Some(std::path::Path::new(repo_path)),
+            reasoning_effort,
+        )?;
+        let json_str = extract_json_object_from_text(&json_str)?;
+        let mut response: PrContentResponse = serde_json::from_str(&json_str).map_err(|e| {
+            log::error!("Failed to parse Grok PR content JSON: {e}, content: {json_str}");
+            format!("Failed to parse PR content: {e}")
+        })?;
+        response.body = augment_pr_references_in_body(&response.body, related_pr_issue_refs);
+        return Ok(response);
+    }
+
     log::trace!("Generating PR content with Claude CLI (JSON schema)");
 
     let cli_path = resolve_cli_binary(app);
@@ -6859,11 +6966,7 @@ fn generate_pr_content_from_inputs(
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let stdout = String::from_utf8_lossy(&output.stdout);
-        return Err(format!(
-            "Claude CLI failed: stderr={}, stdout={}",
-            stderr.trim(),
-            stdout.trim()
-        ));
+        return Err(format_claude_cli_failure(&stderr, &stdout));
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -7438,6 +7541,22 @@ fn generate_commit_message_once(
         });
     }
 
+    if backend == crate::chat::types::Backend::Grok {
+        log::trace!("Generating commit message with Grok");
+        let json_str = crate::chat::grok::execute_one_shot_grok(
+            app,
+            prompt,
+            model_str,
+            working_dir,
+            reasoning_effort,
+        )?;
+        let json_str = extract_json_object_from_text(&json_str)?;
+        return serde_json::from_str(&json_str).map_err(|e| {
+            log::error!("Failed to parse Grok commit message JSON: {e}, content: {json_str}");
+            format!("Failed to parse commit message: {e}")
+        });
+    }
+
     log::trace!("Generating commit message with Claude CLI (JSON schema)");
 
     let cli_path = resolve_cli_binary(app);
@@ -7481,11 +7600,7 @@ fn generate_commit_message_once(
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let stdout = String::from_utf8_lossy(&output.stdout);
-        return Err(format!(
-            "Claude CLI failed: stderr={}, stdout={}",
-            stderr.trim(),
-            stdout.trim()
-        ));
+        return Err(format_claude_cli_failure(&stderr, &stdout));
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -7959,6 +8074,22 @@ fn generate_review(
         });
     }
 
+    if backend == crate::chat::types::Backend::Grok {
+        log::trace!("Running code review with Grok");
+        let json_str = crate::chat::grok::execute_one_shot_grok(
+            app,
+            prompt,
+            model_str,
+            working_dir,
+            reasoning_effort,
+        )?;
+        let json_str = extract_json_object_from_text(&json_str)?;
+        return serde_json::from_str(&json_str).map_err(|e| {
+            log::error!("Failed to parse Grok review JSON: {e}, content: {json_str}");
+            format!("Failed to parse review: {e}")
+        });
+    }
+
     let cli_path = resolve_cli_binary(app);
     if !cli_path.exists() {
         return Err("Claude CLI not installed".to_string());
@@ -8018,11 +8149,7 @@ fn generate_review(
         }
         let stderr = String::from_utf8_lossy(&output.stderr);
         let stdout = String::from_utf8_lossy(&output.stdout);
-        return Err(format!(
-            "Claude CLI failed: stderr={}, stdout={}",
-            stderr.trim(),
-            stdout.trim()
-        ));
+        return Err(format_claude_cli_failure(&stderr, &stdout));
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -8855,6 +8982,26 @@ pub struct ReleaseNotesResponse {
     pub body: String,
 }
 
+/// Response from generate_release_post command
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReleasePostResponse {
+    pub post: String,
+    pub release_url: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ReleasePostContent {
+    post: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GitHubReleaseDetails {
+    name: String,
+    body: String,
+    url: String,
+}
+
 const RELEASE_NOTES_SCHEMA: &str = r#"{
     "type": "object",
     "properties": {
@@ -8868,6 +9015,18 @@ const RELEASE_NOTES_SCHEMA: &str = r#"{
         }
     },
     "required": ["title", "body"],
+    "additionalProperties": false
+}"#;
+
+const RELEASE_POST_SCHEMA: &str = r#"{
+    "type": "object",
+    "properties": {
+        "post": {
+            "type": "string",
+            "description": "A social release announcement under 280 characters including the release URL"
+        }
+    },
+    "required": ["post"],
     "additionalProperties": false
 }"#;
 
@@ -8898,6 +9057,24 @@ const RELEASE_NOTES_PROMPT: &str = r#"Generate release notes for changes since t
 - Skip merge commits and trivial changes (typos, formatting).
 - Write in past tense ("Added", "Fixed", "Improved").
 - Keep it concise and user-facing (skip internal implementation details)."#;
+
+const RELEASE_POST_PROMPT: &str = r#"Write one short release announcement for Twitter/X, Mastodon, Bluesky, LinkedIn, and similar platforms.
+
+Release: {release_name}
+Tag: {tag}
+GitHub release link: {release_url}
+
+Release notes:
+{release_body}
+
+Instructions:
+- Be a bit more generous than a terse tweet, but keep the full post under 280 characters including the GitHub release link.
+- Include the exact GitHub release link.
+- Put each feature, fix, or improvement on its own line.
+- Mention the most user-facing changes or theme.
+- Keep it clear, upbeat, and not hype-heavy.
+- Do not use markdown headings.
+- Output only the JSON object matching the schema."#;
 
 /// Generate release notes content using Claude CLI
 fn generate_release_notes_content(
@@ -9054,6 +9231,25 @@ fn generate_release_notes_content(
         return Ok(response);
     }
 
+    if backend == crate::chat::types::Backend::Grok {
+        log::trace!("Generating release notes with Grok");
+        let json_str = crate::chat::grok::execute_one_shot_grok(
+            app,
+            &prompt,
+            model_str,
+            Some(std::path::Path::new(project_path)),
+            reasoning_effort,
+        )?;
+        let json_str = extract_json_object_from_text(&json_str)?;
+        let mut response: ReleaseNotesResponse = serde_json::from_str(&json_str).map_err(|e| {
+            log::error!("Failed to parse Grok release notes JSON: {e}, content: {json_str}");
+            format!("Failed to parse release notes: {e}")
+        })?;
+        response.body =
+            augment_pr_references_in_body(&response.body, &release_notes_context.pr_issue_refs);
+        return Ok(response);
+    }
+
     let cli_path = resolve_cli_binary(app);
     if !cli_path.exists() {
         return Err("Claude CLI not installed".to_string());
@@ -9097,11 +9293,7 @@ fn generate_release_notes_content(
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let stdout = String::from_utf8_lossy(&output.stdout);
-        return Err(format!(
-            "Claude CLI failed: stderr={}, stdout={}",
-            stderr.trim(),
-            stdout.trim()
-        ));
+        return Err(format_claude_cli_failure(&stderr, &stdout));
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -9187,7 +9379,9 @@ fn format_related_pull_requests(pr_issue_refs: &PrIssueRefsMap) -> String {
 
 #[cfg(test)]
 mod release_notes_body_tests {
-    use super::{augment_pr_references_in_body, format_related_pull_requests};
+    use super::{
+        augment_pr_references_in_body, fit_release_post_to_limit, format_related_pull_requests,
+    };
     use std::collections::{BTreeMap, BTreeSet};
 
     fn issue_map(
@@ -9256,6 +9450,23 @@ Related issue references:
             "- PR #9503: use exact reference `(#9503, fixes #9501, #9504)`"
         );
     }
+
+    #[test]
+    fn release_post_includes_link_and_stays_under_280_chars() {
+        let release_url = "https://github.com/acme/app/releases/tag/v1.2.3";
+        let long_post = "Jean v1.2.3 is out with a long list of improvements, fixes, polish, stability work, performance upgrades, better release workflows, clearer errors, faster startup, smoother onboarding, refreshed settings, and many other user-facing updates worth sharing everywhere.";
+
+        let result = fit_release_post_to_limit(long_post, release_url);
+
+        assert!(result.contains(release_url));
+        assert!(result.chars().count() <= 280);
+    }
+
+    #[test]
+    fn release_post_prompt_requests_one_change_per_line() {
+        assert!(super::RELEASE_POST_PROMPT
+            .contains("Put each feature, fix, or improvement on its own line"));
+    }
 }
 
 /// Generate release notes comparing a tag to HEAD
@@ -9276,8 +9487,222 @@ pub async fn generate_release_notes(
         .ok()
         .and_then(|p| std::fs::read_to_string(p).ok())
         .and_then(|c| serde_json::from_str::<crate::AppPreferences>(&c).ok())
-        .and_then(|p| p.magic_prompt_backends.release_notes_backend);
+        .and_then(|p| p.magic_prompt_backends.release_post_backend);
     generate_release_notes_content(
+        &app,
+        &project_path,
+        &tag,
+        &release_name,
+        custom_prompt.as_deref(),
+        model.as_deref(),
+        custom_profile_name.as_deref(),
+        release_magic_backend.as_deref(),
+        reasoning_effort.as_deref(),
+    )
+}
+
+fn view_github_release_details(
+    app: &AppHandle,
+    project_path: &str,
+    tag: &str,
+) -> Result<GitHubReleaseDetails, String> {
+    let gh = resolve_gh_binary(app);
+    let output = silent_command(&gh)
+        .args(["release", "view", tag, "--json", "tagName,name,body,url"])
+        .current_dir(project_path)
+        .output()
+        .map_err(|e| format!("Failed to run gh CLI: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Failed to view release {tag}: {stderr}"));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    serde_json::from_str::<GitHubReleaseDetails>(&stdout)
+        .map_err(|e| format!("Failed to parse release details: {e}"))
+}
+
+fn fit_release_post_to_limit(post: &str, release_url: &str) -> String {
+    let mut post = post.trim().to_string();
+    if !post.contains(release_url) {
+        if !post.is_empty() {
+            post.push(' ');
+        }
+        post.push_str(release_url);
+    }
+
+    if post.chars().count() <= 280 {
+        return post;
+    }
+
+    let suffix = format!("… {release_url}");
+    let suffix_len = suffix.chars().count();
+    if suffix_len >= 280 {
+        return release_url.chars().take(280).collect();
+    }
+
+    let max_prefix = 280 - suffix_len;
+    let without_url = post.replace(release_url, "");
+    let prefix = without_url
+        .trim()
+        .chars()
+        .take(max_prefix)
+        .collect::<String>()
+        .trim()
+        .to_string();
+    format!("{prefix}{suffix}")
+}
+
+fn generate_release_post_content(
+    app: &AppHandle,
+    project_path: &str,
+    tag: &str,
+    release_name: &str,
+    custom_prompt: Option<&str>,
+    model: Option<&str>,
+    custom_profile_name: Option<&str>,
+    magic_backend: Option<&str>,
+    reasoning_effort: Option<&str>,
+) -> Result<ReleasePostResponse, String> {
+    let release = view_github_release_details(app, project_path, tag)?;
+    let release_url = if release.url.trim().is_empty() {
+        let repo_url = git::get_github_url(project_path)?;
+        format!("{repo_url}/releases/tag/{tag}")
+    } else {
+        release.url
+    };
+
+    let release_name = if release.name.trim().is_empty() {
+        release_name
+    } else {
+        release.name.as_str()
+    };
+    let release_body = if release.body.trim().is_empty() {
+        "No release notes were published for this release."
+    } else {
+        release.body.as_str()
+    };
+    let prompt_template = custom_prompt
+        .filter(|p| !p.trim().is_empty())
+        .unwrap_or(RELEASE_POST_PROMPT);
+    let prompt = prompt_template
+        .replace("{tag}", tag)
+        .replace("{release_name}", release_name)
+        .replace("{release_url}", &release_url)
+        .replace("{release_body}", release_body);
+
+    let model_str = model.unwrap_or("sonnet");
+    let backend = crate::chat::resolve_magic_prompt_backend(app, magic_backend, None);
+
+    let json_str = if backend == crate::chat::types::Backend::Opencode {
+        crate::chat::opencode::execute_one_shot_opencode(
+            app,
+            &prompt,
+            model_str,
+            Some(RELEASE_POST_SCHEMA),
+            Some(std::path::Path::new(project_path)),
+            reasoning_effort,
+        )?
+    } else if backend == crate::chat::types::Backend::Codex {
+        crate::chat::codex::execute_one_shot_codex(
+            app,
+            &prompt,
+            model_str,
+            RELEASE_POST_SCHEMA,
+            Some(std::path::Path::new(project_path)),
+            reasoning_effort,
+        )?
+    } else if backend == crate::chat::types::Backend::Cursor {
+        crate::chat::cursor::execute_one_shot_cursor(
+            app,
+            &prompt,
+            model_str,
+            Some(std::path::Path::new(project_path)),
+        )?
+    } else if backend == crate::chat::types::Backend::Pi {
+        let text = crate::chat::pi::execute_one_shot_pi(
+            app,
+            &prompt,
+            model_str,
+            Some(std::path::Path::new(project_path)),
+            reasoning_effort,
+        )?;
+        extract_json_object_from_text(&text)?
+    } else {
+        let cli_path = resolve_cli_binary(app);
+        if !cli_path.exists() {
+            return Err("Claude CLI not installed".to_string());
+        }
+
+        let mut cmd = silent_command(&cli_path);
+        crate::chat::claude::apply_custom_profile_settings(&mut cmd, custom_profile_name);
+        cmd.args(build_claude_structured_output_args(
+            model_str,
+            "",
+            RELEASE_POST_SCHEMA,
+        ));
+        cmd.stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| format!("Failed to spawn Claude CLI: {e}"))?;
+        {
+            let stdin = child.stdin.as_mut().ok_or("Failed to open stdin")?;
+            let input_message = serde_json::json!({
+                "type": "user",
+                "message": {
+                    "role": "user",
+                    "content": prompt
+                }
+            });
+            writeln!(stdin, "{input_message}")
+                .map_err(|e| format!("Failed to write to stdin: {e}"))?;
+        }
+
+        let output = child
+            .wait_with_output()
+            .map_err(|e| format!("Failed to wait for Claude CLI: {e}"))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            return Err(format_claude_cli_failure(&stderr, &stdout));
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        extract_structured_output(&stdout)?
+    };
+
+    let response = serde_json::from_str::<ReleasePostContent>(&json_str)
+        .map_err(|e| format!("Failed to parse release post response: {e}"))?;
+    Ok(ReleasePostResponse {
+        post: fit_release_post_to_limit(&response.post, &release_url),
+        release_url,
+    })
+}
+
+/// Generate a short social release post for a GitHub release
+#[tauri::command]
+pub async fn generate_release_post(
+    app: AppHandle,
+    project_path: String,
+    tag: String,
+    release_name: String,
+    custom_prompt: Option<String>,
+    model: Option<String>,
+    custom_profile_name: Option<String>,
+    reasoning_effort: Option<String>,
+) -> Result<ReleasePostResponse, String> {
+    log::trace!("Generating release post for {project_path} release {tag}");
+
+    let release_magic_backend = crate::get_preferences_path(&app)
+        .ok()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|c| serde_json::from_str::<crate::AppPreferences>(&c).ok())
+        .and_then(|p| p.magic_prompt_backends.release_notes_backend);
+    generate_release_post_content(
         &app,
         &project_path,
         &tag,
@@ -11568,6 +11993,35 @@ Body
     }
 
     #[test]
+    fn format_claude_cli_failure_extracts_stream_json_auth_error() {
+        let stdout = r#"{"type":"system","subtype":"hook_response","output":"startup hook"}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Failed to authenticate. API Error: 401 Invalid authentication credentials"}]},"error":"authentication_failed"}
+{"type":"result","is_error":true,"result":"Failed to authenticate. API Error: 401 Invalid authentication credentials"}"#;
+
+        let result = format_claude_cli_failure("", stdout);
+
+        assert_eq!(
+            result,
+            "Claude CLI failed: Failed to authenticate. API Error: 401 Invalid authentication credentials"
+        );
+        assert!(!result.contains("hook_response"));
+    }
+
+    #[test]
+    fn format_claude_cli_failure_does_not_report_max_turns_summary_as_error() {
+        let stdout = r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Looking at the diff: two main features — WebSocket reconnect sends minimal payload."}]}}
+{"type":"result","subtype":"error_max_turns","is_error":true,"result":"Looking at the diff: two main features — WebSocket reconnect sends minimal payload."}"#;
+
+        let result = format_claude_cli_failure("", stdout);
+
+        assert_eq!(
+            result,
+            "Claude CLI failed: reached max turns before producing structured output"
+        );
+        assert!(!result.contains("Looking at the diff"));
+    }
+
+    #[test]
     fn validate_commit_message_rejects_commit_guidance_meta_subject() {
         let result = validate_commit_message(
             "chore: inspect commit message guidance",
@@ -11698,11 +12152,11 @@ Body
     }
 
     #[test]
-    fn test_build_claude_structured_output_args_uses_two_turns_and_plan_mode() {
+    fn test_build_claude_structured_output_args_disables_tools_without_plan_mode() {
         let args = build_claude_structured_output_args("sonnet", "none", REVIEW_SCHEMA);
 
-        assert!(args.windows(2).any(|w| w == ["--max-turns", "2"]));
-        assert!(args.windows(2).any(|w| w == ["--permission-mode", "plan"]));
+        assert!(args.windows(2).any(|w| w == ["--max-turns", "3"]));
+        assert!(!args.iter().any(|arg| arg == "--permission-mode"));
         assert!(args.windows(2).any(|w| w == ["--tools", "none"]));
         assert!(args.windows(2).any(|w| w == ["--model", "sonnet"]));
         assert!(args

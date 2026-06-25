@@ -1200,6 +1200,7 @@ export function ChatWindow({
             | 'cursor'
             | 'commandcode'
         )
+        store.setSelectedBackend(newSession.id, yoloBackend as CliBackend)
       }
       // Optimistically update TanStack Query cache so UI shows correct backend/model immediately.
       queryClient.setQueryData<Session>(
@@ -1385,6 +1386,7 @@ export function ChatWindow({
             | 'cursor'
             | 'commandcode'
         )
+        store.setSelectedBackend(newSession.id, buildBackend as CliBackend)
       }
       // Optimistically update TanStack Query cache so UI shows correct backend/model immediately.
       queryClient.setQueryData<Session>(
@@ -1653,6 +1655,7 @@ export function ChatWindow({
             | 'cursor'
             | 'commandcode'
         )
+        store.setSelectedBackend(newSession.id, modeBackend as CliBackend)
       }
       queryClient.setQueryData<Session>(
         chatQueryKeys.session(newSession.id),
@@ -2174,6 +2177,21 @@ export function ChatWindow({
     }
   }, [])
 
+  const handleCopySteeredText = useCallback(
+    (text: string) => {
+      void handleCopyToInput({
+        id: `${activeSessionId ?? 'streaming'}-steered-copy`,
+        session_id: activeSessionId ?? '',
+        role: 'user',
+        content: text,
+        timestamp: Date.now(),
+        content_blocks: [],
+        tool_calls: [],
+      })
+    },
+    [activeSessionId, handleCopyToInput]
+  )
+
   // Window event listeners (focus, plan, git-diff, cancel, create-session, plan approval, etc.)
   useChatWindowEvents({
     inputRef,
@@ -2419,7 +2437,10 @@ export function ChatWindow({
         />
       )}
     >
-      <div className="flex h-full w-full min-w-0 flex-col overflow-hidden">
+      <div
+        data-chat-session-id={activeSessionId}
+        className="flex h-full w-full min-w-0 flex-col overflow-hidden"
+      >
         <ReviewMethodModal
           open={reviewMethodModalOpen}
           onOpenChange={setReviewMethodModalOpen}
@@ -2702,6 +2723,7 @@ export function ChatWindow({
                                       isQuestionAnswered={isQuestionAnswered}
                                       getSubmittedAnswers={getSubmittedAnswers}
                                       areQuestionsSkipped={areQuestionsSkipped}
+                                      onCopySteeredText={handleCopySteeredText}
                                     />
                                   ) : (
                                     <StreamingMessage
@@ -2717,6 +2739,7 @@ export function ChatWindow({
                                       isQuestionAnswered={isQuestionAnswered}
                                       getSubmittedAnswers={getSubmittedAnswers}
                                       areQuestionsSkipped={areQuestionsSkipped}
+                                      onCopySteeredText={handleCopySteeredText}
                                     />
                                   ))}
                                 <StreamingStatusBar
