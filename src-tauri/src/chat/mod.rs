@@ -51,6 +51,12 @@ Rules:
 - Skip the recap entirely if the turn was a single one-line answer with no tool calls.
 - Do NOT repeat tool inputs, file diffs, or raw command output verbatim. Summarize.";
 
+pub(crate) fn should_add_recap_instruction(app: &tauri::AppHandle) -> bool {
+    crate::load_preferences_sync(app)
+        .map(|preferences| preferences.auto_recaps_enabled)
+        .unwrap_or(true)
+}
+
 /// Global counter for active file tailers (sessions being streamed)
 static ACTIVE_TAILER_COUNT: once_cell::sync::Lazy<AtomicUsize> =
     once_cell::sync::Lazy::new(|| AtomicUsize::new(0));

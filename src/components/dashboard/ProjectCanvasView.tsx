@@ -113,6 +113,7 @@ import { OpenPRsBadge } from '@/components/shared/OpenPRsBadge'
 import { FailedRunsBadge } from '@/components/shared/FailedRunsBadge'
 import { SecurityAlertsBadge } from '@/components/shared/SecurityAlertsBadge'
 import { PlanDialog } from '@/components/chat/PlanDialog'
+import { RecapDialog } from '@/components/chat/RecapDialog'
 import { SessionChatModal } from '@/components/chat/SessionChatModal'
 
 import { LabelModal } from '@/components/chat/LabelModal'
@@ -192,7 +193,7 @@ import {
   triggerImmediateGitPoll,
   performGitPull,
 } from '@/services/git-status'
-import { useRemotePicker } from '@/hooks/useRemotePicker'
+import { pushNeedsRemotePicker, useRemotePicker } from '@/hooks/useRemotePicker'
 import {
   DRAG_SCOPE_CANVAS_WORKTREE_LIST,
   isWorktreeDragData,
@@ -514,7 +515,8 @@ function WorktreeSectionHeader({
   const handlePush = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation()
-      pickRemoteOrRun(async remote => {
+
+      const runPush = async (remote?: string) => {
         const opToast = dismissibleToast.loading('Pushing changes...')
         try {
           const result = await gitPush(
@@ -534,9 +536,15 @@ function WorktreeSectionHeader({
         } catch (error) {
           opToast.error(`Push failed: ${error}`)
         }
-      })
+      }
+
+      if (pushNeedsRemotePicker(worktree.pr_number)) {
+        pickRemoteOrRun(runPush)
+      } else {
+        runPush()
+      }
     },
-    [worktree.path, worktree.pr_number, projectId, pickRemoteOrRun]
+    [pickRemoteOrRun, worktree.path, worktree.pr_number, projectId]
   )
 
   const handleDiffClick = useCallback(() => {
@@ -2181,6 +2189,8 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
     planApprovalContext,
     planDialogCard,
     closePlanDialog,
+    recapDialogContent,
+    closeRecapDialog,
   } = useCanvasShortcutEvents({
     selectedCard,
     enabled: !selectedWorktreeModal && selectedIndex !== null,
@@ -2584,6 +2594,7 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
     !!selectedWorktreeModal ||
     !!planDialogPath ||
     !!planDialogContent ||
+    !!recapDialogContent ||
     worktreeLabelModalOpen ||
     !!labelDeleteTarget
   const { cardRefs } = useCanvasKeyboardNav({
@@ -3514,6 +3525,14 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
               ? handleDialogWorktreeApproveYolo
               : undefined
           }
+        />
+      ) : null}
+
+      {recapDialogContent ? (
+        <RecapDialog
+          content={recapDialogContent}
+          isOpen={true}
+          onClose={closeRecapDialog}
         />
       ) : null}
 

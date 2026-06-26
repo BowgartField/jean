@@ -1539,6 +1539,29 @@ fn queued_prompt_skips_plan_wait(
     has_queued_messages && has_plan_wait && !has_question_tool
 }
 
+fn is_unavailable_tool_error(output: Option<&str>) -> bool {
+    output.is_some_and(|text| {
+        text.contains("No such tool available") || text.contains("not enabled in this context")
+    })
+}
+
+fn is_pending_blocking_tool_call(tc: &crate::chat::types::ToolCall) -> bool {
+    matches!(
+        tc.name.as_str(),
+        "AskUserQuestion" | "ExitPlanMode" | "CodexPlan" | "question"
+    ) && !is_unavailable_tool_error(tc.output.as_deref())
+}
+
+fn is_pending_question_tool_call(tc: &crate::chat::types::ToolCall) -> bool {
+    matches!(tc.name.as_str(), "AskUserQuestion" | "question")
+        && !is_unavailable_tool_error(tc.output.as_deref())
+}
+
+fn is_pending_plan_tool_call(tc: &crate::chat::types::ToolCall) -> bool {
+    matches!(tc.name.as_str(), "ExitPlanMode" | "CodexPlan")
+        && !is_unavailable_tool_error(tc.output.as_deref())
+}
+
 /// Close/delete a session tab
 /// Returns the new active session ID (if any)
 /// Also cleans up any pasted images and text files associated with the session
@@ -3087,7 +3110,9 @@ pub async fn send_chat_message(
                     }
 
                     // End-of-turn recap instruction (compact view surfaces this block)
-                    system_prompt_parts.push(super::RECAP_INSTRUCTION.to_string());
+                    if super::should_add_recap_instruction(&thread_app) {
+                        system_prompt_parts.push(super::RECAP_INSTRUCTION.to_string());
+                    }
 
                     // Keep the current Codex execution mode as the final authoritative
                     // instruction so persisted/global plan-mode defaults cannot pull an
@@ -3493,7 +3518,9 @@ pub async fn send_chat_message(
                     }
 
                     // End-of-turn recap instruction (compact view surfaces this block)
-                    system_prompt_parts.push(super::RECAP_INSTRUCTION.to_string());
+                    if super::should_add_recap_instruction(&thread_app) {
+                        system_prompt_parts.push(super::RECAP_INSTRUCTION.to_string());
+                    }
 
                     // Collect and inline context files (issues, PRs, saved contexts)
                     let mut context_content = String::new();
@@ -3841,7 +3868,9 @@ pub async fn send_chat_message(
                     }
 
                     // End-of-turn recap instruction (compact view surfaces this block)
-                    parts.push(super::RECAP_INSTRUCTION.to_string());
+                    if super::should_add_recap_instruction(&thread_app) {
+                        parts.push(super::RECAP_INSTRUCTION.to_string());
+                    }
 
                     if parts.is_empty() {
                         None
@@ -4021,7 +4050,9 @@ pub async fn send_chat_message(
                         }
                     }
 
-                    parts.push(super::RECAP_INSTRUCTION.to_string());
+                    if super::should_add_recap_instruction(&thread_app) {
+                        parts.push(super::RECAP_INSTRUCTION.to_string());
+                    }
 
                     if parts.is_empty() {
                         None
@@ -4162,7 +4193,9 @@ pub async fn send_chat_message(
                         }
                     }
 
-                    parts.push(super::RECAP_INSTRUCTION.to_string());
+                    if super::should_add_recap_instruction(&thread_app) {
+                        parts.push(super::RECAP_INSTRUCTION.to_string());
+                    }
 
                     if parts.is_empty() {
                         None
@@ -4595,20 +4628,18 @@ pub async fn send_chat_message(
     // Pre-compute completion state flags before moving unified_response fields
     let has_content = !unified_response.content.is_empty();
     let was_cancelled = unified_response.cancelled;
-    let has_blocking_tool = unified_response.tool_calls.iter().any(|tc| {
-        tc.name == "AskUserQuestion"
-            || tc.name == "ExitPlanMode"
-            || tc.name == "CodexPlan"
-            || tc.name == "question"
-    });
+    let has_blocking_tool = unified_response
+        .tool_calls
+        .iter()
+        .any(is_pending_blocking_tool_call);
     let has_question_tool = unified_response
         .tool_calls
         .iter()
-        .any(|tc| tc.name == "AskUserQuestion" || tc.name == "question");
+        .any(is_pending_question_tool_call);
     let has_plan_tool = unified_response
         .tool_calls
         .iter()
-        .any(|tc| tc.name == "ExitPlanMode" || tc.name == "CodexPlan");
+        .any(is_pending_plan_tool_call);
     let is_plan_mode_with_content = if response_backend == Backend::Commandcode {
         unified_response.waiting_for_plan
     } else {
@@ -6703,6 +6734,8 @@ fn execute_summarization_claude(
         "--output-format",
         "stream-json",
         "--verbose",
+        "--tools",
+        "default",
         "--model",
         model_str,
         "--no-session-persistence",
@@ -8677,6 +8710,22 @@ pub async fn answer_opencode_question(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::chat::types::ToolCall;
+
+    #[test]
+    fn unavailable_ask_user_question_error_is_not_pending_input() {
+        let tool = ToolCall {
+            id: "toolu_unavailable_question".to_string(),
+            name: "AskUserQuestion".to_string(),
+            input: serde_json::json!({
+                "questions": "[{\"question\":\"Pick one\"}]"
+            }),
+            output: Some("<tool_use_error>Error: No such tool available: AskUserQuestion. AskUserQuestion exists but is not enabled in this context. Use one of the available tools instead.</tool_use_error>".to_string()),
+            parent_tool_use_id: None,
+        };
+
+        assert!(!is_pending_blocking_tool_call(&tool));
+    }
 
     #[test]
     fn editor_file_args_uses_goto_location_for_vscode_and_cursor() {

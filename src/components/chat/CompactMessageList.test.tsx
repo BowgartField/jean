@@ -249,6 +249,25 @@ describe('CompactMessageList', () => {
     expect(screen.getByText('Done')).toBeVisible()
   })
 
+  it('renders steered prompts with the same attachment UI as normal user prompts', () => {
+    renderCompact([
+      message('user-1', 'user', 100, 'do the work'),
+      message('assistant-1', 'assistant', 104, 'Done', {
+        content_blocks: [
+          {
+            type: 'user_input',
+            text: 'check this\n\n[Image attached: /tmp/screenshot.png - Use the Read tool to view this image]',
+          },
+          { type: 'text', text: 'Done' },
+        ],
+      }),
+    ])
+
+    expect(screen.getByText('check this')).toBeVisible()
+    expect(screen.getByAltText('Attached image 1')).toBeVisible()
+    expect(screen.queryByText(/Image attached:/)).not.toBeInTheDocument()
+  })
+
   it('keeps steered prompts in chronological order around activity', () => {
     renderCompact([
       message('user-1', 'user', 100, 'hello'),
@@ -274,11 +293,11 @@ describe('CompactMessageList', () => {
     const isIt = screen.getByText('is it?')
     const activity = screen.getAllByText('All received')[0]
 
-    // Consecutive steered prompts render inside ONE connected group card
+    // Consecutive steered prompts render inside ONE connected group card.
     expect(whatsup.closest('.divide-y')).toBe(isIt.closest('.divide-y'))
     expect(whatsup.closest('.divide-y')).not.toBeNull()
 
-    // Steered prompts come BEFORE the activity that followed them
+    // Steered prompts come BEFORE the activity that followed them.
     expect(
       whatsup.compareDocumentPosition(isIt) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy()
@@ -289,7 +308,7 @@ describe('CompactMessageList', () => {
     ).toBeTruthy()
   })
 
-  it('copies each steered prompt from a connected group', () => {
+  it('copies each steered prompt', () => {
     const onCopyToInput = vi.fn()
 
     renderCompact(
@@ -312,7 +331,9 @@ describe('CompactMessageList', () => {
     expect(copyButtons).toHaveLength(2)
 
     const secondCopyButton = copyButtons[1]
-    if (!secondCopyButton) throw new Error('Expected second copy button')
+    if (!secondCopyButton) {
+      throw new Error('Expected second copy button')
+    }
     fireEvent.click(secondCopyButton)
 
     expect(onCopyToInput).toHaveBeenCalledTimes(1)

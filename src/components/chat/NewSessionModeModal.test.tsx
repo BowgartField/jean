@@ -784,4 +784,24 @@ describe('NewSessionModeModal', () => {
       'chat'
     )
   })
+
+  it('shows fixed option descriptions without truncation', () => {
+    useUIStore.getState().openNewSessionModeModal({
+      worktreeId: 'worktree-1',
+      worktreePath: '/tmp/worktree-1',
+      origin: 'chat',
+    })
+
+    render(<NewSessionModeModal />)
+
+    const jeanDescription = screen.getByText(
+      'Normal ChatWindow session with Jean features'
+    )
+    const terminalDescription = screen.getByText(
+      'Open a plain terminal on this worktree'
+    )
+
+    expect(jeanDescription).not.toHaveClass('truncate')
+    expect(terminalDescription).not.toHaveClass('truncate')
+  })
 })

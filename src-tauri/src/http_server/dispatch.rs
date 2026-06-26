@@ -2222,9 +2222,26 @@ pub async fn dispatch_command(
             let result = crate::grok_cli::list_grok_models(app.clone()).await?;
             to_value(result)
         }
-        "get_grok_install_command" => {
-            let result = crate::grok_cli::get_grok_install_command().await?;
+        "get_available_grok_versions" => {
+            let result = crate::grok_cli::get_available_grok_versions(app.clone()).await?;
             to_value(result)
+        }
+        "get_grok_install_command" => {
+            let result = crate::grok_cli::get_grok_install_command(app.clone()).await?;
+            to_value(result)
+        }
+        "install_grok_cli" => {
+            let version: Option<String> = from_field_opt(&args, "version")?;
+            crate::grok_cli::install_grok_cli(app.clone(), version).await?;
+            Ok(Value::Null)
+        }
+        "uninstall_grok_cli" => {
+            crate::grok_cli::uninstall_grok_cli(app.clone()).await?;
+            Ok(Value::Null)
+        }
+        "update_grok_cli" => {
+            crate::grok_cli::update_grok_cli(app.clone()).await?;
+            Ok(Value::Null)
         }
         "login_grok_cli_device" => {
             crate::grok_cli::login_grok_cli_device(app.clone()).await?;

@@ -822,6 +822,36 @@ export function buildCodexUserInputAnswerMap(
   )
 }
 
+
+export function getAskUserQuestions(input: unknown): Question[] | null {
+  if (typeof input !== 'object' || input === null || !('questions' in input)) {
+    return null
+  }
+
+  const rawQuestions = (input as { questions?: unknown }).questions
+  if (Array.isArray(rawQuestions)) return rawQuestions as Question[]
+
+  if (typeof rawQuestions === 'string') {
+    try {
+      const parsed = JSON.parse(rawQuestions)
+      return Array.isArray(parsed) ? (parsed as Question[]) : null
+    } catch {
+      return null
+    }
+  }
+
+  return null
+}
+
+export function normalizeQuestionMultipleField(
+  questions: (Question & { multiple?: boolean })[]
+): Question[] {
+  return questions.map(q => ({
+    ...q,
+    multiSelect: q.multiSelect ?? q.multiple === true,
+  }))
+}
+
 /**
  * Input structure for AskUserQuestion tool
  */
@@ -840,10 +870,7 @@ export function isAskUserQuestion(
     (toolCall.name === 'AskUserQuestion' ||
       toolCall.name === 'question' ||
       toolCall.name === 'request_user_input') &&
-    typeof toolCall.input === 'object' &&
-    toolCall.input !== null &&
-    'questions' in toolCall.input &&
-    Array.isArray((toolCall.input as AskUserQuestionInput).questions)
+    getAskUserQuestions(toolCall.input) !== null
   )
 }
 

@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { SessionCardData } from '../session-card-utils'
-import type { LabelData } from '@/types/chat'
+import type { LabelData, Session } from '@/types/chat'
 import type { ApprovalContext } from '../PlanDialog'
 import { useUIStore } from '@/store/ui-store'
 import { toast } from 'sonner'
+import { findLatestRecapSection } from '../recap-utils'
+import { invoke } from '@/lib/transport'
 
 interface UseCanvasShortcutEventsOptions {
   /** Currently selected card (null if none selected) */
@@ -48,6 +50,10 @@ interface UseCanvasShortcutEventsResult {
   planDialogCard: SessionCardData | null
   /** Close plan dialog */
   closePlanDialog: () => void
+  /** Recap dialog content (if open) */
+  recapDialogContent: string | null
+  /** Close recap dialog */
+  closeRecapDialog: () => void
   /** Handle plan view button click */
   handlePlanView: (card: SessionCardData) => void
   /** Whether the label modal is open */
@@ -89,6 +95,9 @@ export function useCanvasShortcutEvents({
   const [planDialogCard, setPlanDialogCard] = useState<SessionCardData | null>(
     null
   )
+  const [recapDialogContent, setRecapDialogContent] = useState<string | null>(
+    null
+  )
 
   // Label modal state
   const [labelModalSessionId, setLabelModalSessionId] = useState<string | null>(
@@ -126,6 +135,10 @@ export function useCanvasShortcutEvents({
     setPlanDialogContent(null)
     setPlanApprovalContext(null)
     setPlanDialogCard(null)
+  }, [])
+
+  const closeRecapDialog = useCallback(() => {
+    setRecapDialogContent(null)
   }, [])
 
   const closeLabelModal = useCallback(() => {
@@ -218,6 +231,29 @@ export function useCanvasShortcutEvents({
       }
     }
 
+    const handleOpenRecapEvent = async () => {
+      let messages = selectedCard.session.messages
+      if (messages.length === 0 && selectedCard.session.message_count) {
+        try {
+          const session = await invoke<Session>('get_session', {
+            worktreeId,
+            worktreePath,
+            sessionId: selectedCard.session.id,
+          })
+          messages = session.messages
+        } catch (error) {
+          toast.error(`Failed to load session recap: ${error}`)
+          return
+        }
+      }
+      const recap = findLatestRecapSection(messages)
+      if (recap) {
+        setRecapDialogContent(recap)
+      } else {
+        toast.info('No recap available for this session yet')
+      }
+    }
+
     const handleToggleLabelEvent = () => {
       setLabelModalSessionId(selectedCard.session.id)
       setLabelModalCurrentLabel(selectedCard.label)
@@ -242,6 +278,7 @@ export function useCanvasShortcutEvents({
       handleWorktreeApproveYoloEvent
     )
     window.addEventListener('open-plan', handleOpenPlanEvent)
+    window.addEventListener('open-recap', handleOpenRecapEvent)
     if (!skipLabelHandling) {
       window.addEventListener('toggle-session-label', handleToggleLabelEvent)
     }
@@ -269,6 +306,7 @@ export function useCanvasShortcutEvents({
         handleWorktreeApproveYoloEvent
       )
       window.removeEventListener('open-plan', handleOpenPlanEvent)
+      window.removeEventListener('open-recap', handleOpenRecapEvent)
       if (!skipLabelHandling) {
         window.removeEventListener(
           'toggle-session-label',
@@ -286,6 +324,8 @@ export function useCanvasShortcutEvents({
     onWorktreeApproval,
     onWorktreeApprovalYolo,
     handlePlanView,
+    worktreeId,
+    worktreePath,
     skipLabelHandling,
   ])
 
@@ -295,6 +335,8 @@ export function useCanvasShortcutEvents({
     planApprovalContext,
     planDialogCard,
     closePlanDialog,
+    recapDialogContent,
+    closeRecapDialog,
     handlePlanView,
     isLabelModalOpen: !!labelModalSessionId,
     labelModalSessionId,

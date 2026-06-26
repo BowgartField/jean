@@ -391,6 +391,7 @@ mod tests {
             codex_thread_id: None,
             codex_turn_id: None,
             cursor_chat_id: None,
+            grok_session_id: None,
         });
         metadata.runs.push(RunEntry {
             run_id: "run-2".to_string(),
@@ -414,6 +415,7 @@ mod tests {
             codex_thread_id: Some("codex-1".to_string()),
             codex_turn_id: None,
             cursor_chat_id: None,
+            grok_session_id: None,
         });
 
         assert_eq!(

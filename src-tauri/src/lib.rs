@@ -187,6 +187,8 @@ pub struct AppPreferences {
     pub parallel_execution_prompt_enabled: bool, // Add system prompt to encourage parallel sub-agent execution
     #[serde(default = "default_compact_chat_view_enabled")]
     pub compact_chat_view_enabled: bool, // Collapse intermediate tool calls into single ticker line
+    #[serde(default = "default_auto_recaps_enabled")]
+    pub auto_recaps_enabled: bool, // Ask agents to end multi-step turns with a recap block
     #[serde(default)]
     pub magic_prompts: MagicPrompts, // Customizable prompts for AI-powered features
     #[serde(default)]
@@ -324,7 +326,7 @@ pub struct AppPreferences {
     #[serde(default = "default_cli_source")]
     pub opencode_cli_source: String, // OpenCode CLI source: "jean" (managed) or "path" (system PATH)
     #[serde(default = "default_grok_cli_source")]
-    pub grok_cli_source: String, // Grok CLI source: currently "path" (system PATH)
+    pub grok_cli_source: String, // Grok CLI source: "jean" (managed) or "path" (system PATH)
     #[serde(default = "default_cli_source")]
     pub gh_cli_source: String, // GitHub CLI source: "jean" (managed) or "path" (system PATH)
     #[serde(default)]
@@ -549,6 +551,10 @@ fn default_compact_chat_view_enabled() -> bool {
     false // Disabled by default (experimental)
 }
 
+fn default_auto_recaps_enabled() -> bool {
+    false // Disabled by default
+}
+
 fn default_chrome_enabled() -> bool {
     true // Enabled by default
 }
@@ -624,7 +630,7 @@ fn default_grok_model() -> String {
 }
 
 fn default_grok_cli_source() -> String {
-    "path".to_string()
+    default_cli_source()
 }
 
 fn default_codex_reasoning_effort() -> String {
@@ -1933,6 +1939,7 @@ impl Default for AppPreferences {
             syntax_theme_light: default_syntax_theme_light(),
             parallel_execution_prompt_enabled: default_parallel_execution_prompt_enabled(),
             compact_chat_view_enabled: default_compact_chat_view_enabled(),
+            auto_recaps_enabled: default_auto_recaps_enabled(),
             magic_prompts: MagicPrompts::default(),
             magic_prompt_models: MagicPromptModels::default(),
             magic_prompt_providers: MagicPromptProviders::default(),
@@ -4587,7 +4594,11 @@ pub fn run() {
             grok_cli::detect_grok_in_path,
             grok_cli::check_grok_cli_auth,
             grok_cli::list_grok_models,
+            grok_cli::get_available_grok_versions,
             grok_cli::get_grok_install_command,
+            grok_cli::install_grok_cli,
+            grok_cli::uninstall_grok_cli,
+            grok_cli::update_grok_cli,
             grok_cli::login_grok_cli_device,
             // OpenCode CLI management commands
             opencode_cli::check_opencode_cli_installed,

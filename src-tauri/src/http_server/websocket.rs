@@ -22,6 +22,8 @@ fn command_should_run_on_blocking_pool(command: &str) -> bool {
             | "install_codex_cli"
             | "install_opencode_cli"
             | "install_pi_cli"
+            | "install_grok_cli"
+            | "update_grok_cli"
             | "install_gh_cli"
             | "install_coderabbit_cli"
             | "update_coderabbit_cli"

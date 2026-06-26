@@ -8,7 +8,10 @@ use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::{Duration, Instant};
 use tauri::AppHandle;
 
-use super::config::{binary_exists, resolve_cli_binary, CLI_BINARY_NAME};
+use super::config::{
+    binary_exists, ensure_cli_dir, find_system_grok_binary, get_cli_binary_path, get_cli_dir,
+    resolve_cli_binary,
+};
 use crate::platform::silent_command;
 
 const AUTH_CHECK_TIMEOUT: Duration = Duration::from_secs(5);
@@ -53,6 +56,34 @@ pub struct GrokInstallCommand {
     pub command: String,
     pub args: Vec<String>,
     pub description: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GrokReleaseInfo {
+    pub version: String,
+    pub tag_name: String,
+    pub published_at: String,
+    pub prerelease: bool,
+}
+
+const GROK_NPM_PACKAGE: &str = "@xai-official/grok";
+
+fn grok_package(version: Option<&str>) -> String {
+    match version.map(str::trim).filter(|v| !v.is_empty()) {
+        Some("latest") | None => format!("{GROK_NPM_PACKAGE}@latest"),
+        Some(version) if version.starts_with("@xai-official/grok@") => version.to_string(),
+        Some(version) => format!("{GROK_NPM_PACKAGE}@{version}"),
+    }
+}
+
+fn semver_parts(version: &str) -> Vec<u32> {
+    version
+        .split(['-', '+'])
+        .next()
+        .unwrap_or(version)
+        .split('.')
+        .map(|part| part.parse::<u32>().unwrap_or(0))
+        .collect()
 }
 
 fn fallback_models() -> Vec<GrokModelInfo> {
@@ -433,14 +464,8 @@ pub async fn check_grok_cli_installed(app: AppHandle) -> Result<GrokCliStatus, S
 }
 
 #[tauri::command]
-pub async fn detect_grok_in_path(_app: AppHandle) -> Result<GrokPathDetection, String> {
-    let which_cmd = if cfg!(target_os = "windows") {
-        "where"
-    } else {
-        "which"
-    };
-    let output = silent_command(which_cmd).arg(CLI_BINARY_NAME).output();
-    let Ok(output) = output else {
+pub async fn detect_grok_in_path(app: AppHandle) -> Result<GrokPathDetection, String> {
+    let Some(path) = find_system_grok_binary(&app) else {
         return Ok(GrokPathDetection {
             found: false,
             path: None,
@@ -448,32 +473,14 @@ pub async fn detect_grok_in_path(_app: AppHandle) -> Result<GrokPathDetection, S
             package_manager: None,
         });
     };
-    if !output.status.success() {
-        return Ok(GrokPathDetection {
-            found: false,
-            path: None,
-            version: None,
-            package_manager: None,
-        });
-    }
-    let path = String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .next()
-        .unwrap_or("")
-        .trim()
-        .to_string();
-    let version = if path.is_empty() {
-        None
-    } else {
-        silent_command(&path)
-            .arg("--version")
-            .output()
-            .ok()
-            .and_then(|out| parse_version(&out.stdout))
-    };
+    let version = silent_command(&path)
+        .arg("--version")
+        .output()
+        .ok()
+        .and_then(|out| parse_version(&out.stdout));
     Ok(GrokPathDetection {
-        found: !path.is_empty(),
-        path: if path.is_empty() { None } else { Some(path) },
+        found: true,
+        path: Some(path.to_string_lossy().to_string()),
         version,
         package_manager: Some("path".to_string()),
     })
@@ -516,28 +523,117 @@ pub async fn list_grok_models(app: AppHandle) -> Result<Vec<GrokModelInfo>, Stri
 }
 
 #[tauri::command]
-pub async fn get_grok_install_command() -> Result<GrokInstallCommand, String> {
-    if cfg!(target_os = "windows") {
-        Ok(GrokInstallCommand {
-            command: "powershell".to_string(),
-            args: vec![
-                "-NoProfile".to_string(),
-                "-Command".to_string(),
-                "irm https://x.ai/cli/install.ps1 | iex".to_string(),
-            ],
-            description: "Install Grok Build with the official xAI PowerShell installer."
-                .to_string(),
+pub async fn get_available_grok_versions(_app: AppHandle) -> Result<Vec<GrokReleaseInfo>, String> {
+    let url = "https://registry.npmjs.org/%40xai-official%2Fgrok";
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("Failed to build Grok HTTP client: {e}"))?;
+    let value: serde_json::Value = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch Grok versions: {e}"))?
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse Grok version response: {e}"))?;
+    let latest = value
+        .get("dist-tags")
+        .and_then(|tags| tags.get("latest"))
+        .and_then(|tag| tag.as_str())
+        .unwrap_or_default()
+        .to_string();
+    let mut versions = value
+        .get("versions")
+        .and_then(|v| v.as_object())
+        .map(|object| {
+            object
+                .keys()
+                .map(|version| GrokReleaseInfo {
+                    version: version.clone(),
+                    tag_name: if version == &latest {
+                        "latest".to_string()
+                    } else {
+                        version.clone()
+                    },
+                    published_at: String::new(),
+                    prerelease: version.contains('-'),
+                })
+                .collect::<Vec<_>>()
         })
-    } else {
-        Ok(GrokInstallCommand {
-            command: "bash".to_string(),
-            args: vec![
-                "-lc".to_string(),
-                "curl -fsSL https://x.ai/cli/install.sh | bash".to_string(),
-            ],
-            description: "Install Grok Build with the official xAI shell installer.".to_string(),
-        })
+        .unwrap_or_default();
+    versions.sort_by_key(|release| std::cmp::Reverse(semver_parts(&release.version)));
+    Ok(versions)
+}
+
+#[tauri::command]
+pub async fn get_grok_install_command(app: AppHandle) -> Result<GrokInstallCommand, String> {
+    let cli_dir = get_cli_dir(&app)?;
+    Ok(GrokInstallCommand {
+        command: "npm".to_string(),
+        args: vec![
+            "install".to_string(),
+            "--prefix".to_string(),
+            cli_dir.to_string_lossy().to_string(),
+            grok_package(None),
+        ],
+        description: "Install the latest Grok CLI into Jean's managed app-data directory"
+            .to_string(),
+    })
+}
+
+#[tauri::command]
+pub async fn install_grok_cli(app: AppHandle, version: Option<String>) -> Result<(), String> {
+    let cli_dir = ensure_cli_dir(&app)?;
+    let package = grok_package(version.as_deref());
+    let output = silent_command("npm")
+        .args(["install", "--prefix"])
+        .arg(&cli_dir)
+        .arg(package)
+        .output()
+        .map_err(|e| format!("Failed to run npm install for Grok CLI: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        return Err(format!(
+            "Grok CLI install failed: {}",
+            if stderr.is_empty() { stdout } else { stderr }
+        ));
     }
+
+    let binary_path = get_cli_binary_path(&app)?;
+    if !binary_path.exists() {
+        return Err(format!(
+            "Grok install completed but binary was not found at {}",
+            binary_path.display()
+        ));
+    }
+
+    let verify = silent_command(&binary_path)
+        .arg("--version")
+        .output()
+        .map_err(|e| format!("Failed to verify Grok CLI: {e}"))?;
+    if !verify.status.success() {
+        return Err("Grok CLI verification failed".to_string());
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn uninstall_grok_cli(app: AppHandle) -> Result<(), String> {
+    let cli_dir = get_cli_dir(&app)?;
+    if cli_dir.exists() {
+        std::fs::remove_dir_all(&cli_dir)
+            .map_err(|e| format!("Failed to remove Grok CLI directory: {e}"))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn update_grok_cli(app: AppHandle) -> Result<(), String> {
+    install_grok_cli(app, None).await
 }
 
 #[tauri::command]
@@ -595,6 +691,17 @@ mod tests {
         assert_eq!(
             choose_auth_method_with_api_key(&init, false),
             Some("cached_token".to_string())
+        );
+    }
+
+    #[test]
+    fn grok_package_uses_latest_by_default_and_accepts_versions() {
+        assert_eq!(grok_package(None), "@xai-official/grok@latest");
+        assert_eq!(grok_package(Some("latest")), "@xai-official/grok@latest");
+        assert_eq!(grok_package(Some("1.2.3")), "@xai-official/grok@1.2.3");
+        assert_eq!(
+            grok_package(Some("@xai-official/grok@2.0.0")),
+            "@xai-official/grok@2.0.0"
         );
     }
 

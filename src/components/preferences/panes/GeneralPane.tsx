@@ -91,7 +91,6 @@ import {
   commandcodeCliQueryKeys,
 } from '@/services/commandcode-cli'
 import {
-  getGrokInstallCommand,
   useGrokCliStatus,
   useGrokCliAuth,
   useGrokPathDetection,
@@ -249,6 +248,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
     | 'gh'
     | 'coderabbit'
     | 'commandcode'
+    | 'grok'
     | null
   >(null)
   const [isDeletingCli, setIsDeletingCli] = useState(false)
@@ -698,6 +698,19 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
     }
   }
 
+  const handleGrokSourceChange = (value: 'jean' | 'path') => {
+    if (preferences) {
+      patchPreferences.mutate(
+        { grok_cli_source: value },
+        {
+          onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: grokCliQueryKeys.all })
+          },
+        }
+      )
+    }
+  }
+
   const handleConfirmDeleteCli = async () => {
     if (!deleteCliTarget) return
     const target = deleteCliTarget
@@ -718,6 +731,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
         name: 'Command Code CLI',
         cmd: 'uninstall_commandcode_cli' as const,
       },
+      grok: { name: 'Grok CLI', cmd: 'uninstall_grok_cli' as const },
     }
     const { name, cmd } = labelMap[target]
     setIsDeletingCli(true)
@@ -737,7 +751,9 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                   ? 'gh_cli_source'
                   : target === 'commandcode'
                     ? 'commandcode_cli_source'
-                    : 'coderabbit_cli_source'
+                    : target === 'grok'
+                      ? 'grok_cli_source'
+                      : 'coderabbit_cli_source'
       await new Promise<void>((resolve, reject) => {
         patchPreferences.mutate(
           { [sourceKey]: 'path' } as Partial<AppPreferences>,
@@ -760,7 +776,9 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                   ? ghCliQueryKeys.all
                   : target === 'commandcode'
                     ? commandcodeCliQueryKeys.all
-                    : coderabbitCliQueryKeys.all
+                    : target === 'grok'
+                      ? grokCliQueryKeys.all
+                      : coderabbitCliQueryKeys.all
       queryClient.invalidateQueries({ queryKey: queryKeys })
       const pathFound =
         target === 'claude'
@@ -775,7 +793,9 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                   ? ghPathDetection?.found
                   : target === 'commandcode'
                     ? commandcodePathDetection?.found
-                    : coderabbitPathDetection?.found
+                    : target === 'grok'
+                      ? grokPathDetection?.found
+                      : coderabbitPathDetection?.found
       if (pathFound) {
         toast.success(`Jean-managed ${name} removed. Using system PATH.`, {
           id: toastId,
@@ -1459,21 +1479,12 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
     openCliLoginModal('grok', grokStatus.path, ['login'])
   }, [grokStatus?.path, openCliLoginModal])
 
-  const handleGrokInstall = useCallback(async () => {
-    try {
-      const installCommand = await getGrokInstallCommand()
-      openCliLoginModal(
-        'grok',
-        installCommand.command,
-        installCommand.args,
-        'install'
-      )
-    } catch (error) {
-      toast.error('Failed to prepare Grok install command', {
-        description: error instanceof Error ? error.message : String(error),
-      })
+  const handleGrokInstall = useCallback(() => {
+    if (preferences?.grok_cli_source !== 'jean') {
+      patchPreferences.mutate({ grok_cli_source: 'jean' })
     }
-  }, [openCliLoginModal])
+    openCliUpdateModal('grok')
+  }, [openCliUpdateModal, patchPreferences, preferences?.grok_cli_source])
 
   const handleCopyPath = useCallback((path: string | null | undefined) => {
     if (!path) return
@@ -3185,45 +3196,96 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
         >
           <div className="space-y-4">
             <InlineField
-              label="Status"
+              label={grokStatus?.installed ? 'Version' : 'Status'}
               description={
-                isGrokLoading
-                  ? 'Checking Grok CLI…'
-                  : grokStatus?.installed
-                    ? `Installed${grokStatus.version ? ` · ${grokStatus.version}` : ''}`
-                    : 'Not installed'
+                grokStatus?.installed
+                  ? 'Enables Grok AI sessions through the Grok CLI.'
+                  : 'Grok can be Jean-managed or discovered from your system PATH.'
               }
             >
-              <Button
-                variant="outline"
-                className="w-full sm:w-40"
-                disabled={checkingGrokAuth || isGrokAuthLoading}
-                onClick={() =>
-                  queryClient.invalidateQueries({
-                    queryKey: grokCliQueryKeys.auth(),
-                  })
-                }
-              >
-                {isGrokAuthLoading ? 'Checking…' : 'Check auth'}
-              </Button>
+              {isGrokLoading ? (
+                <Loader2 className="size-4 animate-spin text-muted-foreground" />
+              ) : grokStatus?.installed ? (
+                <Button
+                  variant="outline"
+                  className="w-full sm:w-40 justify-between"
+                  onClick={handleGrokInstall}
+                >
+                  {grokStatus.version ?? 'Installed'}
+                </Button>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-muted-foreground">
+                    Not found in PATH
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleGrokInstall}
+                  >
+                    Install now
+                  </Button>
+                </div>
+              )}
             </InlineField>
             {grokAuthMessage && (
               <p className="text-xs text-muted-foreground">{grokAuthMessage}</p>
             )}
             <InlineField
-              label="Path"
+              label="Source"
               description={
-                <button
-                  onClick={() =>
-                    handleCopyPath(grokPathDetection?.path ?? grokStatus?.path)
-                  }
-                  className="text-left hover:underline cursor-pointer"
-                >
-                  {grokPathDetection?.path ?? grokStatus?.path ?? 'System PATH'}
-                </button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={() =>
+                        handleCopyPath(
+                          preferences?.grok_cli_source === 'path'
+                            ? grokPathDetection?.path
+                            : grokStatus?.path
+                        )
+                      }
+                      className="text-left hover:underline cursor-pointer"
+                    >
+                      {preferences?.grok_cli_source === 'path'
+                        ? (grokPathDetection?.path ?? 'System PATH')
+                        : (grokStatus?.path ?? 'Not installed')}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>Click to copy path</TooltipContent>
+                </Tooltip>
               }
             >
-              <span className="text-sm text-muted-foreground">PATH</span>
+              <div className="flex items-center gap-2">
+                <Select
+                  value={preferences?.grok_cli_source ?? 'jean'}
+                  onValueChange={handleGrokSourceChange}
+                >
+                  <SelectTrigger className="w-full sm:w-80">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="jean">Jean (managed)</SelectItem>
+                    <SelectItem
+                      value="path"
+                      disabled={!grokPathDetection?.found}
+                    >
+                      System PATH
+                      {!grokPathDetection?.found && ' (not found)'}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                {preferences?.grok_cli_source === 'jean' &&
+                  grokStatus?.installed && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-destructive hover:text-destructive"
+                      onClick={() => setDeleteCliTarget('grok')}
+                    >
+                      Delete managed install
+                    </Button>
+                  )}
+              </div>
             </InlineField>
             <InlineField
               label="Model"
@@ -3311,6 +3373,20 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                 onCheckedChange={checked => {
                   patchPreferences.mutate({
                     compact_chat_view_enabled: checked,
+                  })
+                }}
+              />
+            </InlineField>
+
+            <InlineField
+              label="Automatic recaps"
+              description="Ask agents to end multi-step turns with a ## Recap section. Existing recaps remain viewable when this is off."
+            >
+              <Switch
+                checked={preferences?.auto_recaps_enabled ?? true}
+                onCheckedChange={checked => {
+                  patchPreferences.mutate({
+                    auto_recaps_enabled: checked,
                   })
                 }}
               />
@@ -4395,7 +4471,9 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                       ? 'CodeRabbit CLI'
                       : deleteCliTarget === 'commandcode'
                         ? 'Command Code CLI'
-                        : 'GitHub CLI'}
+                        : deleteCliTarget === 'grok'
+                          ? 'Grok CLI'
+                          : 'GitHub CLI'}
               ?
             </AlertDialogTitle>
             <AlertDialogDescription>
@@ -4413,7 +4491,9 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                             ? coderabbitPathDetection?.found
                             : deleteCliTarget === 'commandcode'
                               ? commandcodePathDetection?.found
-                              : false
+                              : deleteCliTarget === 'grok'
+                                ? grokPathDetection?.found
+                                : false
                 return pathFound
                   ? 'The Jean-managed binary will be removed and the source will switch to System PATH. You can reinstall it later from this page.'
                   : 'The Jean-managed binary will be removed. No System PATH version was detected, so this backend will be unavailable until you reinstall it.'

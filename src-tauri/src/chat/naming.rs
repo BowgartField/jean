@@ -388,6 +388,8 @@ fn generate_names(app: &AppHandle, request: &NamingRequest) -> Result<NamingOutp
         "--output-format",
         "stream-json",
         "--verbose",
+        "--tools",
+        "default",
         "--model",
         model_alias,
         "--no-session-persistence",
@@ -440,8 +442,6 @@ fn generate_names(app: &AppHandle, request: &NamingRequest) -> Result<NamingOutp
         // 3 turns: tool call + tool result + final response
         cmd.arg("--max-turns").arg("3");
     } else {
-        // No tools needed for text-only messages
-        cmd.arg("--tools").arg("");
         cmd.arg("--max-turns").arg("1");
     }
 

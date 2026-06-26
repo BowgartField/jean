@@ -67,6 +67,7 @@ import type { Session } from '@/types/chat'
 import { isNativeApp } from '@/lib/environment'
 import { notify } from '@/lib/notifications'
 import { copyToClipboard } from '@/lib/clipboard'
+import { invoke } from '@/lib/transport'
 import { toast } from 'sonner'
 import { ChatWindow } from './ChatWindow'
 import { ModalTerminalDrawer } from './ModalTerminalDrawer'
@@ -100,8 +101,11 @@ import {
 } from '@/components/ui/context-menu'
 import { WorktreeDropdownMenu } from '@/components/projects/WorktreeDropdownMenu'
 import { LabelModal } from './LabelModal'
+import { RecapDialog } from './RecapDialog'
+import { findLatestRecapSection } from './recap-utils'
 import { useSessionArchive } from './hooks/useSessionArchive'
 import { useIsMobile } from '@/hooks/use-mobile'
+import { pushNeedsRemotePicker, useRemotePicker } from '@/hooks/useRemotePicker'
 import { useIsTouchDevice } from '@/hooks/use-touch-device'
 import { useSwipeBack } from '@/hooks/useSwipeBack'
 import {
@@ -341,10 +345,43 @@ export function SessionChatModal({
   const [labelTargetSessionId, setLabelTargetSessionId] = useState<
     string | null
   >(null)
+  const [recapDialogContent, setRecapDialogContent] = useState<string | null>(
+    null
+  )
   const labelSessionId = labelTargetSessionId ?? currentSessionId
   const currentLabel = useChatStore(state =>
     labelSessionId ? (state.sessionLabels[labelSessionId] ?? null) : null
   )
+
+  useEffect(() => {
+    if (!isOpen || !currentSession) return
+
+    const handleOpenRecap = async () => {
+      let messages = currentSession.messages
+      if (messages.length === 0 && currentSession.message_count) {
+        try {
+          const session = await invoke<Session>('get_session', {
+            worktreeId,
+            worktreePath,
+            sessionId: currentSession.id,
+          })
+          messages = session.messages
+        } catch (error) {
+          toast.error(`Failed to load session recap: ${error}`)
+          return
+        }
+      }
+      const recap = findLatestRecapSection(messages)
+      if (recap) {
+        setRecapDialogContent(recap)
+      } else {
+        toast.info('No recap available for this session yet')
+      }
+    }
+
+    window.addEventListener('open-recap', handleOpenRecap)
+    return () => window.removeEventListener('open-recap', handleOpenRecap)
+  }, [isOpen, currentSession, worktreeId, worktreePath])
 
   // Rename session state
   const renameSession = useRenameSession()
@@ -723,26 +760,41 @@ export function SessionChatModal({
     [worktreeId, worktreePath, defaultBranch, project?.id]
   )
 
+  const pickRemoteOrRun = useRemotePicker(worktreePath)
+
   const handlePush = useCallback(
-    async (e: React.MouseEvent) => {
+    (e: React.MouseEvent) => {
       e.stopPropagation()
-      const opToast = dismissibleToast.loading('Pushing changes...')
-      try {
-        const result = await gitPush(worktreePath, worktree?.pr_number)
-        triggerImmediateGitPoll()
-        if (project) fetchWorktreesStatus(project.id)
-        if (result.fellBack) {
-          opToast.warning(
-            'Could not push to PR branch, pushed to new branch instead'
+
+      const runPush = async (remote?: string) => {
+        const opToast = dismissibleToast.loading('Pushing changes...')
+        try {
+          const result = await gitPush(
+            worktreePath,
+            worktree?.pr_number,
+            remote
           )
-        } else {
-          opToast.success('Changes pushed')
+          triggerImmediateGitPoll()
+          if (project) fetchWorktreesStatus(project.id)
+          if (result.fellBack) {
+            opToast.warning(
+              'Could not push to PR branch, pushed to new branch instead'
+            )
+          } else {
+            opToast.success('Changes pushed')
+          }
+        } catch (error) {
+          opToast.error(`Push failed: ${error}`)
         }
-      } catch (error) {
-        opToast.error(`Push failed: ${error}`)
+      }
+
+      if (pushNeedsRemotePicker(worktree?.pr_number)) {
+        pickRemoteOrRun(runPush)
+      } else {
+        runPush()
       }
     },
-    [worktree, worktreePath, project]
+    [pickRemoteOrRun, worktree, worktreePath, project]
   )
 
   const handleUncommittedDiffClick = useCallback(() => {
@@ -1351,6 +1403,13 @@ export function SessionChatModal({
         sessionId={labelSessionId}
         currentLabel={currentLabel}
       />
+      {recapDialogContent ? (
+        <RecapDialog
+          content={recapDialogContent}
+          isOpen={true}
+          onClose={() => setRecapDialogContent(null)}
+        />
+      ) : null}
       <CloseWorktreeDialog
         open={closeConfirmOpen}
         onOpenChange={setCloseConfirmOpen}

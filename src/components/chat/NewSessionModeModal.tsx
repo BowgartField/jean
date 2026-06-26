@@ -413,7 +413,7 @@ function NativeBackendChoice({
         <span className="flex items-center gap-2 text-sm font-medium leading-none">
           {title}
         </span>
-        <span className="mt-1 block truncate text-xs text-muted-foreground">
+        <span className="mt-1 block text-xs leading-snug text-muted-foreground">
           {subtitle}
         </span>
       </button>
@@ -481,7 +481,7 @@ function NewSessionChoice({
             </span>
           )}
         </span>
-        <span className="mt-1 block truncate text-xs text-muted-foreground">
+        <span className="mt-1 block text-xs leading-snug text-muted-foreground">
           {subtitle}
         </span>
       </span>

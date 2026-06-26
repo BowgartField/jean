@@ -47,6 +47,7 @@ export type CliUpdateModalType =
   | 'pi'
   | 'coderabbit'
   | 'commandcode'
+  | 'grok'
   | null
 
 export type CliLoginModalType =

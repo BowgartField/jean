@@ -20,6 +20,13 @@ export interface GrokModelInfo {
   isDefault?: boolean
 }
 
+export interface GrokReleaseInfo {
+  version: string
+  tagName: string
+  publishedAt: string
+  prerelease: boolean
+}
+
 export interface GrokInstallCommand {
   command: string
   args: string[]

@@ -6191,6 +6191,8 @@ fn build_claude_structured_output_args(model: &str, tools: &str, schema: &str) -
         "--no-session-persistence".to_string(),
         "--tools".to_string(),
         tools.to_string(),
+        "--tools".to_string(),
+        "default".to_string(),
         "--max-turns".to_string(),
         "3".to_string(),
         "--json-schema".to_string(),
@@ -12145,12 +12147,13 @@ Body
     }
 
     #[test]
-    fn test_build_claude_structured_output_args_disables_tools_without_plan_mode() {
+    fn test_build_claude_structured_output_args_includes_default_tools_without_plan_mode() {
         let args = build_claude_structured_output_args("sonnet", "none", REVIEW_SCHEMA);
 
         assert!(args.windows(2).any(|w| w == ["--max-turns", "3"]));
         assert!(!args.iter().any(|arg| arg == "--permission-mode"));
         assert!(args.windows(2).any(|w| w == ["--tools", "none"]));
+        assert!(args.windows(2).any(|w| w == ["--tools", "default"]));
         assert!(args.windows(2).any(|w| w == ["--model", "sonnet"]));
         assert!(args
             .windows(2)
