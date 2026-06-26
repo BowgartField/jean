@@ -1297,7 +1297,7 @@ Investigate the loaded security {advisoryWord} ({advisoryRefs})
         .to_string()
 }
 
-fn default_investigate_linear_issue_prompt() -> String {
+pub(crate) fn default_investigate_linear_issue_prompt() -> String {
     r#"<task>
 
 Investigate the loaded Linear {linearWord} ({linearRefs})
