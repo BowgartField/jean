@@ -215,6 +215,8 @@ pub struct AppPreferences {
     pub review_sound: String, // Sound when session finishes reviewing: none, workwork
     #[serde(default = "default_web_access_sounds_enabled")]
     pub web_access_sounds_enabled: bool, // Play notification sounds in browser/web access views
+    #[serde(default = "default_desktop_notifications_enabled")]
+    pub desktop_notifications_enabled: bool, // Show native OS banner when a session needs input or finishes (only while backgrounded)
     #[serde(default)]
     pub http_server_enabled: bool, // Whether HTTP server is enabled
     #[serde(default)]
@@ -662,6 +664,10 @@ fn default_review_sound() -> String {
 }
 
 fn default_web_access_sounds_enabled() -> bool {
+    true
+}
+
+fn default_desktop_notifications_enabled() -> bool {
     true
 }
 
@@ -1921,6 +1927,7 @@ impl Default for AppPreferences {
             waiting_sound: default_waiting_sound(),
             review_sound: default_review_sound(),
             web_access_sounds_enabled: default_web_access_sounds_enabled(),
+            desktop_notifications_enabled: default_desktop_notifications_enabled(),
             http_server_enabled: false,
             http_server_auto_start: false,
             http_server_port: default_http_server_port(),

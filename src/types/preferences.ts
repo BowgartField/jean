@@ -1064,6 +1064,7 @@ export interface AppPreferences {
   waiting_sound: NotificationSound // Sound when session is waiting for input
   review_sound: NotificationSound // Sound when session finishes reviewing
   web_access_sounds_enabled: boolean // Play notification sounds in browser/web access views
+  desktop_notifications_enabled: boolean // Show native OS banner when a session needs input or finishes (only while backgrounded)
   http_server_enabled: boolean // Whether HTTP server is enabled
   http_server_port: number // HTTP server port (default 3456)
   http_server_token: string | null // Auth token for HTTP/WS access
@@ -1913,6 +1914,7 @@ export const defaultPreferences: AppPreferences = {
   waiting_sound: 'none',
   review_sound: 'none',
   web_access_sounds_enabled: true,
+  desktop_notifications_enabled: true,
   http_server_enabled: false,
   http_server_port: 3456,
   http_server_token: null,
