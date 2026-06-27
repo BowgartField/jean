@@ -5506,6 +5506,24 @@ pub async fn read_clipboard_image(app: AppHandle) -> Result<Option<SaveImageResp
     Ok(result)
 }
 
+/// Write text to the native system clipboard.
+///
+/// Browser web access can lose Clipboard API user activation when a command
+/// fetches data asynchronously before copying. This backend command is the
+/// same-machine fallback used by the frontend clipboard helper.
+#[tauri::command]
+pub async fn write_clipboard_text(text: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || -> Result<(), String> {
+        let mut clipboard =
+            arboard::Clipboard::new().map_err(|e| format!("Failed to access clipboard: {e}"))?;
+        clipboard
+            .set_text(text)
+            .map_err(|e| format!("Failed to write clipboard text: {e}"))
+    })
+    .await
+    .map_err(|e| format!("Clipboard text task failed: {e}"))?
+}
+
 /// Save a dropped image file to the app data directory
 ///
 /// Takes a source file path (from Tauri's drag-drop event) and copies it

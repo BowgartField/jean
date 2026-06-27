@@ -2695,6 +2695,11 @@ pub async fn dispatch_command(
             let result = crate::chat::read_clipboard_image(app.clone()).await?;
             to_value(result)
         }
+        "write_clipboard_text" => {
+            let text: String = from_field(&args, "text")?;
+            crate::chat::write_clipboard_text(text).await?;
+            Ok(Value::Null)
+        }
         "regenerate_session_name" => {
             let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
             let worktree_path: String = field(&args, "worktreePath", "worktree_path")?;

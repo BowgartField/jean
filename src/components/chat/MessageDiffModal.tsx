@@ -29,8 +29,6 @@ import { getHunkLineStats } from '@/lib/diff-stats'
 import { useTheme } from '@/hooks/use-theme'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { usePreferences } from '@/services/preferences'
-import { getGitDiff } from '@/services/git-status'
-import { isTauri } from '@/services/projects'
 import { invoke } from '@/lib/transport'
 import { isNativeApp } from '@/lib/environment'
 
@@ -87,7 +85,6 @@ function replaceLast(
 }
 
 type DiffStyle = 'split' | 'unified'
-type ViewMode = 'last' | 'all'
 
 interface MessageDiffModalProps {
   isOpen: boolean
@@ -113,7 +110,6 @@ export function MessageDiffModal({
   const [diffStyle, setDiffStyle] = useState<DiffStyle>(() =>
     isMobile ? 'unified' : 'split'
   )
-  const [viewMode, setViewMode] = useState<ViewMode>('last')
   const { theme } = useTheme()
   const { data: preferences } = usePreferences()
 
@@ -137,7 +133,7 @@ export function MessageDiffModal({
   const { data: fileContent, isLoading: isLoadingFile } = useQuery({
     queryKey: ['file-content', filePath],
     queryFn: () => invoke<string>('read_file_content', { path: filePath }),
-    enabled: isOpen && viewMode === 'last' && !patch,
+    enabled: isOpen && !patch,
     staleTime: 10_000,
   })
 
@@ -180,54 +176,10 @@ export function MessageDiffModal({
     }
   }, [fileContent, edits, subsequentEdits, relativePath, patch])
 
-  // ── All changes: full uncommitted git diff ───────────────────────────────
-  const { data: gitDiff, isLoading: isLoadingGit } = useQuery({
-    queryKey: ['git-diff', worktreePath, 'uncommitted'],
-    queryFn: () => {
-      if (!worktreePath) {
-        throw new Error('worktreePath is required to load git diff')
-      }
-      return getGitDiff(worktreePath, 'uncommitted')
-    },
-    enabled: viewMode === 'all' && !!worktreePath && isTauri(),
-    staleTime: 30_000,
-  })
-
-  const allChangesFile = useMemo(() => {
-    if (!gitDiff?.raw_patch) return null
-    try {
-      const patches = parsePatchFiles(gitDiff.raw_patch)
-      for (const patch of patches) {
-        for (const file of patch.files) {
-          const name = file.name || file.prevName || ''
-          const relative = filePath.startsWith((worktreePath ?? '') + '/')
-            ? filePath.slice((worktreePath?.length ?? 0) + 1)
-            : filePath
-          if (
-            name === relative ||
-            name === filePath ||
-            name.endsWith(`/${relative}`) ||
-            relative.endsWith(`/${name}`)
-          ) {
-            return file
-          }
-        }
-      }
-    } catch {
-      return null
-    }
-    return null
-  }, [gitDiff?.raw_patch, filePath, worktreePath])
-
   const currentStats = useMemo(
     () =>
       currentChangeFile ? getHunkLineStats(currentChangeFile.hunks) : null,
     [currentChangeFile]
-  )
-
-  const allStats = useMemo(
-    () => (allChangesFile ? getHunkLineStats(allChangesFile.hunks) : null),
-    [allChangesFile]
   )
 
   const fileDiffOptions = useMemo(
@@ -273,8 +225,8 @@ export function MessageDiffModal({
     })
   }, [openFileMutation])
 
-  // "All changes" relies on the git backend, only available in the native app
-  const allChangesAvailable = isTauri() && !!worktreePath
+  const hasCurrentStats =
+    currentStats && (currentStats.additions > 0 || currentStats.deletions > 0)
 
   return (
     <Dialog open={isOpen} onOpenChange={open => !open && onClose()}>
@@ -283,10 +235,19 @@ export function MessageDiffModal({
         style={{ fontSize: 'var(--ui-font-size)' }}
         showCloseButton={false}
       >
-        <div className="shrink-0 border-b border-border/60 px-4 pb-3 pt-4 pr-12 sm:border-0 sm:px-0 sm:pb-0 sm:pt-0 sm:pr-10">
-          <DialogTitle className="flex min-w-0 items-center gap-2">
+        <div className="flex shrink-0 flex-col gap-2 border-b border-border/60 px-4 pb-3 pt-4 pr-12 sm:flex-row sm:items-center sm:border-0 sm:px-0 sm:pb-0 sm:pt-0 sm:pr-10">
+          <DialogTitle className="flex w-full min-w-0 items-center gap-2 sm:w-auto">
             <FileText className="h-4 w-4 shrink-0" />
             <span className="truncate">{getFilename(filePath)}</span>
+            {hasCurrentStats && (
+              <span className="shrink-0 font-mono text-sm font-semibold">
+                <span className="text-green-500">
+                  +{currentStats.additions}
+                </span>
+                <span className="mx-1 text-muted-foreground">/</span>
+                <span className="text-red-500">-{currentStats.deletions}</span>
+              </span>
+            )}
           </DialogTitle>
 
           <button
@@ -298,62 +259,7 @@ export function MessageDiffModal({
             <span className="sr-only">Close</span>
           </button>
 
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            {/* View mode toggle */}
-            <div className="flex max-w-full items-center rounded-lg bg-muted p-1">
-              <button
-                type="button"
-                onClick={() => setViewMode('last')}
-                className={cn(
-                  'min-w-0 rounded-md px-3 py-1.5 text-xs font-medium transition-colors',
-                  viewMode === 'last'
-                    ? 'bg-background text-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
-                )}
-              >
-                Current change
-                {currentStats &&
-                  (currentStats.additions > 0 ||
-                    currentStats.deletions > 0) && (
-                    <span className="ml-1.5 font-mono opacity-80">
-                      <span className="text-green-500">
-                        +{currentStats.additions}
-                      </span>
-                      <span className="mx-0.5">/</span>
-                      <span className="text-red-500">
-                        -{currentStats.deletions}
-                      </span>
-                    </span>
-                  )}
-              </button>
-              {allChangesAvailable && (
-                <button
-                  type="button"
-                  onClick={() => setViewMode('all')}
-                  className={cn(
-                    'rounded-md px-3 py-1.5 text-xs font-medium transition-colors',
-                    viewMode === 'all'
-                      ? 'bg-background text-foreground shadow-sm'
-                      : 'text-muted-foreground hover:text-foreground'
-                  )}
-                >
-                  All changes
-                  {allStats &&
-                    (allStats.additions > 0 || allStats.deletions > 0) && (
-                      <span className="ml-1.5 font-mono opacity-80">
-                        <span className="text-green-500">
-                          +{allStats.additions}
-                        </span>
-                        <span className="mx-0.5">/</span>
-                        <span className="text-red-500">
-                          -{allStats.deletions}
-                        </span>
-                      </span>
-                    )}
-                </button>
-              )}
-            </div>
-
+          <div className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:ml-auto sm:w-auto sm:flex-nowrap">
             {/* Diff style toggle */}
             <div className="flex items-center rounded-lg bg-muted p-1">
               <Tooltip>
@@ -412,46 +318,18 @@ export function MessageDiffModal({
         </DialogDescription>
 
         <div className="min-h-0 flex-1 overflow-y-auto space-y-2 sm:mt-2">
-          {viewMode === 'last' ? (
-            isLoadingFile ? (
-              <div className="flex items-center justify-center h-full text-muted-foreground">
-                <Loader2 className="h-5 w-5 animate-spin mr-2" />
-                Loading diff…
-              </div>
-            ) : currentChangeFile ? (
-              <DiffBlock fileName={relativePath}>
-                <FileDiff
-                  fileDiff={currentChangeFile}
-                  options={fileDiffOptions}
-                />
-              </DiffBlock>
-            ) : (
-              <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-                No changes to display
-              </div>
-            )
-          ) : isLoadingGit ? (
+          {isLoadingFile ? (
             <div className="flex items-center justify-center h-full text-muted-foreground">
               <Loader2 className="h-5 w-5 animate-spin mr-2" />
               Loading diff…
             </div>
-          ) : allChangesFile ? (
-            <DiffBlock
-              fileName={
-                allChangesFile.name || allChangesFile.prevName || relativePath
-              }
-              prevName={
-                allChangesFile.prevName &&
-                allChangesFile.prevName !== allChangesFile.name
-                  ? allChangesFile.prevName
-                  : undefined
-              }
-            >
-              <FileDiff fileDiff={allChangesFile} options={fileDiffOptions} />
+          ) : currentChangeFile ? (
+            <DiffBlock fileName={relativePath}>
+              <FileDiff fileDiff={currentChangeFile} options={fileDiffOptions} />
             </DiffBlock>
           ) : (
             <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-              No uncommitted changes for this file
+              No changes to display
             </div>
           )}
         </div>

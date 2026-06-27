@@ -4492,6 +4492,7 @@ pub fn run() {
             chat::list_pending_wakeups,
             // Chat commands - Image handling
             chat::read_clipboard_image,
+            chat::write_clipboard_text,
             chat::save_pasted_image,
             chat::save_dropped_image,
             chat::delete_pasted_image,

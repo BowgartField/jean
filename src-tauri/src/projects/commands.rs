@@ -246,6 +246,15 @@ pub fn generate_unique_suffix_name(
     }
 }
 
+fn generate_pr_worktree_name(pr_number: u32, head_ref_name: &str) -> String {
+    let sanitized_head = sanitize_folder_name(head_ref_name);
+    if sanitized_head.is_empty() {
+        format!("pr-{pr_number}")
+    } else {
+        format!("pr-{pr_number}-{sanitized_head}")
+    }
+}
+
 /// Get current Unix timestamp
 fn now() -> u64 {
     SystemTime::now()
@@ -1053,7 +1062,7 @@ pub async fn create_worktree(
         // worktree:branch_exists / worktree:path_exists events (BranchConflictDialog).
         custom
     } else if let Some(ref ctx) = pr_context {
-        let pr_branch = ctx.head_ref_name.clone();
+        let pr_branch = generate_pr_worktree_name(ctx.number, &ctx.head_ref_name);
         // Check if this branch name already exists, if so, add a suffix
         if data.worktree_name_exists(&project_id, &pr_branch) {
             let mut counter = 2;
@@ -1351,6 +1360,7 @@ pub async fn create_worktree(
                     archived_worktree_id: archived_info.as_ref().map(|(id, _)| id.clone()),
                     archived_worktree_name: archived_info.map(|(_, name)| name),
                     issue_context: issue_context_clone.clone(),
+                    pr_context: pr_context_clone.clone(),
                     security_context: security_context_clone.clone(),
                     advisory_context: advisory_context_clone.clone(),
                     origin: worktree_origin_clone.clone(),
@@ -2108,6 +2118,7 @@ pub async fn create_worktree_from_existing_branch(
                     archived_worktree_id: archived_info.as_ref().map(|(id, _)| id.clone()),
                     archived_worktree_name: archived_info.map(|(_, name)| name),
                     issue_context: issue_context_clone.clone(),
+                    pr_context: pr_context_clone.clone(),
                     security_context: security_context_clone.clone(),
                     advisory_context: advisory_context_clone.clone(),
                     origin: None,
@@ -2537,8 +2548,10 @@ pub async fn checkout_pr(
     // Get valid base branch for creating the worktree
     let base_branch = git::get_valid_base_branch(&project.path, &project.default_branch)?;
 
-    // Generate worktree name from PR (for the directory/worktree name, not the branch)
-    let worktree_name = pr_detail.head_ref_name.clone();
+    // Generate worktree name from PR (for the directory/worktree name, not the branch).
+    // Fork PRs often use generic heads like "main"; scope by PR number to avoid
+    // producing ambiguous names like "main-2".
+    let worktree_name = generate_pr_worktree_name(pr_number, &pr_detail.head_ref_name);
     log::info!("[checkout_pr] Generated base worktree name: '{worktree_name}'");
 
     // Remove any archived worktree records for this PR from data so they don't
@@ -11461,6 +11474,19 @@ mod tests {
         assert_eq!(sanitize_folder_name("café"), "café");
         assert_eq!(sanitize_folder_name("a b\tc"), "a_b_c");
         assert_eq!(sanitize_folder_name("back\\slash"), "back_slash");
+    }
+
+    #[test]
+    fn pr_worktree_name_is_scoped_by_pr_number_for_generic_heads() {
+        assert_eq!(generate_pr_worktree_name(396, "main"), "pr-396-main");
+    }
+
+    #[test]
+    fn pr_worktree_name_sanitizes_slash_separated_heads() {
+        assert_eq!(
+            generate_pr_worktree_name(397, "feature/notifications"),
+            "pr-397-feature_notifications"
+        );
     }
 
     #[test]
