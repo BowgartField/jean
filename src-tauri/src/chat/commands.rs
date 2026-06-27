@@ -2237,7 +2237,9 @@ fn persist_salvaged_resume_id(session: &mut Session, backend: &Backend, sid: &st
         Backend::Opencode => session.opencode_session_id = Some(sid.to_string()),
         Backend::Cursor => session.cursor_chat_id = Some(sid.to_string()),
         Backend::Pi => session.pi_session_id = Some(sid.to_string()),
-        Backend::Commandcode => {}
+        // Command Code has no native resume id; persist a sentinel so the next
+        // run continues the worktree conversation via `-c`.
+        Backend::Commandcode => session.commandcode_session_id = Some(sid.to_string()),
         Backend::Grok => session.grok_session_id = Some(sid.to_string()),
     }
 }
@@ -2549,6 +2551,12 @@ pub async fn send_chat_message(
     let grok_session_id = sessions
         .find_session(&session_id)
         .and_then(|s| s.grok_session_id.clone());
+    // Command Code has no native resume id; a non-empty sentinel marks that a
+    // prior Command Code turn completed in this worktree, so the next run can
+    // pass `-c` (cwd-scoped continue) to resume the conversation.
+    let commandcode_session_id = sessions
+        .find_session(&session_id)
+        .and_then(|s| s.commandcode_session_id.clone());
     let pi_session_id = raw_pi_session_id
         .as_deref()
         .filter(|sid| *sid != session_id)
@@ -2571,6 +2579,13 @@ pub async fn send_chat_message(
         .and_then(super::handoff::latest_completed_custom_profile);
     let backend_handoff =
         super::handoff::should_inject_handoff(previous_backend.as_ref(), &effective_backend);
+    // Resume Command Code by its native session id, but only when this session
+    // already ran a Command Code turn and we're not handing off from a different
+    // backend (handoff injects history into the prompt instead, so resuming the
+    // old conversation would double up).
+    let commandcode_resume_id: Option<String> = commandcode_session_id
+        .clone()
+        .filter(|_| effective_backend == Backend::Commandcode && !backend_handoff);
     let claude_profile_changed = effective_backend == Backend::Claude
         && claude_session_id.is_some()
         && previous_custom_profile.as_deref() != custom_profile_name.as_deref();
@@ -2753,6 +2768,7 @@ pub async fn send_chat_message(
     let thread_cursor_chat_id = cursor_chat_id.clone();
     let thread_pi_session_id = pi_session_id.clone();
     let thread_grok_session_id = grok_session_id.clone();
+    let thread_commandcode_resume_id = commandcode_resume_id.clone();
     let thread_model = model.clone();
     let thread_execution_mode = execution_mode.clone();
     let thread_thinking_level = thinking_level.clone();
@@ -3929,6 +3945,7 @@ pub async fn send_chat_message(
                     thread_model.as_deref(),
                     &thread_message,
                     Some(&system_context),
+                    thread_commandcode_resume_id.as_deref(),
                     Some(make_pid_callback()),
                 ) {
                     Ok((_pid, response)) => Ok((
@@ -4578,7 +4595,9 @@ pub async fn send_chat_message(
                         Backend::Pi => {
                             session.pi_session_id = Some(resume_id_for_log.clone());
                         }
-                        Backend::Commandcode => {}
+                        Backend::Commandcode => {
+                            session.commandcode_session_id = Some(resume_id_for_log.clone());
+                        }
                         Backend::Grok => {
                             session.grok_session_id = Some(resume_id_for_log.clone());
                         }
@@ -4722,7 +4741,9 @@ pub async fn send_chat_message(
                     Backend::Pi => {
                         session.pi_session_id = Some(resume_id_for_log.clone());
                     }
-                    Backend::Commandcode => {}
+                    Backend::Commandcode => {
+                        session.commandcode_session_id = Some(resume_id_for_log.clone());
+                    }
                     Backend::Grok => {
                         session.grok_session_id = Some(resume_id_for_log.clone());
                     }

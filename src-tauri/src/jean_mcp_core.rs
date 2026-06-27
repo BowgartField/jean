@@ -1478,8 +1478,7 @@ mod tests {
         let tools = tool_registry();
         let create_worktree = find_tool(&tools, "create_worktree");
         assert_eq!(
-            create_worktree["inputSchema"]["properties"]["linearIssueIdentifier"]["type"],
-            "string",
+            create_worktree["inputSchema"]["properties"]["linearIssueIdentifier"]["type"], "string",
             "create_worktree must expose a linearIssueIdentifier input"
         );
     }

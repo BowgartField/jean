@@ -592,7 +592,8 @@ pub struct Session {
     /// PI session ID for resuming conversations
     #[serde(default)]
     pub pi_session_id: Option<String>,
-    /// Command Code uses standalone headless invocations; this stores no native resume id.
+    /// Command Code has no native resume id. A non-empty sentinel marks that a
+    /// prior turn ran in this worktree so the next run passes `-c` (cwd-scoped continue).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commandcode_session_id: Option<String>,
     /// Grok headless session ID for resuming conversations
@@ -1424,7 +1425,8 @@ pub struct SessionMetadata {
     /// PI session ID for resuming conversations
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pi_session_id: Option<String>,
-    /// Command Code uses standalone headless invocations; this stores no native resume id.
+    /// Command Code has no native resume id. A non-empty sentinel marks that a
+    /// prior turn ran in this worktree so the next run passes `-c` (cwd-scoped continue).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commandcode_session_id: Option<String>,
     /// Grok headless session ID for resuming conversations

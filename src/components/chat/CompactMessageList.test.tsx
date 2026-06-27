@@ -104,6 +104,50 @@ describe('CompactMessageList', () => {
     expect(screen.getByText('1 step')).toBeVisible()
   })
 
+  it('renders Command Code read_file activity with normalized labels', () => {
+    renderCompact([
+      message('user-1', 'user', 100, 'read files'),
+      message('assistant-1', 'assistant', 104, 'I read files.', {
+        tool_calls: [
+          {
+            id: 'tool-1',
+            name: 'read_file',
+            input: { absolutePath: '/tmp/package.json' },
+          },
+          {
+            id: 'tool-2',
+            name: 'read_file',
+            input: { absolutePath: '/tmp/README.md' },
+          },
+          {
+            id: 'tool-3',
+            name: 'read_file',
+            input: { absolutePath: '/tmp/AGENTS.md', limit: 20 },
+          },
+        ],
+        content_blocks: [
+          { type: 'text', text: 'Reading files.' },
+          { type: 'tool_use', tool_call_id: 'tool-1' },
+          { type: 'tool_use', tool_call_id: 'tool-2' },
+          { type: 'tool_use', tool_call_id: 'tool-3' },
+          { type: 'text', text: 'I read files.' },
+        ],
+      }),
+    ])
+
+    expect(screen.getByRole('button', { name: /3 steps/ })).toBeVisible()
+    expect(screen.queryByText(/unhandled tool/i)).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /3 steps/ }))
+
+    expect(screen.getByRole('button', { name: /3 Read/ })).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: /3 Read/ }))
+
+    expect(screen.getAllByText('Read')).toHaveLength(2)
+    expect(screen.getByText('Read 20 lines')).toBeVisible()
+    expect(screen.getByText('package.json')).toBeVisible()
+  })
+
   it('renders cancelled marker outside the compact activity card', () => {
     renderCompact([
       message('user-1', 'user', 100, 'check status'),
