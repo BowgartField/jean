@@ -1,4 +1,8 @@
-import type { ClaudeModel, CustomCliProfile } from '@/types/preferences'
+import type {
+  ClaudeModel,
+  CliBackend,
+  CustomCliProfile,
+} from '@/types/preferences'
 import type {
   ThinkingLevel,
   EffortLevel,
@@ -79,16 +83,14 @@ export interface ChatToolbarProps {
   onOpenPr: () => void
   onReview: () => void
   onMerge: () => void
+  onMergePr: () => void
   onResolvePrConflicts: () => void
   onResolveConflicts: () => void
   hasOpenPr: boolean
   onSetDiffRequest: (request: DiffRequest) => void
-  installedBackends: ('claude' | 'codex' | 'opencode' | 'cursor')[]
+  installedBackends: CliBackend[]
   onModelChange: (model: ClaudeModel) => void
-  onBackendModelChange: (
-    backend: 'claude' | 'codex' | 'opencode' | 'cursor',
-    model: string
-  ) => void
+  onBackendModelChange: (backend: CliBackend, model: string) => void
   onProviderChange: (provider: string | null) => void
   customCliProfiles: CustomCliProfile[]
   onThinkingLevelChange: (level: ThinkingLevel) => void

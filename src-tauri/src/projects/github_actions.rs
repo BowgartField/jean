@@ -2,7 +2,11 @@ use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 
 use crate::gh_cli::config::resolve_gh_binary;
-use crate::platform::silent_command;
+use std::path::Path;
+
+fn gh_command(gh: &Path, project_path: &str) -> std::process::Command {
+    crate::platform::resolved_cli_command(gh, Some(Path::new(project_path)))
+}
 
 // =============================================================================
 // GitHub Actions Types
@@ -54,7 +58,7 @@ pub async fn list_workflow_runs(
         "databaseId,name,displayTitle,status,conclusion,event,headBranch,createdAt,url,workflowName"
             .to_string(),
         "-L".to_string(),
-        "30".to_string(),
+        "100".to_string(),
     ];
 
     if let Some(ref b) = branch {
@@ -62,9 +66,8 @@ pub async fn list_workflow_runs(
         args.push(b.clone());
     }
 
-    let output = silent_command(&gh)
+    let output = gh_command(&gh, &project_path)
         .args(&args)
-        .current_dir(&project_path)
         .output()
         .map_err(|e| format!("Failed to run gh run list: {e}"))?;
 

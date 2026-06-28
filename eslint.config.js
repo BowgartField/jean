@@ -71,7 +71,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['scripts/**/*.js'],
+    files: ['scripts/**/*.{js,mjs}'],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: 'module',
@@ -105,6 +105,7 @@ export default tseslint.config(
       '*.config.js',
       '*.config.ts',
       'vite.config.ts',
+      'vite.config.d.ts',
       'tailwind.config.js',
     ],
   }

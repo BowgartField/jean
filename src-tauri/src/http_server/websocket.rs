@@ -2,11 +2,102 @@ use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager};
 use tokio::sync::{broadcast, mpsc};
 
 use super::dispatch::dispatch_command;
 use super::{WsBroadcaster, WsEvent};
+
+fn command_should_run_on_blocking_pool(command: &str) -> bool {
+    matches!(
+        command,
+        "create_commit_with_ai"
+            | "create_pr_with_ai_content"
+            | "run_review_with_ai"
+            | "generate_release_notes"
+            | "execute_summarization"
+            | "install_claude_cli"
+            | "install_codex_cli"
+            | "install_opencode_cli"
+            | "install_pi_cli"
+            | "install_grok_cli"
+            | "update_grok_cli"
+            | "install_gh_cli"
+            | "install_coderabbit_cli"
+            | "update_coderabbit_cli"
+            | "run_coderabbit_review"
+            | "trigger_coderabbit_pr_review"
+    )
+}
+
+async fn dispatch_invoke_response(
+    app: AppHandle,
+    id: String,
+    command: String,
+    args: Value,
+) -> InvokeResponse {
+    match dispatch_command(&app, &command, args).await {
+        Ok(data) => InvokeResponse {
+            msg_type: "response".to_string(),
+            id,
+            data: Some(data),
+            error: None,
+        },
+        Err(err) => InvokeResponse {
+            msg_type: "error".to_string(),
+            id,
+            data: None,
+            error: Some(err),
+        },
+    }
+}
+
+fn spawn_dispatch_response(
+    app: AppHandle,
+    id: String,
+    command: String,
+    args: Value,
+    tx: mpsc::UnboundedSender<String>,
+) {
+    if command_should_run_on_blocking_pool(&command) {
+        // These commands perform synchronous git/CLI/process work under an
+        // async dispatch signature. Running them on the core runtime can starve
+        // the WebSocket loop in web/mobile access, making unrelated actions
+        // (for example creating a new session) appear stuck until the command
+        // finishes.
+        tokio::task::spawn_blocking(move || {
+            let resp =
+                tauri::async_runtime::block_on(dispatch_invoke_response(app, id, command, args));
+            if let Ok(json) = serde_json::to_string(&resp) {
+                let _ = tx.send(json);
+            }
+        });
+        return;
+    }
+
+    tokio::spawn(async move {
+        let resp = dispatch_invoke_response(app, id, command, args).await;
+        if let Ok(json) = serde_json::to_string(&resp) {
+            let _ = tx.send(json);
+        }
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::command_should_run_on_blocking_pool;
+
+    #[test]
+    fn commit_generation_runs_on_blocking_pool() {
+        assert!(command_should_run_on_blocking_pool("create_commit_with_ai"));
+    }
+
+    #[test]
+    fn lightweight_session_creation_stays_on_async_runtime() {
+        assert!(!command_should_run_on_blocking_pool("create_session"));
+    }
+}
 
 /// Typed client message parsed from JSON with `"type"` tag.
 #[derive(Deserialize)]
@@ -23,6 +114,9 @@ enum WsClientMessage {
     /// Request replay of missed events after reconnection.
     #[serde(rename = "replay")]
     Replay { session_id: String, last_seq: u64 },
+    /// Request replay of missed terminal events after reconnection.
+    #[serde(rename = "terminal_replay")]
+    TerminalReplay { terminal_id: String, last_seq: u64 },
 }
 
 /// Legacy invoke request without `type` field (backwards compat).
@@ -72,44 +166,59 @@ pub async fn handle_ws_connection(
     // responses are infrequent (user-initiated) and must never be dropped.
     let (resp_tx, mut resp_rx) = mpsc::unbounded_channel::<String>();
 
-    // Main loop — three event sources, never blocks on command dispatch.
+    // Heartbeat: server-driven protocol ping every PING_INTERVAL. If no
+    // inbound traffic (pong, text, ping) for PONG_TIMEOUT, treat connection as
+    // dead and break — onclose path on the client triggers reconnect + replay.
+    //
+    // Also send an app-level heartbeat text frame. Browser JS does not expose
+    // protocol ping/pong frames to `WebSocket.onmessage`, so the frontend
+    // liveness watchdog needs a normal message during otherwise-idle terminal
+    // sessions. Without this, web access reconnects every ~50s of no app
+    // events, which makes embedded xterm sessions appear to time out.
+    const PING_INTERVAL: Duration = Duration::from_secs(20);
+    const PONG_TIMEOUT: Duration = Duration::from_secs(45);
+    const APP_HEARTBEAT_JSON: &str = r#"{"type":"heartbeat"}"#;
+    let mut ping_interval = tokio::time::interval(PING_INTERVAL);
+    ping_interval.tick().await; // skip immediate fire
+    let mut last_inbound = Instant::now();
+
+    // Main loop — four event sources, never blocks on command dispatch.
     loop {
         tokio::select! {
+            // ── Heartbeat tick ───────────────────────────────────────
+            _ = ping_interval.tick() => {
+                if last_inbound.elapsed() > PONG_TIMEOUT {
+                    log::warn!("WS client idle > {PONG_TIMEOUT:?}, dropping connection");
+                    break;
+                }
+                if ws_tx.send(Message::Ping(vec![].into())).await.is_err() {
+                    break;
+                }
+                if ws_tx
+                    .send(Message::Text(APP_HEARTBEAT_JSON.into()))
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+            }
+
             // ── Incoming command from client ──────────────────────────
             msg = ws_rx.next() => {
+                last_inbound = Instant::now();
                 match msg {
                     Some(Ok(Message::Text(text))) => {
                         match serde_json::from_str::<WsClientMessage>(&text) {
                             Ok(WsClientMessage::Invoke { id, command, args }) => {
                                 // Spawn dispatch as a separate task so the
                                 // select loop stays free to drain events.
-                                let app_clone = app.clone();
-                                let tx = resp_tx.clone();
-                                tokio::spawn(async move {
-                                    let resp = match dispatch_command(
-                                        &app_clone,
-                                        &command,
-                                        args,
-                                    )
-                                    .await
-                                    {
-                                        Ok(data) => InvokeResponse {
-                                            msg_type: "response".to_string(),
-                                            id,
-                                            data: Some(data),
-                                            error: None,
-                                        },
-                                        Err(err) => InvokeResponse {
-                                            msg_type: "error".to_string(),
-                                            id,
-                                            data: None,
-                                            error: Some(err),
-                                        },
-                                    };
-                                    if let Ok(json) = serde_json::to_string(&resp) {
-                                        let _ = tx.send(json);
-                                    }
-                                });
+                                spawn_dispatch_response(
+                                    app.clone(),
+                                    id,
+                                    command,
+                                    args,
+                                    resp_tx.clone(),
+                                );
                             }
                             Ok(WsClientMessage::Replay { session_id, last_seq }) => {
                                 // Replay missed events for this session
@@ -122,38 +231,28 @@ pub async fn handle_ws_connection(
                                     }
                                 }
                             }
+                            Ok(WsClientMessage::TerminalReplay { terminal_id, last_seq }) => {
+                                // Replay missed terminal events after reconnect
+                                if let Some(broadcaster) = app.try_state::<WsBroadcaster>() {
+                                    let events = broadcaster.replay_terminal_events(&terminal_id, last_seq);
+                                    for (_seq, json) in events {
+                                        if ws_tx.send(Message::Text(json.to_string().into())).await.is_err() {
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
                             Err(e) => {
                                 // Try legacy format (no "type" field — old clients send bare invoke)
                                 match serde_json::from_str::<InvokeRequest>(&text) {
                                     Ok(req) => {
-                                        let app_clone = app.clone();
-                                        let tx = resp_tx.clone();
-                                        tokio::spawn(async move {
-                                            let id = req.id.clone();
-                                            let resp = match dispatch_command(
-                                                &app_clone,
-                                                &req.command,
-                                                req.args,
-                                            )
-                                            .await
-                                            {
-                                                Ok(data) => InvokeResponse {
-                                                    msg_type: "response".to_string(),
-                                                    id,
-                                                    data: Some(data),
-                                                    error: None,
-                                                },
-                                                Err(err) => InvokeResponse {
-                                                    msg_type: "error".to_string(),
-                                                    id,
-                                                    data: None,
-                                                    error: Some(err),
-                                                },
-                                            };
-                                            if let Ok(json) = serde_json::to_string(&resp) {
-                                                let _ = tx.send(json);
-                                            }
-                                        });
+                                        spawn_dispatch_response(
+                                            app.clone(),
+                                            req.id,
+                                            req.command,
+                                            req.args,
+                                            resp_tx.clone(),
+                                        );
                                     }
                                     Err(_) => {
                                         let resp = InvokeResponse {
@@ -178,7 +277,8 @@ pub async fn handle_ws_connection(
                             break;
                         }
                     }
-                    _ => {} // Ignore binary, pong
+                    Some(Ok(Message::Pong(_))) => {} // liveness already bumped above
+                    _ => {} // Ignore binary
                 }
             }
 
