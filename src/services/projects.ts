@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { invoke, useWsConnectionStatus, setAppDataDir } from '@/lib/transport'
 import { listen, type UnlistenFn } from '@/lib/transport'
+import { useProjectBackendHandle } from '@/hooks/useProjectBackendHandle'
 import { toast } from 'sonner'
 import { logger } from '@/lib/logger'
 import { disposeAllWorktreeTerminals } from '@/lib/terminal-instances'
@@ -84,6 +85,7 @@ export function useProjects() {
  * Hook to list worktrees for a specific project
  */
 export function useWorktrees(projectId: string | null) {
+  const backendHandle = useProjectBackendHandle(projectId)
   return useQuery({
     queryKey: projectsQueryKeys.worktrees(projectId ?? ''),
     queryFn: async (): Promise<Worktree[]> => {
@@ -95,6 +97,7 @@ export function useWorktrees(projectId: string | null) {
         logger.debug('Loading worktrees for project', { projectId })
         const worktrees = await invoke<Worktree[]>('list_worktrees', {
           projectId,
+          ...(backendHandle ? { _backendHandle: backendHandle } : {}),
         })
         logger.info('Worktrees loaded successfully', {
           count: worktrees.length,

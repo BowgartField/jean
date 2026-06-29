@@ -64,6 +64,7 @@ interface PersistentTerminal {
   worktreePath: string
   command: string | null
   commandArgs: string[] | null
+  backendHandle: string | null // remote server ID, or null for local
   initialized: boolean // PTY has been started
   replayRequested: boolean // Buffered web replay has been requested for an existing PTY
   opened: boolean // Terminal UI has been opened into hostElement
@@ -177,10 +178,12 @@ function scheduleAppearanceResize(instance: PersistentTerminal): void {
     instance.fitAddon.fit()
     const { cols, rows } = getSafeTerminalDimensions(instance.terminal)
     if (!instance.initialized) return
+    const handle = instance.backendHandle
     invoke('terminal_resize', {
       terminalId: instance.terminalId,
       cols,
       rows,
+      ...(handle ? { _backendHandle: handle } : {}),
     }).catch(console.error)
   }, 120)
 }
@@ -566,9 +569,13 @@ function flushTerminalInput(terminalId: string): void {
   if (buffer.timer) clearTimeout(buffer.timer)
   inputBuffers.delete(terminalId)
   if (!buffer.data) return
-  invoke('terminal_write', { terminalId, data: buffer.data }).catch(
-    console.error
-  )
+  const inst = instances.get(terminalId)
+  const handle = inst?.backendHandle ?? null
+  invoke('terminal_write', {
+    terminalId,
+    data: buffer.data,
+    ...(handle ? { _backendHandle: handle } : {}),
+  }).catch(console.error)
 }
 
 function discardTerminalInput(terminalId: string): void {
@@ -829,10 +836,14 @@ function handleTerminalStopped(event: TerminalStoppedEvent): void {
 
   if (isCleanExit && inst && isPanel) {
     const wId = inst.worktreeId
+    const stoppedHandle = inst.backendHandle
     setTimeout(() => {
       if (!instances.has(terminalId)) return // Already disposed
       // eslint-disable-next-line @typescript-eslint/no-empty-function
-      invoke('stop_terminal', { terminalId }).catch(() => {})
+      invoke('stop_terminal', {
+        terminalId,
+        ...(stoppedHandle ? { _backendHandle: stoppedHandle } : {}),
+      }).catch(() => {})
       disposeTerminal(terminalId)
       const { removeTerminal, setTerminalPanelOpen } =
         useTerminalStore.getState()
@@ -885,6 +896,7 @@ export function getOrCreateTerminal(
     worktreePath: string
     command?: string | null
     commandArgs?: string[] | null
+    backendHandle?: string | null
   }
 ): PersistentTerminal {
   const existing = instances.get(terminalId)
@@ -900,6 +912,7 @@ export function getOrCreateTerminal(
     worktreePath,
     command = null,
     commandArgs = null,
+    backendHandle = null,
   } = options
 
   // Ensure the visibility/focus wake handler is running.
@@ -922,6 +935,7 @@ export function getOrCreateTerminal(
     worktreePath,
     command,
     commandArgs,
+    backendHandle,
     initialized: false,
     replayRequested: false,
     opened: false,
@@ -1047,6 +1061,9 @@ export async function attachToContainer(
       // First time - check if PTY already exists (reconnecting after app restart)
       const ptyExists = await invoke<boolean>('has_active_terminal', {
         terminalId,
+        ...(instance.backendHandle
+          ? { _backendHandle: instance.backendHandle }
+          : {}),
       })
       if (!isCurrentInstance(terminalId, instance)) return
 
@@ -1059,11 +1076,17 @@ export async function attachToContainer(
           requestTerminalReplay(terminalId, 0)
         }
         useTerminalStore.getState().setTerminalRunning(terminalId, true)
-        await invoke('terminal_resize', { terminalId, cols, rows }).catch(
-          console.error
-        )
+        await invoke('terminal_resize', {
+          terminalId,
+          cols,
+          rows,
+          ...(instance.backendHandle
+            ? { _backendHandle: instance.backendHandle }
+            : {}),
+        }).catch(console.error)
       } else {
         // Start new PTY process
+        const handle = instance.backendHandle
         await invoke('start_terminal', {
           terminalId,
           worktreePath,
@@ -1071,6 +1094,7 @@ export async function attachToContainer(
           rows,
           command,
           commandArgs,
+          ...(handle ? { _backendHandle: handle } : {}),
         }).catch(error => {
           console.error('[terminal-instances] start_terminal failed:', error)
           terminal.writeln(`\x1b[31mFailed to start terminal: ${error}\x1b[0m`)
@@ -1081,9 +1105,14 @@ export async function attachToContainer(
       instance.initialized = true
     } else {
       // Already initialized - just resize
-      await invoke('terminal_resize', { terminalId, cols, rows }).catch(
-        console.error
-      )
+      await invoke('terminal_resize', {
+        terminalId,
+        cols,
+        rows,
+        ...(instance.backendHandle
+          ? { _backendHandle: instance.backendHandle }
+          : {}),
+      }).catch(console.error)
     }
 
     terminal.focus()
@@ -1103,6 +1132,7 @@ export function startHeadless(
     worktreePath: string
     command: string
     commandArgs?: string[] | null
+    backendHandle?: string | null
   }
 ): void {
   const instance = getOrCreateTerminal(terminalId, options)
@@ -1113,6 +1143,7 @@ export function startHeadless(
       if (!terminal) return
       if (!(await waitForTerminalReady(terminalId, instance))) return
       instance.initialized = true
+      const handle = instance.backendHandle
       return invoke('start_terminal', {
         terminalId,
         worktreePath: options.worktreePath,
@@ -1120,6 +1151,7 @@ export function startHeadless(
         rows: 24,
         command: options.command,
         commandArgs: options.commandArgs ?? null,
+        ...(handle ? { _backendHandle: handle } : {}),
       })
     })
     .catch(error => {
@@ -1153,7 +1185,13 @@ export function fitTerminal(terminalId: string): void {
 
   instance.fitAddon.fit()
   const { cols, rows } = getSafeTerminalDimensions(instance.terminal)
-  invoke('terminal_resize', { terminalId, cols, rows }).catch(console.error)
+  const handle = instance.backendHandle
+  invoke('terminal_resize', {
+    terminalId,
+    cols,
+    rows,
+    ...(handle ? { _backendHandle: handle } : {}),
+  }).catch(console.error)
 }
 
 /**
@@ -1208,8 +1246,13 @@ export function disposeAllWorktreeTerminals(worktreeId: string): void {
 
   // Dispose each terminal instance and stop PTY
   for (const terminalId of terminalIds) {
+    const inst = instances.get(terminalId)
+    const handle = inst?.backendHandle ?? null
     // Stop PTY process
-    invoke('stop_terminal', { terminalId }).catch(() => {
+    invoke('stop_terminal', {
+      terminalId,
+      ...(handle ? { _backendHandle: handle } : {}),
+    }).catch(() => {
       // Terminal may already be stopped
     })
 
@@ -1228,7 +1271,12 @@ export function disposePanelWorktreeTerminals(worktreeId: string): void {
     .closePanelTerminals(worktreeId)
 
   for (const terminalId of terminalIds) {
-    invoke('stop_terminal', { terminalId }).catch(() => {
+    const inst = instances.get(terminalId)
+    const handle = inst?.backendHandle ?? null
+    invoke('stop_terminal', {
+      terminalId,
+      ...(handle ? { _backendHandle: handle } : {}),
+    }).catch(() => {
       // Terminal may already be stopped
     })
 

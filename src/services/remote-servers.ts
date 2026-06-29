@@ -1,6 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { hasBackend } from '@/lib/environment'
-import { invoke } from '@/lib/transport'
+import {
+  invoke,
+  registerRemoteTransport,
+  unregisterRemoteTransport,
+} from '@/lib/transport'
 import type {
   ProvisionResult,
   RemoteConnection,
@@ -88,14 +92,23 @@ export function useProvisionRemoteServer() {
 }
 
 export function useConnectRemoteServer() {
-  return useRemoteServerMutation<string, RemoteConnection>(serverId =>
-    invoke('connect_remote_server', { serverId })
-  )
+  return useRemoteServerMutation<string, RemoteConnection>(async serverId => {
+    const connection = await invoke<RemoteConnection>('connect_remote_server', {
+      serverId,
+    })
+    registerRemoteTransport(
+      connection.server_id,
+      connection.local_port,
+      connection.token
+    )
+    return connection
+  })
 }
 
 export function useDisconnectRemoteServer() {
   return useRemoteServerMutation<string, undefined>(async serverId => {
     await invoke('disconnect_remote_server', { serverId })
+    unregisterRemoteTransport(serverId)
     return undefined
   })
 }

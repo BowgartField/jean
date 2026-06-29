@@ -300,10 +300,23 @@ function executeKeybindingAction(
             .setModalTerminalOpen(targetWorktreeId, true)
         } else {
           // Canvas view: start PTY headlessly (no terminal UI mounted yet)
+          // Look up backendHandle from the project owning this worktree
+          const cachedWorktree = queryClient.getQueryData<{
+            project_id?: string
+          }>([...projectsQueryKeys.all, 'worktree', targetWorktreeId])
+          const backendHandle: string | null = cachedWorktree?.project_id
+            ? (queryClient
+                .getQueryData<{ id: string; server_id?: string | null }[]>(
+                  projectsQueryKeys.list()
+                )
+                ?.find(p => p.id === cachedWorktree.project_id)?.server_id ??
+              null)
+            : null
           startHeadless(terminalId, {
             worktreeId: targetWorktreeId,
             worktreePath: resolvedWorktreePath,
             command: firstScript,
+            backendHandle,
           })
         }
       })()

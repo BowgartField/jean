@@ -18,6 +18,7 @@ import { Kbd } from '@/components/ui/kbd'
 import { formatShortcutDisplay } from '@/types/keybindings'
 import { cn } from '@/lib/utils'
 import { useTerminalImageDrop } from './hooks/useTerminalImageDrop'
+import { useBackendHandleForWorktree } from '@/hooks/useProjectBackendHandle'
 import { MODAL_TERMINAL_SECONDARY_ROW_CLASS } from './modal-terminal-layout'
 import '@xterm/xterm/css/xterm.css'
 
@@ -52,12 +53,14 @@ const TerminalTabContent = memo(function TerminalTabContent({
   const containerRef = useRef<HTMLDivElement>(null)
   const terminalBg = useTerminalBackgroundColor()
   const { isDraggingImage, dropHandlers } = useTerminalImageDrop(terminal.id)
+  const backendHandle = useBackendHandleForWorktree(worktreeId)
   const { initTerminal, fit, focus } = useTerminal({
     terminalId: terminal.id,
     worktreeId,
     worktreePath,
     command: terminal.command,
     commandArgs: terminal.commandArgs,
+    backendHandle,
   })
   const initialized = useRef(false)
   const canAttach = isActive && !isCollapsed && isWorktreeActive

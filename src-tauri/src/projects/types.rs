@@ -154,6 +154,9 @@ pub struct Project {
     /// When set, worktrees go to <worktrees_dir>/<project-name>/<worktree-name>.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worktrees_dir: Option<String>,
+    /// Remote server ID that owns this project (None = local)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_id: Option<String>,
     /// Linear personal API key for fetching issues (per-project)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub linear_api_key: Option<String>,

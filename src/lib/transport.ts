@@ -113,6 +113,15 @@ export async function invoke<T>(
     return null as T
   }
 
+  const backendHandle = args?._backendHandle as string | undefined
+  if (backendHandle) {
+    const remote = _remoteTransports.get(backendHandle)
+    if (!remote)
+      throw new Error(`Remote transport '${backendHandle}' is not connected`)
+    const { _backendHandle: _, ...cleanArgs } = args!
+    return remote.invoke<T>(command, cleanArgs)
+  }
+
   if (isNativeApp()) {
     const { invoke: tauriInvoke } = await import('@tauri-apps/api/core')
     return tauriInvoke<T>(command, args)
@@ -123,10 +132,15 @@ export async function invoke<T>(
 /**
  * Listen for backend events. Drop-in replacement for Tauri's listen().
  * Returns an unlisten function.
+ *
+ * @param backendHandle - Optional remote server ID. When provided, routes only
+ *   to that remote transport. When omitted in native mode, fans out to both the
+ *   local Tauri IPC and all active remote transports.
  */
 export async function listen<T>(
   event: string,
-  handler: (event: { payload: T }) => void
+  handler: (event: { payload: T }) => void,
+  backendHandle?: string | null
 ): Promise<() => void> {
   // E2E mock transport — route to in-memory event emitter
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -139,10 +153,37 @@ export async function listen<T>(
     return () => et.removeEventListener(event, wrapped)
   }
 
+  // Route to a specific remote transport
+  if (backendHandle) {
+    const remote = _remoteTransports.get(backendHandle)
+    if (remote) return remote.listen<T>(event, handler)
+    return () => {}
+  }
+
   if (isNativeApp()) {
     const { listen: tauriListen } = await import('@tauri-apps/api/event')
-    return tauriListen<T>(event, handler)
+    const localUnsub = await tauriListen<T>(event, handler)
+
+    const typedHandler = handler as (event: { payload: unknown }) => void
+    const entry: GlobalHandler = { fn: typedHandler, remoteUnsubs: new Map() }
+
+    // Fan out to all currently-active remote transports
+    for (const [serverId, transport] of _remoteTransports) {
+      entry.remoteUnsubs.set(serverId, transport.listen(event, typedHandler))
+    }
+
+    // Track this handler so future registerRemoteTransport() picks it up
+    if (!_globalHandlers.has(event)) _globalHandlers.set(event, new Set())
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    _globalHandlers.get(event)!.add(entry)
+
+    return () => {
+      localUnsub()
+      entry.remoteUnsubs.forEach(u => u())
+      _globalHandlers.get(event)?.delete(entry)
+    }
   }
+
   return wsTransport.listen<T>(event, handler)
 }
 
@@ -406,8 +447,14 @@ class WsTransport {
   private _lastSeqByTerminal = new Map<string, number>()
   /** Terminals that were running when we (potentially) disconnected. */
   private _activeTerminals = new Set<string>()
+  /** Override origin for remote transports (SSH tunnel). Null = use window.location.origin. */
+  private _baseUrl: string | null = null
+  /** Fixed auth token for remote transports. Null = read from URL/localStorage. */
+  private _fixedToken: string | null = null
 
-  constructor() {
+  constructor(opts?: { baseUrl?: string; fixedToken?: string }) {
+    this._baseUrl = opts?.baseUrl ?? null
+    this._fixedToken = opts?.fixedToken ?? null
     // Reconnect instantly when the page returns to the foreground or the
     // network comes back. Mobile browsers suspend background tabs and freeze
     // JS timers, so the livenessTimer cannot detect a dead socket until it
@@ -488,18 +535,24 @@ class WsTransport {
     )
       return
 
-    // Read token from URL query param or localStorage
-    const urlToken = new URLSearchParams(window.location.search).get('token')
-    const token = urlToken || localStorage.getItem('jean-http-token') || ''
+    let token: string
+    if (this._fixedToken !== null) {
+      // Fixed token for remote transports — use directly, skip URL manipulation
+      token = this._fixedToken
+    } else {
+      // Read token from URL query param or localStorage
+      const urlToken = new URLSearchParams(window.location.search).get('token')
+      token = urlToken || localStorage.getItem('jean-http-token') || ''
 
-    // Persist token from URL to localStorage for future page loads
-    if (urlToken) {
-      localStorage.setItem('jean-http-token', urlToken)
+      // Persist token from URL to localStorage for future page loads
+      if (urlToken) {
+        localStorage.setItem('jean-http-token', urlToken)
 
-      // Remove token from URL for security (prevent history/bookmark exposure)
-      const url = new URL(window.location.href)
-      url.searchParams.delete('token')
-      window.history.replaceState({}, '', url.toString())
+        // Remove token from URL for security (prevent history/bookmark exposure)
+        const url = new URL(window.location.href)
+        url.searchParams.delete('token')
+        window.history.replaceState({}, '', url.toString())
+      }
     }
 
     this._connecting = true
@@ -526,9 +579,10 @@ class WsTransport {
   }
 
   private async validateAndConnect(token: string): Promise<void> {
+    const origin = this._baseUrl ?? window.location.origin
     const authUrl = token
-      ? `${window.location.origin}/api/auth?token=${encodeURIComponent(token)}`
-      : `${window.location.origin}/api/auth`
+      ? `${origin}/api/auth?token=${encodeURIComponent(token)}`
+      : `${origin}/api/auth`
 
     try {
       const res = await fetch(authUrl)
@@ -557,10 +611,17 @@ class WsTransport {
   }
 
   private connectWs(token: string): void {
-    // Derive WS URL from current page location
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const host = window.location.host
-    const url = `${protocol}//${host}/ws?token=${encodeURIComponent(token)}`
+    // Derive WS URL from base URL (remote transport) or current page location
+    let url: string
+    if (this._baseUrl) {
+      const wsProto = this._baseUrl.startsWith('https') ? 'wss:' : 'ws:'
+      const host = new URL(this._baseUrl).host
+      url = `${wsProto}//${host}/ws?token=${encodeURIComponent(token)}`
+    } else {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+      const host = window.location.host
+      url = `${protocol}//${host}/ws?token=${encodeURIComponent(token)}`
+    }
 
     this.ws = new WebSocket(url)
     this.clearConnectWatchdog()
@@ -1019,6 +1080,75 @@ class WsTransport {
 
 // Singleton instance
 const wsTransport = new WsTransport()
+
+// ---------------------------------------------------------------------------
+// Remote server transport registry (native app mode)
+// ---------------------------------------------------------------------------
+
+// Remote server transports: serverId → WsTransport instance
+const _remoteTransports = new Map<string, WsTransport>()
+
+// Track globally-registered listen() handlers (native mode, no backendHandle)
+// so new remote transports added later get the same handlers retroactively.
+type GlobalHandler = {
+  fn: (event: { payload: unknown }) => void
+  remoteUnsubs: Map<string, () => void>
+}
+const _globalHandlers = new Map<string, Set<GlobalHandler>>()
+
+/**
+ * Register a remote server transport (SSH-tunneled Jean backend).
+ * All existing global listen() handlers are retroactively registered on it.
+ * Call this after connect_remote_server succeeds.
+ */
+export function registerRemoteTransport(
+  serverId: string,
+  localPort: number,
+  token: string
+): void {
+  // Clean up any stale transport for this server
+  unregisterRemoteTransport(serverId)
+
+  const transport = new WsTransport({
+    baseUrl: `http://127.0.0.1:${localPort}`,
+    fixedToken: token,
+  })
+  _remoteTransports.set(serverId, transport)
+
+  // Register all existing global handlers on this new transport
+  for (const [event, entries] of _globalHandlers) {
+    for (const entry of entries) {
+      entry.remoteUnsubs.set(serverId, transport.listen(event, entry.fn))
+    }
+  }
+
+  transport.enableConnect()
+}
+
+/**
+ * Unregister a remote transport (on disconnect or server removal).
+ */
+export function unregisterRemoteTransport(serverId: string): void {
+  const transport = _remoteTransports.get(serverId)
+  if (!transport) return
+
+  // Detach this transport from all global handlers
+  for (const entries of _globalHandlers.values()) {
+    for (const entry of entries) {
+      entry.remoteUnsubs.get(serverId)?.()
+      entry.remoteUnsubs.delete(serverId)
+    }
+  }
+
+  _remoteTransports.delete(serverId)
+}
+
+/**
+ * Get a remote transport by server ID (for status checks).
+ */
+export function getRemoteTransport(serverId: string): WsTransport | null {
+  return _remoteTransports.get(serverId) ?? null
+}
 
 // ---------------------------------------------------------------------------
 // React hooks for connection status (browser mode only)
