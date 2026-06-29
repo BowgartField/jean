@@ -351,6 +351,9 @@ export function NativeCliSessionsModal({
             return
           }
 
+          const commandArgs =
+            resumeLaunch?.args ??
+            (await resolveTerminalCommandArgs(session, launchMode === 'new'))
           if (options?.trackNativeId && backend) {
             try {
               await invoke('track_native_cli_session', {
@@ -368,9 +371,6 @@ export function NativeCliSessionsModal({
             }
           }
 
-          const commandArgs =
-            resumeLaunch?.args ??
-            (await resolveTerminalCommandArgs(session, launchMode === 'new'))
           terminalId = terminalStore.addTerminal(
             worktreeId,
             resumeLaunch?.command ?? session.terminal_command ?? command,

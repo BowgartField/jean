@@ -557,6 +557,63 @@ describe('NewSessionModeModal', () => {
     )
   })
 
+  it('starts native CLI tracking only after terminal context preparation', async () => {
+    mutate.mockImplementation(
+      (
+        _args: unknown,
+        opts?: {
+          onSuccess?: (session: {
+            id: string
+            name: string
+            backend?: string
+          }) => void
+        }
+      ) => {
+        opts?.onSuccess?.({
+          id: 'session-codex-prepare-order',
+          name: 'Codex',
+          backend: 'codex',
+        })
+      }
+    )
+    useUIStore.getState().openNewSessionModeModal({
+      worktreeId: 'worktree-1',
+      worktreePath: '/tmp/worktree-1',
+      origin: 'chat',
+    })
+
+    render(<NewSessionModeModal />)
+    fireEvent.click(screen.getByText('Codex'))
+    fireEvent.click(screen.getByText('New Codex session'))
+
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith('prepare_backend_terminal_context', {
+        sessionId: 'session-codex-prepare-order',
+        worktreeId: 'worktree-1',
+        backend: 'codex',
+      })
+    })
+    expect(invoke).toHaveBeenCalledWith('track_native_cli_session', {
+      worktreePath: '/tmp/worktree-1',
+      sessionId: 'session-codex-prepare-order',
+      backend: 'codex',
+    })
+    const prepareCallOrder =
+      invoke.mock.invocationCallOrder[
+        invoke.mock.calls.findIndex(
+          ([command]) => command === 'prepare_backend_terminal_context'
+        )
+      ]
+    const trackCallOrder =
+      invoke.mock.invocationCallOrder[
+        invoke.mock.calls.findIndex(
+          ([command]) => command === 'track_native_cli_session'
+        )
+      ]
+    expect(prepareCallOrder).toBeLessThan(trackCallOrder)
+    expect(useTerminalStore.getState().terminals['worktree-1']).toHaveLength(1)
+  })
+
   it('opens a plain terminal session with shortcut 1', async () => {
     mutate.mockImplementation(
       (

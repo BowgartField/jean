@@ -8,8 +8,8 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 use tauri::AppHandle;
 
-use super::storage::with_existing_metadata_mut;
-use super::types::Backend;
+use super::storage::{load_metadata, with_existing_metadata_mut};
+use super::types::{Backend, SessionMetadata};
 use crate::http_server::EmitExt;
 
 const MAX_NATIVE_HISTORY_FILES: usize = 10_000;
@@ -148,6 +148,23 @@ fn persist_native_cli_session_id(
     Ok(())
 }
 
+fn validate_native_cli_tracking_metadata(
+    metadata: &SessionMetadata,
+    backend: &str,
+) -> Result<(), String> {
+    if metadata.primary_surface.as_deref() != Some("terminal") {
+        return Err(format!("Session {} is not a terminal session", metadata.id));
+    }
+
+    match (backend, &metadata.backend) {
+        ("codex", Backend::Codex) | ("opencode", Backend::Opencode) => Ok(()),
+        _ => Err(format!(
+            "Backend {backend} does not match session {}",
+            metadata.id
+        )),
+    }
+}
+
 #[tauri::command]
 pub async fn bind_native_cli_session(
     app: AppHandle,
@@ -173,6 +190,9 @@ pub async fn track_native_cli_session(
             "Native CLI tracking is not supported for backend {backend}"
         ));
     }
+    let metadata = load_metadata(&app, &session_id)?
+        .ok_or_else(|| format!("Session {session_id} not found"))?;
+    validate_native_cli_tracking_metadata(&metadata, &backend)?;
 
     let known_session_ids = load_native_session_ids_uncached(&worktree_path, &backend)?
         .into_iter()
@@ -1028,6 +1048,24 @@ mod tests {
             ),
             NewNativeSession::Ambiguous
         );
+    }
+
+    #[test]
+    fn native_session_tracking_validation_requires_matching_terminal_metadata() {
+        let mut metadata = crate::chat::types::SessionMetadata::new(
+            "jean-session".to_string(),
+            "worktree-1".to_string(),
+            "Codex".to_string(),
+            0,
+        );
+        metadata.backend = Backend::Codex;
+        metadata.primary_surface = Some("terminal".to_string());
+
+        assert!(validate_native_cli_tracking_metadata(&metadata, "codex").is_ok());
+        assert!(validate_native_cli_tracking_metadata(&metadata, "opencode").is_err());
+
+        metadata.primary_surface = Some("chat".to_string());
+        assert!(validate_native_cli_tracking_metadata(&metadata, "codex").is_err());
     }
 
     #[test]
