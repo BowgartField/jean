@@ -1,6 +1,11 @@
 # Jean Headless Server
 
-Jean can run as a browser-accessible server without creating a Tauri WebView/window. This is intended first for Linux VPS, systemd, Docker, and Tailscale deployments.
+Jean can run as a browser-accessible server without creating a visible Tauri WebView/window. This is intended first for Linux VPS, systemd, Docker, and Tailscale deployments.
+
+On Linux, the Tauri/GTK runtime still needs a display backend to initialize even
+when Jean is headless. The Docker image starts `Xvfb` automatically. For a raw
+Linux binary on a server without `DISPLAY`, run it under `xvfb-run` or provide an
+X/Wayland display.
 
 ## Start locally
 
@@ -15,8 +20,7 @@ cargo build --bin jean --bin jean-server
 ```
 
 ```bash
-unset DISPLAY WAYLAND_DISPLAY
-./target/debug/jean --headless --host 127.0.0.1 --port 3456
+xvfb-run -a ./target/debug/jean --headless --host 127.0.0.1 --port 3456
 curl http://127.0.0.1:3456/healthz
 ```
 
@@ -32,7 +36,7 @@ For a production single-binary server:
 bun run build
 cd src-tauri
 cargo build --release --bin jean-server
-./target/release/jean-server --host 0.0.0.0 --port 3456 --token "$JEAN_TOKEN"
+xvfb-run -a ./target/release/jean-server --host 0.0.0.0 --port 3456 --token "$JEAN_TOKEN"
 ```
 
 After `cargo build --release --bin jean-server` finishes, `dist/` is no longer
@@ -81,7 +85,7 @@ User=jean
 Environment=JEAN_HOST=127.0.0.1
 Environment=JEAN_PORT=3456
 Environment=JEAN_TOKEN=change-me-long-random-token
-ExecStart=/usr/local/bin/jean-server
+ExecStart=/usr/bin/xvfb-run -a /usr/local/bin/jean-server
 Restart=on-failure
 RestartSec=5
 
@@ -91,6 +95,9 @@ WantedBy=multi-user.target
 
 ## Docker notes
 
+- The server Docker image is published by the Server Release workflow as
+  `ghcr.io/<owner>/<repo>-server:<tag>`.
+- The image starts `Xvfb` internally before launching `jean-server`.
 - Bind to `0.0.0.0` inside the container, but keep token auth enabled.
 - Mount Jean's app-data directory as a volume so projects, preferences, and sessions persist.
 - Put TLS/auth in front of the container for internet exposure.
@@ -105,7 +112,7 @@ docker run --rm \
   -e JEAN_TOKEN=change-me-long-random-token \
   -p 127.0.0.1:3456:3456 \
   -v jean-data:/home/jean/.local/share/com.jean.desktop \
-  jean:latest
+  ghcr.io/OWNER/REPO-server:latest
 ```
 
 ## Reverse proxy
