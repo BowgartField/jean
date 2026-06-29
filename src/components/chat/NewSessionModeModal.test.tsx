@@ -598,19 +598,20 @@ describe('NewSessionModeModal', () => {
       sessionId: 'session-codex-prepare-order',
       backend: 'codex',
     })
-    const prepareCallOrder =
-      invoke.mock.invocationCallOrder[
-        invoke.mock.calls.findIndex(
-          ([command]) => command === 'prepare_backend_terminal_context'
-        )
-      ]
-    const trackCallOrder =
-      invoke.mock.invocationCallOrder[
-        invoke.mock.calls.findIndex(
-          ([command]) => command === 'track_native_cli_session'
-        )
-      ]
-    expect(prepareCallOrder).toBeLessThan(trackCallOrder)
+    const prepareCallIndex = invoke.mock.calls.findIndex(
+      ([command]) => command === 'prepare_backend_terminal_context'
+    )
+    const trackCallIndex = invoke.mock.calls.findIndex(
+      ([command]) => command === 'track_native_cli_session'
+    )
+    expect(prepareCallIndex).toBeGreaterThanOrEqual(0)
+    expect(trackCallIndex).toBeGreaterThanOrEqual(0)
+
+    const prepareCallOrder = invoke.mock.invocationCallOrder[prepareCallIndex]
+    const trackCallOrder = invoke.mock.invocationCallOrder[trackCallIndex]
+    expect(prepareCallOrder).toBeDefined()
+    expect(trackCallOrder).toBeDefined()
+    expect(prepareCallOrder!).toBeLessThan(trackCallOrder!)
     expect(useTerminalStore.getState().terminals['worktree-1']).toHaveLength(1)
   })
 
