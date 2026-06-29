@@ -17,7 +17,11 @@ vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }))
 
-import { prefetchSessions, reconnectNativeCliSession } from './chat'
+import {
+  canReconnectSession,
+  prefetchSessions,
+  reconnectNativeCliSession,
+} from './chat'
 import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
 import { useTerminalStore } from '@/store/terminal-store'
@@ -137,6 +141,42 @@ describe('reconnectNativeCliSession', () => {
     expect(terminal?.commandArgs).toEqual(['--resume', 'abc123'])
   })
 
+  it('preserves native CLI global flags when resuming', async () => {
+    await reconnectNativeCliSession(
+      {
+        ...terminalSession,
+        terminal_command_args: [
+          '--permission-mode',
+          'bypassPermissions',
+          '--session-id',
+          'abc123',
+        ],
+      },
+      'wt-1'
+    )
+
+    const terminalId = useUIStore.getState().sessionTerminalIds['session-1']
+    const terminal = useTerminalStore
+      .getState()
+      .terminals['wt-1']?.find(t => t.id === terminalId)
+    expect(terminal?.commandArgs).toEqual([
+      '--permission-mode',
+      'bypassPermissions',
+      '--resume',
+      'abc123',
+    ])
+  })
+
+  it('refuses to reconnect native sessions without a persisted resume ID', () => {
+    expect(
+      canReconnectSession({
+        ...terminalSession,
+        claude_session_id: undefined,
+        terminal_command_args: ['--permission-mode', 'bypassPermissions'],
+      })
+    ).toBe(false)
+  })
+
   it('opens the modal drawer and toasts by default (manual reconnect)', async () => {
     await reconnectNativeCliSession(terminalSession, 'wt-1')
 
@@ -154,7 +194,9 @@ describe('reconnectNativeCliSession', () => {
     // Terminal still restored...
     expect(useUIStore.getState().sessionTerminalIds['session-1']).toBeDefined()
     // ...but no floating drawer pops and no toast fires.
-    expect(useTerminalStore.getState().modalTerminalOpen['wt-1']).toBeUndefined()
+    expect(
+      useTerminalStore.getState().modalTerminalOpen['wt-1']
+    ).toBeUndefined()
     expect(toastMock.success).not.toHaveBeenCalled()
   })
 

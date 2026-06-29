@@ -4649,6 +4649,8 @@ pub fn run() {
             chat::get_session,
             chat::load_older_session_messages,
             chat::list_native_cli_sessions,
+            chat::bind_native_cli_session,
+            chat::track_native_cli_session,
             chat::create_session,
             chat::rename_session,
             chat::regenerate_session_name,

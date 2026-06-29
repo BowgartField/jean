@@ -668,8 +668,12 @@ pub async fn create_session(
     terminal_command: Option<String>,
     terminal_command_args: Option<Vec<String>>,
     terminal_label: Option<String>,
+    native_session_id: Option<String>,
 ) -> Result<Session, String> {
     log::trace!("Creating new session for worktree: {worktree_id}");
+    if native_session_id.is_some() && primary_surface.as_deref() != Some("terminal") {
+        return Err("Native session IDs are only valid for terminal sessions".to_string());
+    }
 
     let preferences = crate::load_preferences(app.clone()).await.ok();
 
@@ -743,6 +747,9 @@ pub async fn create_session(
         session.terminal_command = terminal_command.clone();
         session.terminal_command_args = terminal_command_args.clone().unwrap_or_default();
         session.terminal_label = terminal_label.clone();
+        if let Some(native_session_id) = native_session_id.as_deref() {
+            persist_salvaged_resume_id(&mut session, &backend_enum, native_session_id);
+        }
         if primary_surface.as_deref() != Some("terminal") {
             session.selected_model = preferences
                 .as_ref()
@@ -9447,5 +9454,23 @@ my-disabled: /usr/bin/disabled (STDIO) - disabled";
         let remaining = vec![s2, s3];
         let selected = find_neighbor_non_archived_session_id(&remaining, 0);
         assert_eq!(selected.as_deref(), Some("s3"));
+    }
+
+    #[test]
+    fn native_terminal_resume_ids_are_saved_on_the_backend_specific_field() {
+        let mut claude = Session::new("Claude".to_string(), 0, Backend::Claude);
+        persist_salvaged_resume_id(&mut claude, &Backend::Claude, "claude-session");
+        assert_eq!(claude.claude_session_id.as_deref(), Some("claude-session"));
+
+        let mut codex = Session::new("Codex".to_string(), 0, Backend::Codex);
+        persist_salvaged_resume_id(&mut codex, &Backend::Codex, "codex-thread");
+        assert_eq!(codex.codex_thread_id.as_deref(), Some("codex-thread"));
+
+        let mut opencode = Session::new("OpenCode".to_string(), 0, Backend::Opencode);
+        persist_salvaged_resume_id(&mut opencode, &Backend::Opencode, "opencode-session");
+        assert_eq!(
+            opencode.opencode_session_id.as_deref(),
+            Some("opencode-session")
+        );
     }
 }

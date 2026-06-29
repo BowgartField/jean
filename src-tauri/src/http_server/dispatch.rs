@@ -979,6 +979,27 @@ pub async fn dispatch_command(
             .await?;
             to_value(result)
         }
+        "bind_native_cli_session" => {
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let backend: String = from_field(&args, "backend")?;
+            let native_session_id: String = field(&args, "nativeSessionId", "native_session_id")?;
+            crate::chat::bind_native_cli_session(
+                app.clone(),
+                session_id,
+                backend,
+                native_session_id,
+            )
+            .await?;
+            Ok(Value::Null)
+        }
+        "track_native_cli_session" => {
+            let worktree_path: String = field(&args, "worktreePath", "worktree_path")?;
+            let session_id: String = field(&args, "sessionId", "session_id")?;
+            let backend: String = from_field(&args, "backend")?;
+            crate::chat::track_native_cli_session(app.clone(), worktree_path, session_id, backend)
+                .await?;
+            Ok(Value::Null)
+        }
         "get_session" => {
             let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
             let worktree_path: String = field(&args, "worktreePath", "worktree_path")?;
@@ -1020,6 +1041,8 @@ pub async fn dispatch_command(
                 field_opt(&args, "terminalCommandArgs", "terminal_command_args")?;
             let terminal_label: Option<String> =
                 field_opt(&args, "terminalLabel", "terminal_label")?;
+            let native_session_id: Option<String> =
+                field_opt(&args, "nativeSessionId", "native_session_id")?;
             let result = crate::chat::create_session(
                 app.clone(),
                 worktree_id,
@@ -1030,6 +1053,7 @@ pub async fn dispatch_command(
                 terminal_command,
                 terminal_command_args,
                 terminal_label,
+                native_session_id,
             )
             .await?;
             to_value(result)

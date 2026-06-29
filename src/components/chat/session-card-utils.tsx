@@ -12,6 +12,7 @@ import {
   type PermissionDenial,
   type LabelData,
 } from '@/types/chat'
+import { getNativeTerminalResumeLaunch } from '@/lib/native-cli-session'
 import { findPlanFilePath, resolvePlanContent } from './tool-call-utils'
 
 export type SessionStatus =
@@ -421,24 +422,8 @@ export function getResumeArgs(
   session: Session
 ): { command: string; args: string[] } | null {
   const cmd = session.terminal_command || ''
-  if (session.backend === 'claude' && session.claude_session_id) {
-    return {
-      command: cmd || 'claude',
-      args: ['--resume', session.claude_session_id],
-    }
-  }
-  if (session.backend === 'codex' && session.codex_thread_id) {
-    return {
-      command: cmd || 'codex',
-      args: ['resume', session.codex_thread_id],
-    }
-  }
-  if (session.backend === 'opencode' && session.opencode_session_id) {
-    return {
-      command: cmd || 'opencode',
-      args: ['-s', session.opencode_session_id],
-    }
-  }
+  const nativeLaunch = getNativeTerminalResumeLaunch(session)
+  if (nativeLaunch) return nativeLaunch
   if (session.backend === 'cursor' && session.cursor_chat_id) {
     return {
       command: cmd || 'cursor-agent',

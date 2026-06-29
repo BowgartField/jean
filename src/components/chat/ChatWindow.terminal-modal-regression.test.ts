@@ -38,6 +38,7 @@ describe('terminal primary surface modal regression', () => {
     expect(source).toMatch(/openModal:\s*false/)
     expect(source).toMatch(/showToast:\s*false/)
     expect(source).toMatch(/markOpened:\s*false/)
+    expect(source).toContain("session.primary_surface === 'terminal'")
   })
 
   it('guards terminal auto-restore against session switches and duplicate spawns', () => {
@@ -53,5 +54,13 @@ describe('terminal primary surface modal regression', () => {
     expect(source).toMatch(
       /autoReconnectingRef\.current\.delete\s*\(\s*sessionId\s*\)/
     )
+  })
+
+  it('shows a safe recovery state instead of an empty chat for legacy sessions', () => {
+    const source = readSource('src/components/chat/ChatWindow.tsx')
+
+    expect(source).toContain('isTerminalAwaitingReconnect')
+    expect(source).toContain('Terminal session needs to be reconnected')
+    expect(source).toContain('Choose native session')
   })
 })

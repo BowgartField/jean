@@ -96,7 +96,15 @@ Additional systems (no dedicated docs yet):
   terminals. Full-screen pure CLI sessions persist their intent on `Session`
   (`primary_surface`, `terminal_command`, `terminal_label`) and lazily recreate
   a PTY only when the user reopens that session, so hidden historical CLI
-  sessions do not start background processes. The native CLI picker also merges
+  sessions do not start background processes. Native Claude terminal sessions
+  receive a generated `--session-id` when created. Codex and OpenCode terminal
+  sessions snapshot their backend history before launch and bind the single new
+  native session/thread ID back to Jean metadata; ambiguous concurrent matches
+  are never guessed. Cold restoration uses `claude --resume <id>`,
+  `codex resume <id>`, or `opencode --session <id>` while preserving global
+  permission/yolo flags. Legacy native terminal sessions without either a typed
+  ID or persisted resume arguments show the native-history picker instead of
+  silently launching an unrelated conversation. The native CLI picker also merges
   backend-owned history from local stores where stable (`~/.codex/sessions/**`
   and `~/.claude/projects/<escaped-cwd>/**`) and imports a chosen history row as
   a Jean terminal session running the backend's native resume command.

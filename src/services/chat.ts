@@ -37,6 +37,7 @@ import type { AppPreferences } from '@/types/preferences'
 import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
 import { useTerminalStore } from '@/store/terminal-store'
+import { isNativeTerminalBackend } from '@/lib/native-cli-session'
 import { getResumeArgs } from '@/components/chat/session-card-utils'
 import type { ReviewResponse, Worktree } from '@/types/projects'
 
@@ -98,10 +99,9 @@ export function removeSessionFromAllSessionsCache(
  * terminal command). Used to gate the "Reconnect" menu item.
  */
 export function canReconnectSession(session: Session): boolean {
-  return (
-    session.primary_surface === 'terminal' &&
-    (!!getResumeArgs(session) || !!session.terminal_command)
-  )
+  if (session.primary_surface !== 'terminal') return false
+  if (getResumeArgs(session)) return true
+  return !isNativeTerminalBackend(session.backend) && !!session.terminal_command
 }
 
 /**
@@ -131,13 +131,21 @@ export async function reconnectNativeCliSession(
   worktreeId: string,
   options?: { openModal?: boolean; showToast?: boolean; markOpened?: boolean }
 ): Promise<void> {
-  const { openModal = true, showToast = true, markOpened = true } = options ?? {}
+  const {
+    openModal = true,
+    showToast = true,
+    markOpened = true,
+  } = options ?? {}
   const resume = getResumeArgs(session)
-  const launch = resume ?? {
-    command: session.terminal_command ?? '',
-    args: session.terminal_command_args ?? [],
-  }
-  if (!launch.command) {
+  const launch =
+    resume ??
+    (!isNativeTerminalBackend(session.backend)
+      ? {
+          command: session.terminal_command ?? '',
+          args: session.terminal_command_args ?? [],
+        }
+      : null)
+  if (!launch?.command) {
     if (showToast) toast.error('No command available to reconnect this session')
     return
   }
@@ -732,6 +740,7 @@ export function useCreateSession() {
       terminalCommand,
       terminalCommandArgs,
       terminalLabel,
+      nativeSessionId,
     }: {
       worktreeId: string
       worktreePath: string
@@ -741,6 +750,7 @@ export function useCreateSession() {
       terminalCommand?: string | null
       terminalCommandArgs?: string[]
       terminalLabel?: string
+      nativeSessionId?: string
     }): Promise<Session> => {
       if (!isTauri()) {
         throw new Error('Not in Tauri context')
@@ -756,6 +766,7 @@ export function useCreateSession() {
         terminalCommand,
         terminalCommandArgs,
         terminalLabel,
+        nativeSessionId,
       })
       logger.info('Session created', { sessionId: session.id })
       return session
