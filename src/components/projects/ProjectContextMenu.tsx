@@ -6,15 +6,21 @@ import {
   FolderOpen,
   Home,
   Plus,
+  Server,
   Settings,
   Terminal,
   Trash2,
 } from 'lucide-react'
+import { useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
 import { isBaseSession, type Project } from '@/types/projects'
@@ -29,12 +35,16 @@ import {
   useRemoveProject,
   useWorktrees,
 } from '@/services/projects'
+import { projectsQueryKeys } from '@/services/projects'
 import { usePreferences } from '@/services/preferences'
 import { useProjectsStore } from '@/store/projects-store'
 import { useUIStore } from '@/store/ui-store'
 import { getEditorLabel, getTerminalLabel } from '@/types/preferences'
 import { getFileManagerName } from '@/lib/platform'
 import { isNativeApp } from '@/lib/environment'
+import { useRemoteServers } from '@/services/remote-servers'
+import { invoke } from '@/lib/transport'
+import type { RemoteClone } from '@/types/projects'
 
 interface ProjectContextMenuProps {
   project: Project
@@ -59,6 +69,14 @@ export function ProjectContextMenu({
   const setNewWorktreeModalOpen = useUIStore(
     state => state.setNewWorktreeModalOpen
   )
+  const queryClient = useQueryClient()
+  const { data: remoteServers = [] } = useRemoteServers()
+
+  // Only connected + provisioned servers can receive clones
+  const cloneableServers = remoteServers.filter(
+    s => s.status === 'connected' && s.http_token
+  )
+
   // Check if base session already exists
   const existingBaseSession = worktrees.find(isBaseSession)
   const isNested = project.parent_id !== undefined
@@ -108,6 +126,21 @@ export function ProjectContextMenu({
 
   const handleOpenSettings = () => {
     openProjectSettings(project.id)
+  }
+
+  const handleCloneToServer = (serverId: string, serverName: string) => {
+    const toastId = toast.loading(`Cloning to ${serverName}...`)
+    invoke<RemoteClone>('clone_project_to_remote', {
+      projectId: project.id,
+      serverId,
+    })
+      .then(() => {
+        queryClient.invalidateQueries({ queryKey: projectsQueryKeys.list() })
+        toast.success(`Cloned to ${serverName}`, { id: toastId })
+      })
+      .catch((error: unknown) => {
+        toast.error(`Clone failed: ${error}`, { id: toastId })
+      })
   }
 
   return (
@@ -168,6 +201,29 @@ export function ProjectContextMenu({
           <ExternalLink className="mr-2 h-4 w-4" />
           Open on GitHub
         </ContextMenuItem>
+
+        {cloneableServers.length > 0 && (
+          <>
+            <ContextMenuSeparator />
+            <ContextMenuSub>
+              <ContextMenuSubTrigger>
+                <Server className="mr-2 h-4 w-4" />
+                Clone to remote
+              </ContextMenuSubTrigger>
+              <ContextMenuSubContent className="w-48">
+                {cloneableServers.map(server => (
+                  <ContextMenuItem
+                    key={server.id}
+                    onClick={() => handleCloneToServer(server.id, server.name)}
+                  >
+                    <Server className="mr-2 h-3.5 w-3.5 text-muted-foreground" />
+                    {server.name}
+                  </ContextMenuItem>
+                ))}
+              </ContextMenuSubContent>
+            </ContextMenuSub>
+          </>
+        )}
 
         <ContextMenuSeparator />
 

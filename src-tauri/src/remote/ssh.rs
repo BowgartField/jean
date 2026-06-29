@@ -144,6 +144,11 @@ fn common_ssh_args_for_path(
     }
 
     if kind == ConnectionKind::Command {
+        // Forward the local SSH agent so git can authenticate on the remote
+        // using the user's existing keys (e.g. GitHub) without storing any
+        // credentials on the server.
+        args.extend(["-o".to_string(), "ForwardAgent=yes".to_string()]);
+
         if let Some(control_path) = control_path {
             args.extend([
                 "-o".to_string(),

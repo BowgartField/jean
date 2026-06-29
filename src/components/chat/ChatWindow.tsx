@@ -846,6 +846,8 @@ export function ChatWindow({
   // PERFORMANCE: Track hasValue via callback from ChatInput instead of store subscription
   // ChatInput notifies on mount, session change, and empty/non-empty boundary changes
   const [hasInputValue, setHasInputValue] = useState(false)
+  // Remote server to run this session on (null = local). Phase 3 feature.
+  const [remoteServerId, setRemoteServerId] = useState<string | null>(null)
   // Per-session execution mode (defaults to preference or 'plan' for new sessions)
   // Uses deferredSessionId for display consistency with other content
   const defaultExecutionMode = preferences?.default_execution_mode ?? 'plan'
@@ -3430,6 +3432,8 @@ export function ChatWindow({
                                   handleOpenProjectSettings
                                 }
                                 onRunCommand={handleRunCommand}
+                                remoteServerId={remoteServerId}
+                                onRemoteServerChange={setRemoteServerId}
                               />
                             </div>
                           </form>

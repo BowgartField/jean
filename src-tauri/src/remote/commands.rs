@@ -305,6 +305,16 @@ pub async fn get_remote_server_status(
     Ok(tunnel::status(&server))
 }
 
+#[tauri::command]
+pub async fn clone_project_to_remote(
+    app: AppHandle,
+    project_id: String,
+    server_id: String,
+    remote_path: Option<String>,
+) -> Result<crate::projects::types::RemoteClone, String> {
+    super::clone::clone_project_to_remote(app, project_id, server_id, remote_path).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

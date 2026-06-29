@@ -61,6 +61,7 @@ import {
   getBackendPlainLabel,
 } from '@/components/ui/backend-label'
 import type { RevertCommitResponse } from '@/types/projects'
+import { SessionRemoteBackendPicker } from '@/components/chat/toolbar/SessionRemoteBackendPicker'
 
 // eslint-disable-next-line react-refresh/only-export-components
 export {
@@ -133,6 +134,8 @@ export const ChatToolbar = memo(function ChatToolbar({
   onToggleMcpServer,
   onOpenProjectSettings,
   onRunCommand,
+  remoteServerId,
+  onRemoteServerChange,
 }: ChatToolbarProps) {
   const {
     statuses: mcpStatuses,
@@ -507,6 +510,16 @@ export const ChatToolbar = memo(function ChatToolbar({
             className="flex @xl:hidden shrink-0"
             align="end"
           />
+
+          {onRemoteServerChange && (
+            <>
+              <SessionRemoteBackendPicker
+                value={remoteServerId ?? null}
+                onChange={onRemoteServerChange}
+              />
+              <div className="hidden @xl:block h-4 w-px shrink-0 bg-border/50" />
+            </>
+          )}
 
           <DesktopToolbarControls
             hasPendingQuestions={hasPendingQuestions}

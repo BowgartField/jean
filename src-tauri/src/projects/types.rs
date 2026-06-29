@@ -21,6 +21,14 @@ pub enum WorktreeOrigin {
     AutoFix,
 }
 
+/// A clone of a project on a remote server.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RemoteClone {
+    pub server_id: String,
+    /// Absolute path on the remote server (e.g. "/root/jean/my-project")
+    pub remote_path: String,
+}
+
 /// Per-project automated issue fixing settings.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ProjectAutoFixSettings {
@@ -157,6 +165,9 @@ pub struct Project {
     /// Remote server ID that owns this project (None = local)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub server_id: Option<String>,
+    /// Remote servers this project has been cloned onto
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub remote_clones: Vec<RemoteClone>,
     /// Linear personal API key for fetching issues (per-project)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub linear_api_key: Option<String>,

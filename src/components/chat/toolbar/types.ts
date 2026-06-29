@@ -106,4 +106,8 @@ export interface ChatToolbarProps {
   onToggleMcpServer: (serverName: string) => void
   onOpenProjectSettings?: () => void
   onRunCommand?: (command: string) => void
+
+  /** Remote server to run this session on (null = local). Phase 3 feature. */
+  remoteServerId?: string | null
+  onRemoteServerChange?: (serverId: string | null) => void
 }

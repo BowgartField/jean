@@ -70,6 +70,7 @@ import {
 } from './lib/initial-data-cache'
 import { useExternalLinkInterceptor } from './hooks/useExternalLinkInterceptor'
 import { WebAccessAuthScreen } from './components/web/WebAccessAuthScreen'
+import { useAutoConnectRemoteServers } from './hooks/useAutoConnectRemoteServers'
 
 interface AutoFixStoppedEvent {
   projectId: string
@@ -664,6 +665,9 @@ function App() {
 
   // Keep Codex usage UI fresh when the app-server pushes account rate-limit updates.
   useCodexUsageUpdateListener()
+
+  // Auto-connect to all provisioned remote servers on startup (silent background).
+  useAutoConnectRemoteServers()
 
   // Browser mode: only open WebSocket after preload + listener registration.
   // This lets us replay buffered server events before live events start arriving.

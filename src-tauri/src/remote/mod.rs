@@ -1,3 +1,4 @@
+mod clone;
 mod commands;
 mod keychain;
 mod provision;

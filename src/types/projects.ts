@@ -10,6 +10,11 @@ export type WorktreeSortMode = 'created' | 'last_activity' | 'manual'
 
 export type WorktreeOrigin = 'manual' | 'auto_fix'
 
+export interface RemoteClone {
+  server_id: string
+  remote_path: string
+}
+
 export interface ProjectAutoFixSettings {
   enabled: boolean
   interval_minutes: number
@@ -77,6 +82,8 @@ export interface Project {
   worktrees_dir?: string | null
   /** Remote server ID that owns this project (null = local) */
   server_id?: string | null
+  /** Remote servers this project has been cloned onto */
+  remote_clones?: RemoteClone[]
   /** Linear personal API key for fetching issues (per-project) */
   linear_api_key?: string | null
   /** Linear team ID to filter issues (undefined/null = show all teams) */

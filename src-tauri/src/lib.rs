@@ -4573,6 +4573,7 @@ pub fn run() {
             remote::connect_remote_server,
             remote::disconnect_remote_server,
             remote::get_remote_server_status,
+            remote::clone_project_to_remote,
             set_window_vibrancy,
             save_cli_profile,
             delete_cli_profile,

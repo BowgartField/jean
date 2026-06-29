@@ -159,6 +159,13 @@ pub async fn dispatch_command(
             let result = crate::remote::get_remote_server_status(app.clone(), server_id).await?;
             to_value(result)
         }
+        "clone_project_to_remote" => {
+            let project_id: String = from_field(&args, "projectId")?;
+            let server_id: String = from_field(&args, "serverId")?;
+            let remote_path: Option<String> = from_field_opt(&args, "remotePath")?;
+            let result = crate::remote::clone_project_to_remote(app.clone(), project_id, server_id, remote_path).await?;
+            to_value(result)
+        }
         "set_window_vibrancy" => {
             let enabled: bool = from_field(&args, "enabled")?;
             crate::set_window_vibrancy(app.clone(), enabled).await?;
