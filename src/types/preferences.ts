@@ -1241,6 +1241,7 @@ export const fileEditModeOptions: { value: FileEditMode; label: string }[] = [
 
 export type ClaudeModel =
   | 'claude-fable-5'
+  | 'claude-sonnet-5'
   | 'claude-opus-4-8'
   | 'claude-opus-4-8[1m]'
   | 'claude-opus-4-7'
@@ -1260,6 +1261,7 @@ export type ClaudeModel =
 
 export const modelOptions: { value: ClaudeModel; label: string }[] = [
   { value: 'claude-fable-5', label: 'Claude Fable 5' },
+  { value: 'claude-sonnet-5', label: 'Claude Sonnet 5' },
   { value: 'claude-opus-4-8[1m]', label: 'Claude Opus 4.8 (1M)' },
   { value: 'claude-opus-4-8', label: 'Claude Opus 4.8' },
   { value: 'claude-opus-4-7[1m]', label: 'Claude Opus 4.7 (1M)' },
@@ -1274,7 +1276,7 @@ export const modelOptions: { value: ClaudeModel; label: string }[] = [
 
 const legacyClaudeDefaultModelMap = {
   'claude-opus-4-6-fast': 'claude-opus-4-6[1m]-fast',
-  sonnet: 'claude-sonnet-4-6[1m]',
+  sonnet: 'claude-sonnet-5',
 } as const satisfies Partial<Record<ClaudeModel, ClaudeModel>>
 
 const knownClaudeModels = new Set<string>([

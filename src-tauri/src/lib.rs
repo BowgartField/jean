@@ -465,7 +465,7 @@ fn migrate_default_claude_model(model: &str) -> Option<&'static str> {
         "claude-opus-4-7[1m]" => Some("claude-opus-4-8[1m]"),
         "claude-opus-4-7[1m]-fast" => Some("claude-opus-4-8[1m]-fast"),
         "claude-opus-4-6-fast" => Some("claude-opus-4-6[1m]-fast"),
-        "sonnet" => Some("claude-sonnet-4-6[1m]"),
+        "sonnet" => Some("claude-sonnet-5"),
         _ => None,
     }
 }
@@ -871,6 +871,14 @@ mod tests {
         assert_eq!(super::migrate_default_claude_model("claude-opus-4-8"), None);
         assert_eq!(super::migrate_default_claude_model("claude-opus-4-7"), None);
         assert_eq!(super::migrate_default_claude_model("claude-opus-4-6"), None);
+    }
+
+    #[test]
+    fn migrate_default_claude_model_updates_sonnet_alias() {
+        assert_eq!(
+            super::migrate_default_claude_model("sonnet"),
+            Some("claude-sonnet-5")
+        );
     }
 
     #[test]

@@ -98,6 +98,7 @@ describe('model option helpers', () => {
   it('offers Claude 1M variants alongside standard context models', () => {
     expect(modelOptions.map(option => option.value)).toEqual([
       'claude-fable-5',
+      'claude-sonnet-5',
       'claude-opus-4-8[1m]',
       'claude-opus-4-8',
       'claude-opus-4-7[1m]',
@@ -109,8 +110,9 @@ describe('model option helpers', () => {
       'claude-sonnet-4-6',
       'haiku',
     ])
-    expect(normalizeClaudeModel('sonnet')).toBe('claude-sonnet-4-6[1m]')
+    expect(normalizeClaudeModel('sonnet')).toBe('claude-sonnet-5')
     expect(normalizeClaudeModel('claude-fable-5')).toBe('claude-fable-5')
+    expect(normalizeClaudeModel('claude-sonnet-5')).toBe('claude-sonnet-5')
     expect(normalizeClaudeModel('claude-opus-4-8')).toBe('claude-opus-4-8')
     expect(normalizeClaudeModel('claude-opus-4-7')).toBe('claude-opus-4-7')
     expect(normalizeClaudeModel('claude-opus-4-6')).toBe('claude-opus-4-6')
@@ -1202,4 +1204,3 @@ describe('preferences service', () => {
     })
   })
 })
-
