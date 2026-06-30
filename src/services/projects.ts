@@ -26,6 +26,7 @@ import type {
   WorktreeSetupCompleteEvent,
 } from '@/types/projects'
 import { useProjectsStore } from '@/store/projects-store'
+import { useRemoteServers } from '@/services/remote-servers'
 import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
 import { getFileManagerName } from '@/lib/platform'
@@ -82,27 +83,63 @@ export function useProjects() {
 }
 
 /**
- * Hook to list worktrees for a specific project
+ * Hook to list worktrees for a specific project.
+ *
+ * Always returns local worktrees. If the project has remote_clones on provisioned
+ * servers, also fetches remote worktrees and appends them (decorated with _server_id).
  */
 export function useWorktrees(projectId: string | null) {
-  const backendHandle = useProjectBackendHandle(projectId)
+  const legacyBackendHandle = useProjectBackendHandle(projectId)
+  const { data: allProjects } = useProjects()
+  const { data: remoteServers = [] } = useRemoteServers()
+
+  // Collect all remote clones with provisioned servers for this project
+  const remoteClones = (() => {
+    if (!projectId || !allProjects) return []
+    const localProject = allProjects.find(p => p.id === projectId)
+    if (!localProject?.remote_clones?.length) return []
+    return localProject.remote_clones.filter(c =>
+      remoteServers.some(s => s.id === c.server_id && s.http_token)
+    )
+  })()
+
   return useQuery({
-    queryKey: projectsQueryKeys.worktrees(projectId ?? ''),
+    queryKey: [...projectsQueryKeys.worktrees(projectId ?? ''), remoteClones.map(c => c.server_id)],
     queryFn: async (): Promise<Worktree[]> => {
-      if (!isTauri() || !projectId) {
-        return []
-      }
+      if (!isTauri() || !projectId) return []
 
       try {
+        const backendHandle = legacyBackendHandle
         logger.debug('Loading worktrees for project', { projectId })
-        const worktrees = await invoke<Worktree[]>('list_worktrees', {
+        const localWorktrees = await invoke<Worktree[]>('list_worktrees', {
           projectId,
           ...(backendHandle ? { _backendHandle: backendHandle } : {}),
         })
-        logger.info('Worktrees loaded successfully', {
-          count: worktrees.length,
-        })
-        return worktrees
+        logger.info('Worktrees loaded successfully', { count: localWorktrees.length })
+
+        // Fetch remote worktrees for each clone and append with _server_id
+        const remoteWorktreeArrays = await Promise.allSettled(
+          remoteClones.map(async clone => {
+            const remoteProjects = await invoke<{ id: string; name: string }[]>(
+              'list_projects',
+              { _backendHandle: clone.server_id }
+            )
+            const localProject = allProjects?.find(p => p.id === projectId)
+            const remoteProject = remoteProjects.find(p => p.name === localProject?.name)
+            if (!remoteProject) return []
+            const worktrees = await invoke<Worktree[]>('list_worktrees', {
+              projectId: remoteProject.id,
+              _backendHandle: clone.server_id,
+            })
+            return worktrees.map(w => ({ ...w, _server_id: clone.server_id }))
+          })
+        )
+
+        const remoteWorktrees = remoteWorktreeArrays.flatMap(r =>
+          r.status === 'fulfilled' ? r.value : []
+        )
+
+        return [...localWorktrees, ...remoteWorktrees]
       } catch (error) {
         logger.error('Failed to load worktrees', { error, projectId })
         return fallbackUnlessWsDisconnected(error, [])
@@ -129,6 +166,10 @@ export function useWorktree(worktreeId: string | null) {
   // Skip backend fetch while worktree is pending — it's not in projects.json yet
   const cachedData = queryClient.getQueryData<Worktree>(queryKey)
   const isPending = cachedData?.status === 'pending'
+  const serverId = worktreeId
+    ? (cachedData?._server_id ??
+      useChatStore.getState().worktreeRemoteServerIds[worktreeId])
+    : undefined
 
   return useQuery({
     queryKey,
@@ -141,9 +182,10 @@ export function useWorktree(worktreeId: string | null) {
         logger.debug('Loading worktree', { worktreeId })
         const worktree = await invoke<Worktree>('get_worktree', {
           worktreeId,
+          ...(serverId ? { _backendHandle: serverId } : {}),
         })
         logger.info('Worktree loaded successfully', { id: worktree.id })
-        return worktree
+        return serverId ? { ...worktree, _server_id: serverId } : worktree
       } catch (error) {
         logger.error('Failed to load worktree', { error, worktreeId })
         return null
@@ -467,6 +509,7 @@ export function useCreateWorktree() {
       customName,
       origin,
       background: _background,
+      serverId,
     }: {
       projectId: string
       baseBranch?: string
@@ -532,22 +575,43 @@ export function useCreateWorktree() {
       origin?: Worktree['origin']
       /** When true, skip auto-navigation (CMD+Click from new session modal) */
       background?: boolean
+      /** Remote server to create the worktree on (null/undefined = local) */
+      serverId?: string | null
     }): Promise<Worktree> => {
       if (!isTauri()) {
         throw new Error('Not in Tauri context')
       }
 
-      logger.debug('Creating worktree (background)', {
-        projectId,
+      // Resolve remote project ID when creating on a remote server
+      let resolvedProjectId = projectId
+      const backendHandle = serverId ?? undefined
+      if (serverId) {
+        const { data: allProjects } = queryClient.getQueryState<{ id: string; name: string }[]>(
+          ['projects']
+        ) ?? {}
+        const remoteProjects = await invoke<{ id: string; name: string }[]>(
+          'list_projects',
+          { _backendHandle: serverId }
+        )
+        // Find local project name to match on remote
+        const localProjectName = allProjects?.find(p => p.id === projectId)?.name
+        const remoteProject = remoteProjects.find(p => p.name === localProjectName)
+        if (!remoteProject) throw new Error(`Project not found on remote server`)
+        resolvedProjectId = remoteProject.id
+      }
+
+      logger.debug('Creating worktree', {
+        projectId: resolvedProjectId,
         baseBranch,
         issueNumber: issueContext?.number,
         prNumber: prContext?.number,
         securityAlertNumber: securityContext?.number,
         advisoryGhsaId: advisoryContext?.ghsaId,
         customName,
+        serverId,
       })
       const worktree = await invoke<Worktree>('create_worktree', {
-        projectId,
+        projectId: resolvedProjectId,
         baseBranch,
         issueContext,
         prContext,
@@ -556,22 +620,47 @@ export function useCreateWorktree() {
         linearContext,
         customName,
         origin,
+        ...(backendHandle ? { _backendHandle: backendHandle } : {}),
       })
-      return worktree
+      return serverId ? { ...worktree, _server_id: serverId } : worktree
     },
     onSuccess: (worktree, { projectId, background: isBackground }) => {
       const shouldAutoOpen = !isBackground
+      // Pin server routing immediately so navigation is correct
+      if (worktree._server_id) {
+        useChatStore.getState().setWorktreeRemoteServer(worktree.id, worktree._server_id)
+      }
       // Check if this worktree was already resolved by an event handler
       // (e.g. unarchive_worktree emits worktree:unarchived which sets status: 'ready')
       const existing = queryClient.getQueryData<Worktree[]>(
         projectsQueryKeys.worktrees(projectId)
       )
       const existingEntry = existing?.find(w => w.id === worktree.id)
-      if (existingEntry?.status === 'ready') {
-        logger.info('Worktree already ready (unarchived), skipping pending', {
+      const readyEntry =
+        existingEntry?.status === 'ready'
+          ? existingEntry
+          : queryClient.getQueryData<Worktree>([
+              ...projectsQueryKeys.all,
+              'worktree',
+              worktree.id,
+            ])
+      if (readyEntry?.status === 'ready') {
+        logger.info('Worktree already ready, skipping pending transition', {
           id: worktree.id,
           name: worktree.name,
         })
+        queryClient.setQueryData<Worktree[]>(
+          projectsQueryKeys.worktrees(projectId),
+          old => {
+            if (!old) return [readyEntry]
+            if (old.some(candidate => candidate.id === readyEntry.id)) {
+              return old.map(candidate =>
+                candidate.id === readyEntry.id ? readyEntry : candidate
+              )
+            }
+            return [...old, readyEntry]
+          }
+        )
         const { expandProject, selectWorktree } = useProjectsStore.getState()
         expandProject(projectId)
         if (!isBackground) selectWorktree(worktree.id)
@@ -798,20 +887,35 @@ export function useCreateWorktreeKeybinding() {
 function handleWorktreeReady(
   worktree: Worktree,
   queryClient: ReturnType<typeof useQueryClient>,
-  autoOpenInJean = true
+  autoOpenInJean = true,
+  serverId?: string
 ) {
-  // Update cache
-  const readyWorktree = { ...worktree, status: 'ready' as const }
-  queryClient.setQueryData<Worktree[]>(
-    projectsQueryKeys.worktrees(worktree.project_id),
+  const readyWorktree = {
+    ...worktree,
+    status: 'ready' as const,
+    ...(serverId ? { _server_id: serverId } : {}),
+  }
+
+  // Remote project IDs differ from their local project IDs. Update whichever
+  // combined worktree cache already contains this UUID instead of assuming the
+  // event's project_id is a local query key.
+  let updatedExistingCache = false
+  queryClient.setQueriesData<Worktree[]>(
+    { queryKey: [...projectsQueryKeys.all, 'worktrees'] },
     old => {
-      if (!old) return [readyWorktree]
-      const exists = old.some(w => w.id === worktree.id)
-      if (exists)
-        return old.map(w => (w.id === worktree.id ? readyWorktree : w))
-      return [...old, readyWorktree]
+      if (!old?.some(candidate => candidate.id === worktree.id)) return old
+      updatedExistingCache = true
+      return old.map(candidate =>
+        candidate.id === worktree.id ? readyWorktree : candidate
+      )
     }
   )
+  if (!updatedExistingCache) {
+    queryClient.setQueryData<Worktree[]>(
+      projectsQueryKeys.worktrees(worktree.project_id),
+      old => [...(old ?? []), readyWorktree]
+    )
+  }
   queryClient.setQueryData<Worktree>(
     [...projectsQueryKeys.all, 'worktree', worktree.id],
     readyWorktree
@@ -835,6 +939,9 @@ function handleWorktreeReady(
 
   // Register worktree path
   const { setActiveWorktree, registerWorktreePath } = useChatStore.getState()
+  if (serverId) {
+    useChatStore.getState().setWorktreeRemoteServer(worktree.id, serverId)
+  }
   registerWorktreePath(worktree.id, worktree.path)
 
   // Fire-and-forget: detect and link PR if not already linked
@@ -1001,7 +1108,12 @@ export function useWorktreeEvents() {
         // Update cache FIRST, then clear timeout — ensures the safety timeout
         // survives if the cache update is a no-op (e.g. cache was invalidated
         // between worktree:creating and worktree:created events).
-        handleWorktreeReady(worktree, queryClient, autoOpenInJean)
+        handleWorktreeReady(
+          worktree,
+          queryClient,
+          autoOpenInJean,
+          event.backendHandle
+        )
         clearPendingTimeout(worktree.id)
 
         toast.dismiss(`worktree-creating-${worktree.id}`)
@@ -1434,16 +1546,21 @@ export function useDeleteWorktree() {
     mutationFn: async ({
       worktreeId,
       projectId,
+      serverId,
     }: {
       worktreeId: string
       projectId: string
+      serverId?: string
     }): Promise<{ worktreeId: string; projectId: string }> => {
       if (!isTauri()) {
         throw new Error('Not in Tauri context')
       }
 
       logger.debug('Deleting worktree (background)', { worktreeId })
-      await invoke('delete_worktree', { worktreeId })
+      await invoke('delete_worktree', {
+        worktreeId,
+        ...(serverId ? { _backendHandle: serverId } : {}),
+      })
       logger.info('Worktree deletion started (background)')
       return { worktreeId, projectId }
     },
@@ -1702,24 +1819,54 @@ export function usePermanentlyDeleteWorktree() {
  */
 export function useCreateBaseSession() {
   const queryClient = useQueryClient()
+  const { data: allProjects } = useProjects()
 
   return useMutation({
-    mutationFn: async (projectId: string): Promise<Worktree> => {
+    mutationFn: async ({
+      projectId,
+      serverId,
+    }: {
+      projectId: string
+      serverId?: string
+    }): Promise<Worktree> => {
       if (!isTauri()) {
         throw new Error('Not in Tauri context')
       }
 
+      // Remote server chosen: resolve remote project ID and route to remote server
+      if (serverId) {
+        const localProject = allProjects?.find(p => p.id === projectId)
+        const remoteProjects = await invoke<{ id: string; name: string }[]>(
+          'list_projects',
+          { _backendHandle: serverId }
+        )
+        const remoteProject = remoteProjects.find(p => p.name === localProject?.name)
+        if (!remoteProject) {
+          throw new Error(`Project "${localProject?.name}" not found on remote server`)
+        }
+        logger.debug('Creating base session on remote', { remoteProjectId: remoteProject.id })
+        const session = await invoke<Worktree>('create_base_session', {
+          projectId: remoteProject.id,
+          _backendHandle: serverId,
+        })
+        logger.info('Remote base session created', { session })
+        return { ...session, _server_id: serverId }
+      }
+
       logger.debug('Creating base session', { projectId })
-      const session = await invoke<Worktree>('create_base_session', {
-        projectId,
-      })
+      const session = await invoke<Worktree>('create_base_session', { projectId })
       logger.info('Base session created/reopened', { session })
       return session
     },
-    onSuccess: (session, projectId) => {
+    onSuccess: (session, { projectId, serverId }) => {
       queryClient.invalidateQueries({
         queryKey: projectsQueryKeys.worktrees(projectId),
       })
+
+      // Pin serverId so ChatWindow routes send_chat_message to the right server
+      if (serverId) {
+        useChatStore.getState().setWorktreeRemoteServer(session.id, serverId)
+      }
 
       // Auto-expand the project and select the session
       const { expandProject, selectWorktree } = useProjectsStore.getState()
@@ -1763,16 +1910,21 @@ export function useCloseBaseSession() {
   return useMutation({
     mutationFn: async ({
       worktreeId,
+      serverId,
     }: {
       worktreeId: string
       projectId: string
+      serverId?: string
     }): Promise<void> => {
       if (!isTauri()) {
         throw new Error('Not in Tauri context')
       }
 
       logger.debug('Closing base session', { worktreeId })
-      await invoke('close_base_session', { worktreeId })
+      await invoke('close_base_session', {
+        worktreeId,
+        ...(serverId ? { _backendHandle: serverId } : {}),
+      })
       logger.info('Base session closed')
     },
     onSuccess: (_, { projectId, worktreeId }) => {

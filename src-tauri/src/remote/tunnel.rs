@@ -169,6 +169,7 @@ pub async fn connect(
         .ok_or_else(|| "Remote server must be provisioned before connecting".to_string())?;
 
     if let Some(connection) = active_connection(server, token) {
+        set_runtime_status(&server.id, RemoteServerStatus::Connected, None);
         return Ok(connection);
     }
 

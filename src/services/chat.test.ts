@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { QueryClient } from '@tanstack/react-query'
+import { createElement, type ReactNode } from 'react'
+import { act, renderHook } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 vi.mock('@/lib/transport', () => ({
   invoke: vi.fn(),
@@ -21,8 +23,12 @@ import {
   canReconnectSession,
   prefetchSessions,
   reconnectNativeCliSession,
+  useArchiveSession,
+  useCloseSession,
+  useSendMessage,
 } from './chat'
 import { fallbackUnlessWsDisconnected } from '@/lib/query-fallback'
+import { invoke } from '@/lib/transport'
 import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
 import { useTerminalStore } from '@/store/terminal-store'
@@ -48,6 +54,73 @@ describe('transient WebSocket query failures', () => {
     expect(
       fallbackUnlessWsDisconnected(new Error('session file is invalid'), fallback)
     ).toBe(fallback)
+  })
+})
+
+function createQueryWrapper() {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  })
+  return {
+    queryClient,
+    wrapper: ({ children }: { children: ReactNode }) =>
+      createElement(QueryClientProvider, { client: queryClient }, children),
+  }
+}
+
+describe('remote session routing', () => {
+  beforeEach(() => {
+    vi.mocked(invoke).mockReset()
+    useChatStore.setState({
+      activeSessionIds: {},
+      sessionWorktreeMap: {},
+      worktreeRemoteServerIds: { 'worktree-remote': 'server-test' },
+    })
+  })
+
+  it('sends chat messages to the worktree remote backend', async () => {
+    vi.mocked(invoke).mockResolvedValue({ id: 'message-1' })
+    const { wrapper } = createQueryWrapper()
+    const { result } = renderHook(() => useSendMessage(), { wrapper })
+
+    await act(() =>
+      result.current.mutateAsync({
+        sessionId: 'session-remote',
+        worktreeId: 'worktree-remote',
+        worktreePath: '/srv/jean/example-project',
+        message: 'salut',
+      })
+    )
+
+    expect(invoke).toHaveBeenCalledWith(
+      'send_chat_message',
+      expect.objectContaining({ _backendHandle: 'server-test' })
+    )
+  })
+
+  it.each([
+    ['close_session', useCloseSession],
+    ['archive_session', useArchiveSession],
+  ])('routes %s to the worktree remote backend', async (command, useMutation) => {
+    vi.mocked(invoke).mockResolvedValue(null)
+    const { wrapper } = createQueryWrapper()
+    const { result } = renderHook(() => useMutation(), { wrapper })
+
+    await act(() =>
+      result.current.mutateAsync({
+        worktreeId: 'worktree-remote',
+        worktreePath: '/srv/jean/example-project',
+        sessionId: 'session-remote',
+      })
+    )
+
+    expect(invoke).toHaveBeenCalledWith(
+      command,
+      expect.objectContaining({ _backendHandle: 'server-test' })
+    )
   })
 })
 

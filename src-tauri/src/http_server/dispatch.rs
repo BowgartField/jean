@@ -166,6 +166,15 @@ pub async fn dispatch_command(
             let result = crate::remote::clone_project_to_remote(app.clone(), project_id, server_id, remote_path).await?;
             to_value(result)
         }
+        "get_local_tool_status" => {
+            let result = crate::remote::get_local_tool_status(app.clone()).await;
+            to_value(result)
+        }
+        "install_gh_on_remote" => {
+            let server_id: String = from_field(&args, "serverId")?;
+            crate::remote::install_gh_on_remote(app.clone(), server_id).await?;
+            Ok(Value::Null)
+        }
         "set_window_vibrancy" => {
             let enabled: bool = from_field(&args, "enabled")?;
             crate::set_window_vibrancy(app.clone(), enabled).await?;

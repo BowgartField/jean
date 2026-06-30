@@ -27,8 +27,10 @@ const USAGE_REFRESH_MS = 1000 * 60 * 5
 // Query keys for Claude CLI
 export const claudeCliQueryKeys = {
   all: ['claude-cli'] as const,
-  status: () => [...claudeCliQueryKeys.all, 'status'] as const,
-  auth: () => [...claudeCliQueryKeys.all, 'auth'] as const,
+  status: (serverId?: string) =>
+    [...claudeCliQueryKeys.all, 'status', serverId ?? 'local'] as const,
+  auth: (serverId?: string) =>
+    [...claudeCliQueryKeys.all, 'auth', serverId ?? 'local'] as const,
   usage: () => [...claudeCliQueryKeys.all, 'usage'] as const,
   versions: () => [...claudeCliQueryKeys.all, 'versions'] as const,
 }
@@ -93,9 +95,13 @@ function getUsageRefetchInterval(snapshot?: ClaudeUsageSnapshot): number {
 /**
  * Hook to check if Claude CLI is installed and get its status
  */
-export function useClaudeCliStatus(options?: { enabled?: boolean }) {
+export function useClaudeCliStatus(options?: {
+  enabled?: boolean
+  serverId?: string
+}) {
+  const serverId = options?.serverId
   return useQuery({
-    queryKey: claudeCliQueryKeys.status(),
+    queryKey: claudeCliQueryKeys.status(serverId),
     queryFn: async (): Promise<ClaudeCliStatus> => {
       if (!isTauri()) {
         logger.debug('Not in Tauri context, returning mock CLI status')
@@ -110,7 +116,8 @@ export function useClaudeCliStatus(options?: { enabled?: boolean }) {
       try {
         console.debug('[ONBOARDING:SVC] claude: checking installed status...')
         const status = await invoke<ClaudeCliStatus>(
-          'check_claude_cli_installed'
+          'check_claude_cli_installed',
+          serverId ? { _backendHandle: serverId } : undefined
         )
         console.debug('[ONBOARDING:SVC] claude: status =', status)
         return status
@@ -134,9 +141,13 @@ export function useClaudeCliStatus(options?: { enabled?: boolean }) {
 /**
  * Hook to check if Claude CLI is authenticated
  */
-export function useClaudeCliAuth(options?: { enabled?: boolean }) {
+export function useClaudeCliAuth(options?: {
+  enabled?: boolean
+  serverId?: string
+}) {
+  const serverId = options?.serverId
   return useQuery({
-    queryKey: claudeCliQueryKeys.auth(),
+    queryKey: claudeCliQueryKeys.auth(serverId),
     queryFn: async (): Promise<ClaudeAuthStatus> => {
       if (!isTauri()) {
         logger.debug('Not in Tauri context, returning mock auth status')
@@ -145,7 +156,10 @@ export function useClaudeCliAuth(options?: { enabled?: boolean }) {
 
       try {
         console.debug('[ONBOARDING:SVC] claude: checking auth status...')
-        const status = await invoke<ClaudeAuthStatus>('check_claude_cli_auth')
+        const status = await invoke<ClaudeAuthStatus>(
+          'check_claude_cli_auth',
+          serverId ? { _backendHandle: serverId } : undefined
+        )
         console.debug('[ONBOARDING:SVC] claude: auth =', status)
         return status
       } catch (error) {

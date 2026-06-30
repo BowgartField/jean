@@ -53,6 +53,21 @@ function isWsDisconnectError(error: unknown): boolean {
   return msg.includes('WebSocket disconnected')
 }
 
+function worktreeBackendArgs(
+  worktreeId: string,
+  explicitServerId?: string | null
+): { _backendHandle?: string } {
+  const serverId =
+    explicitServerId ??
+    useChatStore.getState().worktreeRemoteServerIds[worktreeId]
+  return serverId ? { _backendHandle: serverId } : {}
+}
+
+function sessionBackendArgs(sessionId: string): { _backendHandle?: string } {
+  const worktreeId = useChatStore.getState().sessionWorktreeMap[sessionId]
+  return worktreeId ? worktreeBackendArgs(worktreeId) : {}
+}
+
 export function cleanupSessionTerminalForRemovedSession(
   worktreeId: string,
   sessionId: string
@@ -284,6 +299,7 @@ export function useChatHistory(
         const history = await invoke<ChatHistory>('get_chat_history', {
           worktreeId,
           worktreePath,
+          ...worktreeBackendArgs(worktreeId),
         })
         logger.info('Chat history loaded', { count: history.messages.length })
         return history
@@ -308,9 +324,10 @@ export function useChatHistory(
 export function useSessions(
   worktreeId: string | null,
   worktreePath: string | null,
-  options?: { includeMessageCounts?: boolean }
+  options?: { includeMessageCounts?: boolean; serverId?: string }
 ) {
   const includeMessageCounts = options?.includeMessageCounts ?? false
+  const serverId = options?.serverId
 
   return useQuery({
     queryKey: includeMessageCounts
@@ -332,6 +349,7 @@ export function useSessions(
           worktreeId,
           worktreePath,
           includeMessageCounts,
+          ...worktreeBackendArgs(worktreeId, serverId),
         })
         logger.info('Sessions loaded', { count: sessions.sessions.length })
         return sessions
@@ -411,6 +429,7 @@ export async function prefetchSessions(
     const sessions = await invoke<WorktreeSessions>('get_sessions', {
       worktreeId,
       worktreePath,
+      ...worktreeBackendArgs(worktreeId),
     })
     queryClient.setQueryData(chatQueryKeys.sessions(worktreeId), sessions)
 
@@ -619,6 +638,7 @@ export function useSession(
           worktreePath,
           sessionId,
           limit: INITIAL_RUN_LIMIT,
+          ...worktreeBackendArgs(worktreeId),
         })
         logger.info('[useSession] loaded', {
           sessionId,
@@ -718,6 +738,7 @@ export function useLoadOlderMessages() {
           sessionId,
           beforeRunIndex,
           limit,
+          ...sessionBackendArgs(sessionId),
         }
       )
       logger.info('[useLoadOlderMessages] loaded', {
@@ -779,6 +800,7 @@ export function useCreateSession() {
       terminalCommandArgs,
       terminalLabel,
       nativeSessionId,
+      serverId,
     }: {
       worktreeId: string
       worktreePath: string
@@ -789,12 +811,23 @@ export function useCreateSession() {
       terminalCommandArgs?: string[]
       terminalLabel?: string
       nativeSessionId?: string
+      serverId?: string
     }): Promise<Session> => {
       if (!isTauri()) {
         throw new Error('Not in Tauri context')
       }
 
-      logger.debug('Creating session', { worktreeId, name })
+      // Auto-resolve remote server from chat store if not explicitly passed
+      const resolvedServerId =
+        serverId ??
+        useChatStore.getState().worktreeRemoteServerIds[worktreeId] ??
+        undefined
+
+      logger.debug('Creating session', {
+        worktreeId,
+        name,
+        serverId: resolvedServerId,
+      })
       const session = await invoke<Session>('create_session', {
         worktreeId,
         worktreePath,
@@ -805,6 +838,7 @@ export function useCreateSession() {
         terminalCommandArgs,
         terminalLabel,
         nativeSessionId,
+        ...worktreeBackendArgs(worktreeId, resolvedServerId),
       })
       logger.info('Session created', { sessionId: session.id })
       return session
@@ -864,6 +898,7 @@ export function useRenameSession() {
         worktreePath,
         sessionId,
         newName,
+        ...worktreeBackendArgs(worktreeId),
       })
       logger.info('Session renamed')
     },
@@ -1010,6 +1045,7 @@ export function useUpdateSessionState() {
         enabledMcpServers,
         selectedExecutionMode,
         tableCheckedRows,
+        ...worktreeBackendArgs(worktreeId),
       })
       logger.debug('Session state updated')
     },
@@ -1055,6 +1091,7 @@ export function useCloseSession() {
         worktreeId,
         worktreePath,
         sessionId,
+        ...worktreeBackendArgs(worktreeId),
       })
       logger.info('Session closed', { newActiveId })
       return newActiveId
@@ -1126,6 +1163,7 @@ export function useArchiveSession() {
         worktreeId,
         worktreePath,
         sessionId,
+        ...worktreeBackendArgs(worktreeId),
       })
       logger.info('Session archived', { newActiveId })
       return newActiveId
@@ -1190,6 +1228,7 @@ export function useUnarchiveSession() {
         worktreeId,
         worktreePath,
         sessionId,
+        ...worktreeBackendArgs(worktreeId),
       })
       logger.info('Session unarchived', { sessionId })
       return session
@@ -1248,6 +1287,7 @@ export function useRestoreSessionWithBase() {
           worktreePath,
           sessionId,
           projectId,
+          ...worktreeBackendArgs(worktreeId),
         }
       )
       logger.info('Session restored with base', {
@@ -1306,6 +1346,7 @@ export function useDeleteArchivedSession() {
         worktreeId,
         worktreePath,
         sessionId,
+        ...worktreeBackendArgs(worktreeId),
       })
       logger.info('Archived session deleted', { sessionId })
     },
@@ -1342,6 +1383,7 @@ export function useArchivedSessions(
       const sessions = await invoke<Session[]>('list_archived_sessions', {
         worktreeId,
         worktreePath,
+        ...worktreeBackendArgs(worktreeId),
       })
       logger.debug('Got archived sessions', { count: sessions.length })
       return sessions
@@ -1529,6 +1571,7 @@ export function useReorderSessions() {
         worktreeId,
         worktreePath,
         sessionIds,
+        ...worktreeBackendArgs(worktreeId),
       })
       logger.info('Sessions reordered')
     },
@@ -1615,6 +1658,7 @@ export function useSetActiveSession() {
         worktreeId,
         worktreePath,
         sessionId,
+        ...worktreeBackendArgs(worktreeId),
       })
       logger.info('Active session set')
     },
@@ -1667,6 +1711,7 @@ export function useSendMessage() {
       chromeEnabled,
       customProfileName,
       backend,
+      backendHandle,
     }: {
       sessionId: string
       worktreeId: string
@@ -1683,6 +1728,8 @@ export function useSendMessage() {
       chromeEnabled?: boolean
       customProfileName?: string
       backend?: string
+      /** Remote server ID — routes this invoke() to the remote WsTransport */
+      backendHandle?: string | null
       /** Set by the queue processor — its onError requeues the original message */
       fromQueue?: boolean
     }): Promise<ChatMessage> => {
@@ -1705,6 +1752,7 @@ export function useSendMessage() {
         allowedTools,
         mcpConfig: mcpConfig ? '(set)' : undefined,
         chromeEnabled,
+        backendHandle,
       })
       const response = await invoke<ChatMessage>('send_chat_message', {
         sessionId,
@@ -1722,6 +1770,7 @@ export function useSendMessage() {
         chromeEnabled,
         customProfileName,
         backend,
+        ...worktreeBackendArgs(worktreeId, backendHandle),
       })
       logger.info('Chat message sent', { responseId: response.id })
       return response
@@ -2019,6 +2068,7 @@ export function useClearSessionHistory() {
         worktreeId,
         worktreePath,
         sessionId,
+        ...worktreeBackendArgs(worktreeId),
       })
       logger.info('Session history cleared')
     },
@@ -2069,7 +2119,11 @@ export function useClearChatHistory() {
       }
 
       logger.debug('Clearing chat history', { worktreeId })
-      await invoke('clear_chat_history', { worktreeId, worktreePath })
+      await invoke('clear_chat_history', {
+        worktreeId,
+        worktreePath,
+        ...worktreeBackendArgs(worktreeId),
+      })
       logger.info('Chat history cleared')
     },
     onSuccess: (_, { worktreeId }) => {
@@ -2123,6 +2177,7 @@ export function useSetSessionModel() {
         worktreePath,
         sessionId,
         model,
+        ...worktreeBackendArgs(worktreeId),
       })
       logger.info('Session model saved')
     },
@@ -2192,6 +2247,7 @@ export function useSetSessionBackend() {
         worktreePath,
         sessionId,
         backend,
+        ...worktreeBackendArgs(worktreeId),
       })
       logger.info('Session backend saved')
     },
@@ -2239,6 +2295,7 @@ export function useSetSessionProvider() {
         worktreePath,
         sessionId,
         provider,
+        ...worktreeBackendArgs(worktreeId),
       })
       logger.info('Session provider saved')
     },
@@ -2295,6 +2352,7 @@ export function useSetSessionThinkingLevel() {
         worktreePath,
         sessionId,
         thinkingLevel,
+        ...worktreeBackendArgs(worktreeId),
       })
       logger.info('Session thinking level saved')
     },
@@ -2351,6 +2409,7 @@ export function useSetSessionEffortLevel() {
         worktreePath,
         sessionId,
         effortLevel,
+        ...worktreeBackendArgs(worktreeId),
       })
       logger.info('Session effort level saved')
     },
@@ -2398,7 +2457,12 @@ export function useSetWorktreeModel() {
       }
 
       logger.debug('Setting worktree model', { worktreeId, model })
-      await invoke('set_worktree_model', { worktreeId, worktreePath, model })
+      await invoke('set_worktree_model', {
+        worktreeId,
+        worktreePath,
+        model,
+        ...worktreeBackendArgs(worktreeId),
+      })
       logger.info('Worktree model saved')
     },
     onSuccess: (_, { worktreeId }) => {
@@ -2452,6 +2516,7 @@ export function useSetWorktreeThinkingLevel() {
         worktreeId,
         worktreePath,
         thinkingLevel,
+        ...worktreeBackendArgs(worktreeId),
       })
       logger.info('Worktree thinking level saved')
     },
@@ -2498,6 +2563,7 @@ export async function cancelChatMessage(
     const cancelled = await invoke<boolean>('cancel_chat_message', {
       sessionId,
       worktreeId,
+      ...worktreeBackendArgs(worktreeId),
     })
     if (cancelled) {
       logger.info('Chat message cancelled', { sessionId })
@@ -2537,6 +2603,7 @@ export async function saveCancelledMessage(
       content,
       toolCalls,
       contentBlocks,
+      ...worktreeBackendArgs(worktreeId),
     })
     logger.info('Cancelled message saved', { sessionId })
   } catch (error) {
@@ -2635,6 +2702,7 @@ export async function markPlanApproved(
       worktreePath,
       sessionId,
       messageId,
+      ...worktreeBackendArgs(worktreeId),
     })
     logger.info('Plan marked as approved', { messageId })
   } catch (error) {
@@ -2662,6 +2730,7 @@ export function persistEnqueue(
     worktreePath,
     sessionId,
     message,
+    ...worktreeBackendArgs(worktreeId),
   }).catch(err => {
     logger.error('Failed to persist enqueue', { err, sessionId })
   })
@@ -2680,6 +2749,7 @@ export async function persistDequeue(
     worktreeId,
     worktreePath,
     sessionId,
+    ...worktreeBackendArgs(worktreeId),
   })
 }
 
@@ -2697,6 +2767,7 @@ export function persistRemoveQueued(
     worktreePath,
     sessionId,
     messageId,
+    ...worktreeBackendArgs(worktreeId),
   }).catch(err => {
     logger.error('Failed to persist remove queued', { err, sessionId })
   })
@@ -2738,6 +2809,7 @@ export async function persistMoveQueuedFront(
     worktreePath,
     sessionId,
     messageId,
+    ...worktreeBackendArgs(worktreeId),
   })
 }
 
@@ -2757,6 +2829,7 @@ export async function steerCodexTurn(
     sessionId,
     message,
     queuedMessage,
+    ...worktreeBackendArgs(worktreeId),
   })
 }
 
@@ -2777,6 +2850,7 @@ export async function steerOpencodeTurn(
     worktreePath,
     sessionId,
     message,
+    ...worktreeBackendArgs(worktreeId),
   })
 }
 
@@ -2790,7 +2864,12 @@ export async function steerPiTurn(
   sessionId: string,
   message: string
 ): Promise<void> {
-  await invoke('steer_pi_turn', { worktreeId, sessionId, message })
+  await invoke('steer_pi_turn', {
+    worktreeId,
+    sessionId,
+    message,
+    ...worktreeBackendArgs(worktreeId),
+  })
 }
 
 /**
@@ -2809,12 +2888,14 @@ export async function persistRequeueFront(
     worktreePath,
     sessionId,
     message,
+    ...worktreeBackendArgs(worktreeId),
   })
   await invoke('move_queued_message_front', {
     worktreeId,
     worktreePath,
     sessionId,
     messageId: message.id,
+    ...worktreeBackendArgs(worktreeId),
   })
 }
 
@@ -2836,9 +2917,12 @@ export function persistClearQueue(
   worktreePath: string,
   sessionId: string
 ): void {
-  invoke('clear_message_queue', { worktreeId, worktreePath, sessionId }).catch(
-    err => {
-      logger.error('Failed to persist clear queue', { err, sessionId })
-    }
-  )
+  invoke('clear_message_queue', {
+    worktreeId,
+    worktreePath,
+    sessionId,
+    ...worktreeBackendArgs(worktreeId),
+  }).catch(err => {
+    logger.error('Failed to persist clear queue', { err, sessionId })
+  })
 }

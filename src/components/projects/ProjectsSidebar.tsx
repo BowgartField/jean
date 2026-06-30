@@ -12,8 +12,6 @@ import { useProjectsStore } from '@/store/projects-store'
 import { ProjectTree } from './ProjectTree'
 import { useInstalledBackends } from '@/hooks/useInstalledBackends'
 import { scheduleIdleWork } from '@/lib/idle'
-import { useRemoteServers } from '@/services/remote-servers'
-import { cn } from '@/lib/utils'
 
 export function ProjectsSidebar() {
   const { data: projects = [], isLoading } = useProjects()
@@ -27,46 +25,11 @@ export function ProjectsSidebar() {
   })
   const setupIncomplete = installedBackends.length === 0
 
-  // Local/Remote view toggle
-  const [view, setView] = useState<'local' | 'remote'>('local')
-  const { data: remoteServers = [] } = useRemoteServers()
-  const hasRemoteServers = remoteServers.some(s => s.http_token)
-
   // Responsive layout threshold
   const isNarrow = sidebarWidth < 180
 
   return (
     <div className="flex h-full flex-col">
-      {/* Local / Remote toggle — only shown when remote servers are provisioned */}
-      {hasRemoteServers && (
-        <div className="flex shrink-0 gap-px p-2 pb-0">
-          <button
-            type="button"
-            onClick={() => setView('local')}
-            className={cn(
-              'flex-1 rounded-l-md border py-0.5 text-xs font-medium transition-colors',
-              view === 'local'
-                ? 'border-primary/40 bg-primary/10 text-foreground'
-                : 'border-border bg-transparent text-muted-foreground hover:bg-accent'
-            )}
-          >
-            Local
-          </button>
-          <button
-            type="button"
-            onClick={() => setView('remote')}
-            className={cn(
-              'flex-1 rounded-r-md border py-0.5 text-xs font-medium transition-colors',
-              view === 'remote'
-                ? 'border-primary/40 bg-primary/10 text-foreground'
-                : 'border-border bg-transparent text-muted-foreground hover:bg-accent'
-            )}
-          >
-            Remote
-          </button>
-        </div>
-      )}
-
       {/* Content */}
       <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
         {isLoading ? (
@@ -80,7 +43,7 @@ export function ProjectsSidebar() {
             </span>
           </div>
         ) : (
-          <ProjectTree projects={projects} remoteView={view === 'remote'} />
+          <ProjectTree projects={projects} />
         )}
       </div>
 

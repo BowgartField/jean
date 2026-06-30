@@ -59,6 +59,10 @@ import { Switch } from '@/components/ui/switch'
 import { isMacOS } from '@/lib/platform'
 import { cn } from '@/lib/utils'
 import {
+  useClaudeCliAuth,
+  useClaudeCliStatus,
+} from '@/services/claude-cli'
+import {
   useAddRemoteServer,
   useConnectRemoteServer,
   useDisconnectRemoteServer,
@@ -67,6 +71,7 @@ import {
   useTestRemoteServer,
   useUpdateRemoteServer,
 } from '@/services/remote-servers'
+import { useUIStore } from '@/store/ui-store'
 import type {
   RemoteServerConfig,
   RemoteServerInput,
@@ -101,6 +106,62 @@ const EMPTY_FORM: ServerFormState = {
   password: '',
   remotePort: '3456',
   isDefault: false,
+}
+
+function RemoteClaudeAuthStatus({
+  server,
+  connected,
+}: {
+  server: RemoteServerConfig
+  connected: boolean
+}) {
+  const openCliLoginModal = useUIStore(state => state.openCliLoginModal)
+  const cliStatus = useClaudeCliStatus({
+    enabled: connected,
+    serverId: server.id,
+  })
+  const cliAuth = useClaudeCliAuth({
+    enabled: connected && cliStatus.data?.installed === true,
+    serverId: server.id,
+  })
+
+  const handleLogin = () => {
+    const status = cliStatus.data
+    if (!status?.path) return
+    const args = status.supports_auth_command ? ['auth', 'login'] : ['login']
+    openCliLoginModal('claude', status.path, args, 'login', server.id)
+  }
+
+  let statusLabel = 'Connect to check'
+  if (connected && cliStatus.isLoading) {
+    statusLabel = 'Checking installation…'
+  } else if (connected && !cliStatus.data?.installed) {
+    statusLabel = 'Not installed'
+  } else if (connected && cliAuth.isLoading) {
+    statusLabel = 'Checking login…'
+  } else if (connected && cliAuth.data?.authenticated) {
+    statusLabel = 'Logged in'
+  } else if (connected && cliStatus.data?.installed) {
+    statusLabel = 'Login required'
+  }
+
+  return (
+    <div className="flex items-center gap-3 rounded-lg border bg-muted/15 px-3 py-2.5">
+      <KeyRound className="size-4 shrink-0 text-muted-foreground" />
+      <div className="min-w-0 flex-1">
+        <p className="text-xs font-medium">Claude CLI</p>
+        <p className="text-xs text-muted-foreground">{statusLabel}</p>
+      </div>
+      {connected &&
+        cliStatus.data?.installed &&
+        !cliAuth.isLoading &&
+        !cliAuth.data?.authenticated && (
+          <Button variant="outline" size="sm" onClick={handleLogin}>
+            Login
+          </Button>
+        )}
+    </div>
+  )
 }
 
 function formFromServer(server: RemoteServerConfig): ServerFormState {
@@ -728,6 +789,11 @@ export function RemoteServersPane() {
                         </p>
                       </div>
                     </div>
+
+                    <RemoteClaudeAuthStatus
+                      server={server}
+                      connected={connected}
+                    />
 
                     {status === 'error' && (
                       <div className="flex items-start gap-2 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive">

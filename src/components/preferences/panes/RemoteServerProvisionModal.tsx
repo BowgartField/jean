@@ -14,7 +14,7 @@ import {
   ServerCog,
   ShieldCheck,
 } from 'lucide-react'
-import { listen } from '@/lib/transport'
+import { invoke, listen } from '@/lib/transport'
 import { toast } from 'sonner'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import {
@@ -27,13 +27,16 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Checkbox } from '@/components/ui/checkbox'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
 import { useProvisionRemoteServer } from '@/services/remote-servers'
 import type {
+  LocalToolStatus,
   RemoteProvisionLogLine,
   RemoteProvisionProgress,
   RemoteServerConfig,
+  ToolsToInstall,
 } from '@/types/remote'
 
 interface ProvisionStep {
@@ -42,7 +45,7 @@ interface ProvisionStep {
   description: string
 }
 
-const PROVISION_STEPS: ProvisionStep[] = [
+const BASE_PROVISION_STEPS: ProvisionStep[] = [
   {
     stage: 'preparing',
     label: 'Prepare server',
@@ -68,12 +71,34 @@ const PROVISION_STEPS: ProvisionStep[] = [
     label: 'Verify service',
     description: 'Start the systemd unit and confirm it is active.',
   },
-  {
-    stage: 'complete',
-    label: 'Ready',
-    description: 'Remote Jean is available through the SSH tunnel.',
-  },
 ]
+
+const CLAUDE_CLI_STEP: ProvisionStep = {
+  stage: 'installing_claude_cli',
+  label: 'Install Claude CLI',
+  description: 'Download and install the Claude CLI binary.',
+}
+
+const GH_CLI_STEP: ProvisionStep = {
+  stage: 'installing_gh_cli',
+  label: 'Install GitHub CLI',
+  description: 'Install gh from the official package repository.',
+}
+
+const COMPLETE_STEP: ProvisionStep = {
+  stage: 'complete',
+  label: 'Ready',
+  description: 'Remote Jean is available through the SSH tunnel.',
+}
+
+function buildSteps(tools: ToolsToInstall): ProvisionStep[] {
+  return [
+    ...BASE_PROVISION_STEPS,
+    ...(tools.claudeCli ? [CLAUDE_CLI_STEP] : []),
+    ...(tools.ghCli ? [GH_CLI_STEP] : []),
+    COMPLETE_STEP,
+  ]
+}
 
 interface RemoteServerProvisionModalProps {
   open: boolean
@@ -81,9 +106,9 @@ interface RemoteServerProvisionModalProps {
   onOpenChange: (open: boolean) => void
 }
 
-function stageIndex(stage?: string | null): number {
+function stageIndex(steps: ProvisionStep[], stage?: string | null): number {
   if (!stage) return -1
-  return PROVISION_STEPS.findIndex(step => step.stage === stage)
+  return steps.findIndex(step => step.stage === stage)
 }
 
 function logClassName(stream: RemoteProvisionLogLine['stream']) {
@@ -101,7 +126,7 @@ function ProvisionLogPanel({
 }) {
   return (
     <ScrollArea
-      className="min-h-0 flex-1 rounded-xl border bg-muted/10"
+      className="flex-1 min-h-0 rounded-xl border bg-muted/10"
       viewportRef={viewportRef}
     >
       <div className="space-y-1 p-3 font-mono text-[11px] leading-5">
@@ -132,13 +157,15 @@ function ProvisionLogPanel({
 
 function StepRail({
   progress,
+  steps,
 }: {
   progress: RemoteProvisionProgress | null
+  steps: ProvisionStep[]
 }) {
-  const activeIndex = stageIndex(progress?.stage)
+  const activeIndex = stageIndex(steps, progress?.stage)
   return (
     <div className="grid gap-3 sm:grid-cols-2">
-      {PROVISION_STEPS.map((step, index) => {
+      {steps.map((step, index) => {
         const completed = activeIndex > index || progress?.stage === 'complete'
         const active = activeIndex === index && progress?.stage !== 'complete'
         return (
@@ -203,6 +230,7 @@ export function RemoteServerProvisionModal({
   const [error, setError] = useState<string | null>(null)
   const [completedVersion, setCompletedVersion] = useState<string | null>(null)
   const [running, setRunning] = useState(false)
+  const [tools, setTools] = useState<ToolsToInstall>({ claudeCli: false, ghCli: false })
   const initializedRef = useRef(false)
   const logsViewportRef = useRef<HTMLDivElement | null>(null)
 
@@ -216,6 +244,16 @@ export function RemoteServerProvisionModal({
     setRunning(false)
     initializedRef.current = false
   }, [])
+
+  // Load local tool status to set default checkboxes
+  useEffect(() => {
+    if (!open) return
+    invoke<LocalToolStatus>('get_local_tool_status', {})
+      .then(status => {
+        setTools({ claudeCli: status.claude_cli, ghCli: status.gh_cli })
+      })
+      .catch(() => {/* ignore — defaults stay false */})
+  }, [open])
 
   useEffect(() => {
     if (!open) {
@@ -278,10 +316,12 @@ export function RemoteServerProvisionModal({
     viewport.scrollTop = viewport.scrollHeight
   }, [logs])
 
+  const provisionSteps = useMemo(() => buildSteps(tools), [tools])
+
   const currentStep = useMemo(() => {
-    if (progress?.stage === 'complete') return PROVISION_STEPS[PROVISION_STEPS.length - 1]
-    return PROVISION_STEPS.find(step => step.stage === progress?.stage) ?? null
-  }, [progress?.stage])
+    if (progress?.stage === 'complete') return COMPLETE_STEP
+    return provisionSteps.find(step => step.stage === progress?.stage) ?? null
+  }, [progress?.stage, provisionSteps])
 
   const startProvisioning = useCallback(async () => {
     if (!server || running || initializedRef.current) return
@@ -293,6 +333,38 @@ export function RemoteServerProvisionModal({
 
     try {
       const result = await provisionServer.mutateAsync(server.id)
+
+      // Install selected CLIs after jean-server is running
+      const installErrors: string[] = []
+
+      if (tools.claudeCli) {
+        setProgress({
+          server_id: server.id,
+          stage: 'installing_claude_cli',
+          message: 'Installing Claude CLI…',
+          percent: 90,
+        })
+        try {
+          await invoke('install_claude_cli', { _backendHandle: server.id })
+        } catch (e) {
+          installErrors.push(`Claude CLI: ${String(e)}`)
+        }
+      }
+
+      if (tools.ghCli) {
+        setProgress({
+          server_id: server.id,
+          stage: 'installing_gh_cli',
+          message: 'Installing GitHub CLI…',
+          percent: tools.claudeCli ? 95 : 90,
+        })
+        try {
+          await invoke('install_gh_on_remote', { serverId: server.id })
+        } catch (e) {
+          installErrors.push(`GitHub CLI: ${String(e)}`)
+        }
+      }
+
       setCompletedVersion(result.version)
       setProgress({
         server_id: server.id,
@@ -301,13 +373,17 @@ export function RemoteServerProvisionModal({
         percent: 100,
       })
       setRunning(false)
+
+      if (installErrors.length > 0) {
+        toast.warning(`Provisioned, but some CLIs failed to install:\n${installErrors.join('\n')}`)
+      }
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause)
       setError(message)
       setRunning(false)
       toast.error(`Provisioning failed: ${message}`)
     }
-  }, [provisionServer, running, server])
+  }, [provisionServer, running, server, tools])
 
   const isComplete = progress?.stage === 'complete' && !running && !error
   const isError = error != null
@@ -397,9 +473,32 @@ export function RemoteServerProvisionModal({
                 </div>
               </div>
 
-              <StepRail progress={progress} />
+              {/* Tool selection — compact row, shown before provisioning starts */}
+              {!running && !isComplete && !isError && (
+                <div className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl border bg-muted/10 px-4 py-3">
+                  <p className="shrink-0 text-xs font-medium text-muted-foreground">
+                    Also install:
+                  </p>
+                  <label className="flex cursor-pointer items-center gap-2">
+                    <Checkbox
+                      checked={tools.claudeCli}
+                      onCheckedChange={v => setTools(t => ({ ...t, claudeCli: !!v }))}
+                    />
+                    <span className="text-sm">Claude CLI</span>
+                  </label>
+                  <label className="flex cursor-pointer items-center gap-2">
+                    <Checkbox
+                      checked={tools.ghCli}
+                      onCheckedChange={v => setTools(t => ({ ...t, ghCli: !!v }))}
+                    />
+                    <span className="text-sm">GitHub CLI</span>
+                  </label>
+                </div>
+              )}
 
-              <div className="min-h-[220px] flex-1">
+              <StepRail progress={progress} steps={provisionSteps} />
+
+              <div className="min-h-0 flex-1 flex flex-col">
                 <ProvisionLogPanel logs={logs} viewportRef={logsViewportRef} />
               </div>
 
@@ -426,7 +525,7 @@ export function RemoteServerProvisionModal({
           )}
         </div>
 
-        <DialogFooter className="shrink-0 gap-2 sm:gap-0">
+        <DialogFooter className="shrink-0">
           {!server ? (
             <Button variant="outline" onClick={() => onOpenChange(false)}>
               Close

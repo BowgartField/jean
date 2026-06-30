@@ -4,7 +4,7 @@ import type {
   IndicatorStatus,
   IndicatorVariant,
 } from '@/components/ui/status-indicator'
-import { ArrowDown, ArrowUp, ChevronDown, GitBranch } from 'lucide-react'
+import { ArrowDown, ArrowUp, ChevronDown, GitBranch, Server } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { dismissibleToast } from '@/lib/dismissible-toast'
 import { isBaseSession, type Worktree } from '@/types/projects'
@@ -45,6 +45,7 @@ import {
   TooltipContent,
 } from '@/components/ui/tooltip'
 import { useSidebarWidth } from '@/components/layout/SidebarWidthContext'
+import { useRemoteServers } from '@/services/remote-servers'
 
 interface WorktreeItemProps {
   worktree: Worktree
@@ -59,6 +60,10 @@ export function WorktreeItem({
   defaultBranch,
 }: WorktreeItemProps) {
   const isMobile = useIsMobile()
+  const { data: remoteServers = [] } = useRemoteServers()
+  const remoteServerName = worktree._server_id
+    ? (remoteServers.find(s => s.id === worktree._server_id)?.name ?? 'Remote')
+    : null
   const selectedWorktreeId = useProjectsStore(state => state.selectedWorktreeId)
   const selectWorktree = useProjectsStore(state => state.selectWorktree)
   const selectProject = useProjectsStore(state => state.selectProject)
@@ -110,7 +115,7 @@ export function WorktreeItem({
   const hasUncommitted = uncommittedAdded > 0 || uncommittedRemoved > 0
 
   // Fetch sessions to check for persisted unanswered questions
-  const { data: sessionsData } = useSessions(worktree.id, worktree.path)
+  const { data: sessionsData } = useSessions(worktree.id, worktree.path, { serverId: worktree._server_id })
 
   // Canonical worktree actions — computed once here and passed to
   // WorktreeContextMenu so the hook isn't run twice per row. The middle-click
@@ -352,6 +357,10 @@ export function WorktreeItem({
     (sessionId: string) => {
       selectProject(projectId)
       selectWorktree(worktree.id)
+      // Pin remote server if this worktree came from a remote server
+      if (worktree._server_id) {
+        useChatStore.getState().setWorktreeRemoteServer(worktree.id, worktree._server_id)
+      }
       // Clear active worktree so MainWindowContent renders ProjectCanvasView
       // (which hosts SessionChatModal with topbar + session tabs)
       useChatStore.getState().clearActiveWorktree()
@@ -369,7 +378,7 @@ export function WorktreeItem({
         )
       }, 50)
     },
-    [projectId, worktree.id, worktree.path, selectProject, selectWorktree]
+    [projectId, worktree.id, worktree.path, worktree._server_id, selectProject, selectWorktree]
   )
 
   // Responsive padding based on sidebar width
@@ -415,6 +424,10 @@ export function WorktreeItem({
   const handleClick = useCallback(() => {
     selectProject(projectId)
     selectWorktree(worktree.id)
+    // Pin remote server if this worktree came from a remote server
+    if (worktree._server_id) {
+      useChatStore.getState().setWorktreeRemoteServer(worktree.id, worktree._server_id)
+    }
     // Clear active worktree so MainWindowContent renders ProjectCanvasView
     // (which hosts SessionChatModal with topbar + session tabs)
     useChatStore.getState().clearActiveWorktree()
@@ -451,6 +464,7 @@ export function WorktreeItem({
     projectId,
     worktree.id,
     worktree.path,
+    worktree._server_id,
     sessionsData?.sessions,
     selectProject,
     selectWorktree,
@@ -650,6 +664,17 @@ export function WorktreeItem({
               )}
             >
               <span className="truncate">{worktree.name}</span>
+              {remoteServerName && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="inline-flex shrink-0 items-center gap-0.5 rounded px-1 py-0.5 text-[10px] font-medium bg-primary/10 text-primary">
+                      <Server className="size-2.5" />
+                      {remoteServerName}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>Running on {remoteServerName}</TooltipContent>
+                </Tooltip>
+              )}
               {/* Chevron for expand/collapse sessions */}
               <button
                 type="button"

@@ -118,6 +118,9 @@ interface ChatUIState {
   // Separate from sendingSessionIds to allow user to send messages while waiting
   waitingForInputSessionIds: Record<string, boolean>
 
+  // Mapping of worktree IDs to remote server IDs (for routing send_chat_message)
+  worktreeRemoteServerIds: Record<string, string>
+
   // Mapping of session IDs to worktree IDs (for checking all sessions in a worktree)
   sessionWorktreeMap: Record<string, string>
 
@@ -359,6 +362,7 @@ interface ChatUIState {
   ) => void
   registerWorktreePath: (worktreeId: string, path: string) => void
   getWorktreePath: (worktreeId: string) => string | undefined
+  setWorktreeRemoteServer: (worktreeId: string, serverId: string | null) => void
 
   // Actions - Session-based sending state
   addSendingSession: (sessionId: string, startTime?: number) => void
@@ -711,6 +715,7 @@ export const useChatStore = create<ChatUIState>()(
       completedDurations: {},
       userInitiatedSessionIds: {},
       waitingForInputSessionIds: {},
+      worktreeRemoteServerIds: {},
       sessionWorktreeMap: {},
       streamingContents: {},
       activeToolCalls: {},
@@ -1177,6 +1182,22 @@ export const useChatStore = create<ChatUIState>()(
         ),
 
       getWorktreePath: worktreeId => get().worktreePaths[worktreeId],
+
+      setWorktreeRemoteServer: (worktreeId, serverId) =>
+        set(
+          state => {
+            if (state.worktreeRemoteServerIds[worktreeId] === serverId) return state
+            const updated = { ...state.worktreeRemoteServerIds }
+            if (serverId === null) {
+              Reflect.deleteProperty(updated, worktreeId)
+            } else {
+              updated[worktreeId] = serverId
+            }
+            return { worktreeRemoteServerIds: updated }
+          },
+          undefined,
+          'setWorktreeRemoteServer'
+        ),
 
       // Sending state (session-based)
       addSendingSession: (sessionId, startTime) =>

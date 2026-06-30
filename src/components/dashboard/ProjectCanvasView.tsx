@@ -214,6 +214,7 @@ import {
   type WorktreeReorderDragState,
 } from '@/lib/drag-and-drop/worktree-reorder-ux'
 import { openCanvasConflictResolution } from './conflict-resolution-navigation'
+import { RunWhereModal } from '@/components/remote/RunWhereModal'
 
 interface ProjectCanvasViewProps {
   projectId: string
@@ -855,6 +856,7 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
 
   const [searchQuery, setSearchQuery] = useState('')
   const [activeFilterTab, setActiveFilterTab] = useState<CanvasFilterTab>('all')
+  const [runWhereOpen, setRunWhereOpen] = useState(false)
   const isMobile = useIsMobile()
   const isNative = isNativeApp()
   const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false)
@@ -2920,7 +2922,14 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
                     <DropdownMenuSeparator />
 
                     <DropdownMenuItem
-                      onSelect={() => createBaseSession.mutate(projectId)}
+                      onSelect={() => {
+                        const clones = project?.remote_clones ?? []
+                        if (clones.length > 0) {
+                          setRunWhereOpen(true)
+                        } else {
+                          createBaseSession.mutate({ projectId })
+                        }
+                      }}
                     >
                       <Home className="h-4 w-4" />
                       {worktrees.find(isBaseSession)
@@ -3614,6 +3623,14 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
           projectId={projectId}
         />
       </Suspense>
+
+      <RunWhereModal
+        open={runWhereOpen}
+        onOpenChange={setRunWhereOpen}
+        onSelect={serverId => createBaseSession.mutate({ projectId, serverId: serverId ?? undefined })}
+        projectName={project?.name}
+        clonedServerIds={(project?.remote_clones ?? []).map(c => c.server_id)}
+      />
     </div>
   )
 }

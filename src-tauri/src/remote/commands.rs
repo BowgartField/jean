@@ -305,6 +305,76 @@ pub async fn get_remote_server_status(
     Ok(tunnel::status(&server))
 }
 
+#[derive(serde::Serialize)]
+pub struct LocalToolStatus {
+    pub claude_cli: bool,
+    pub gh_cli: bool,
+}
+
+#[tauri::command]
+pub async fn get_local_tool_status(app: AppHandle) -> LocalToolStatus {
+    let claude_cli = crate::claude_cli::resolve_cli_binary(&app).exists();
+    let gh_cli = crate::platform::find_cli_in_host_path("gh", None).is_some();
+    LocalToolStatus { claude_cli, gh_cli }
+}
+
+#[tauri::command]
+pub async fn install_gh_on_remote(
+    app: AppHandle,
+    server_id: String,
+) -> Result<(), String> {
+    let server = load_server(&app, &server_id).await?;
+    let script = r#"set -eu
+if command -v gh >/dev/null 2>&1; then
+  echo "gh already installed: $(gh --version | head -1)"
+  exit 0
+fi
+# Detect architecture
+ARCH=$(uname -m)
+case "$ARCH" in
+  x86_64) GH_ARCH="amd64" ;;
+  aarch64|arm64) GH_ARCH="arm64" ;;
+  *) echo "Unsupported architecture: $ARCH"; exit 1 ;;
+esac
+# Try apt/deb first (Debian/Ubuntu)
+if command -v apt-get >/dev/null 2>&1; then
+  (type -p curl >/dev/null || apt-get install -y curl) 2>/dev/null
+  curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+    | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg 2>/dev/null
+  chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
+  echo "deb [arch=${GH_ARCH} signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+    | tee /etc/apt/sources.list.d/github-cli.list >/dev/null
+  apt-get update -qq && apt-get install -y gh
+  echo "GitHub CLI installed: $(gh --version | head -1)"
+  exit 0
+fi
+# Fallback: download binary from GitHub releases
+GH_VERSION=$(curl -s https://api.github.com/repos/cli/cli/releases/latest | grep '"tag_name"' | cut -d '"' -f 4 | sed 's/v//')
+curl -L -o /tmp/gh.tar.gz "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${GH_ARCH}.tar.gz"
+tar xf /tmp/gh.tar.gz -C /tmp
+mv "/tmp/gh_${GH_VERSION}_linux_${GH_ARCH}/bin/gh" /usr/local/bin/gh
+chmod +x /usr/local/bin/gh
+rm -rf /tmp/gh.tar.gz "/tmp/gh_${GH_VERSION}_linux_${GH_ARCH}"
+echo "GitHub CLI installed: $(gh --version | head -1)"
+"#;
+    let output = tokio::task::spawn_blocking(move || {
+        ssh::exec(&app, &server, script)
+    })
+    .await
+    .map_err(|e| format!("SSH task failed: {e}"))??;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        Err(if stderr.is_empty() {
+            format!("gh install failed with status {}", output.status)
+        } else {
+            format!("gh install failed: {stderr}")
+        })
+    }
+}
+
 #[tauri::command]
 pub async fn clone_project_to_remote(
     app: AppHandle,

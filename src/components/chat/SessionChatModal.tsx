@@ -181,9 +181,13 @@ export function SessionChatModal({
     onSwipeBack: onClose,
     enabled: isTouch && isOpen,
   })
+  const sessionServerId = useChatStore(
+    state => (worktreeId ? (state.worktreeRemoteServerIds[worktreeId] ?? null) : null)
+  )
   const { data: sessionsData } = useSessions(
     worktreeId || null,
-    worktreePath || null
+    worktreePath || null,
+    { serverId: sessionServerId ?? undefined }
   )
   const sessions = useMemo(
     () => sessionsData?.sessions ?? [],

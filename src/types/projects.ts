@@ -201,6 +201,8 @@ export interface Worktree {
   archived_at?: number
   /** Unix timestamp when worktree was last opened/viewed by the user */
   last_opened_at?: number
+  /** Remote server ID — set client-side for worktrees fetched from a remote server */
+  _server_id?: string
 }
 
 // =============================================================================

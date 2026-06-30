@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useProjectsStore } from '@/store/projects-store'
+import { useUIStore } from '@/store/ui-store'
 import {
   useGitHubIssues,
   useGitHubPRs,
@@ -49,16 +50,25 @@ export function useNewWorktreeData(
     [projects, selectedProjectId]
   )
 
+  const newWorktreeServerId = useUIStore(s => s.newWorktreeServerId)
+
   // Worktrees & base session
   const { data: worktrees } = useWorktrees(selectedProjectId)
-  const hasBaseSession = useMemo(
-    () => worktrees?.some(w => isBaseSession(w)) ?? false,
-    [worktrees]
-  )
-  const baseSession = useMemo(
-    () => worktrees?.find(w => isBaseSession(w)),
-    [worktrees]
-  )
+  // When a server is selected, check for base session on that server only
+  const hasBaseSession = useMemo(() => {
+    if (!worktrees) return false
+    if (newWorktreeServerId) {
+      return worktrees.some(w => isBaseSession(w) && w._server_id === newWorktreeServerId)
+    }
+    return worktrees.some(w => isBaseSession(w) && !w._server_id)
+  }, [worktrees, newWorktreeServerId])
+  const baseSession = useMemo(() => {
+    if (!worktrees) return undefined
+    if (newWorktreeServerId) {
+      return worktrees.find(w => isBaseSession(w) && w._server_id === newWorktreeServerId)
+    }
+    return worktrees.find(w => isBaseSession(w) && !w._server_id)
+  }, [worktrees, newWorktreeServerId])
 
   // GitHub issues
   const issueState = includeClosed ? 'all' : 'open'
@@ -232,6 +242,7 @@ export function useNewWorktreeData(
     selectedProject,
     hasBaseSession,
     baseSession,
+    newWorktreeServerId,
     jeanConfig,
 
     // Issues

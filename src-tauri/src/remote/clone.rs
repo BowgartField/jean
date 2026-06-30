@@ -10,6 +10,17 @@ fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
+/// Like shell_quote but handles leading `~/` — single quotes prevent tilde
+/// expansion so we substitute `$HOME/` and double-quote instead.
+fn shell_path(value: &str) -> String {
+    if let Some(rest) = value.strip_prefix("~/") {
+        let escaped = rest.replace('"', "\\\"");
+        format!("\"$HOME/{escaped}\"")
+    } else {
+        shell_quote(value)
+    }
+}
+
 struct ResolvedSshUrl {
     url: String,
     /// Identity file from ~/.ssh/config for the original host alias (local path).
@@ -190,7 +201,7 @@ pub async fn clone_project_to_remote(
     // need to be pre-populated in the remote's known_hosts.
     let clone_command = format!(
         "set -eu\nexport GIT_SSH_COMMAND='ssh -o StrictHostKeyChecking=accept-new'\nif [ -d {path}/.git ]; then\n  git -C {path} fetch --all --prune\nelse\n  mkdir -p \"$(dirname {path})\"\n  git clone {url} {path}\nfi",
-        path = shell_quote(&resolved_remote_path),
+        path = shell_path(&resolved_remote_path),
         url = shell_quote(&remote_url),
     );
 

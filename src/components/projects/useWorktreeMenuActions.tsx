@@ -32,7 +32,7 @@ export function useWorktreeMenuActions({
   const openInEditor = useOpenWorktreeInEditor()
   const { data: runScripts = [] } = useRunScripts(worktree.path)
   const { data: preferences } = usePreferences()
-  const { data: sessionsData } = useSessions(worktree.id, worktree.path)
+  const { data: sessionsData } = useSessions(worktree.id, worktree.path, { serverId: worktree._server_id })
   const isBase = isBaseSession(worktree)
 
   const hasMessages = sessionsData?.sessions?.some(
@@ -81,9 +81,9 @@ export function useWorktreeMenuActions({
 
   const handleArchiveOrClose = useCallback(() => {
     if (isBase) {
-      closeBaseSession.mutate({ worktreeId: worktree.id, projectId })
+      closeBaseSession.mutate({ worktreeId: worktree.id, projectId, serverId: worktree._server_id })
     } else if (preferences?.removal_behavior === 'delete') {
-      deleteWorktree.mutate({ worktreeId: worktree.id, projectId })
+      deleteWorktree.mutate({ worktreeId: worktree.id, projectId, serverId: worktree._server_id })
     } else {
       archiveWorktree.mutate({ worktreeId: worktree.id, projectId })
     }
@@ -98,9 +98,9 @@ export function useWorktreeMenuActions({
   ])
 
   const handleDelete = useCallback(() => {
-    deleteWorktree.mutate({ worktreeId: worktree.id, projectId })
+    deleteWorktree.mutate({ worktreeId: worktree.id, projectId, serverId: worktree._server_id })
     setShowDeleteConfirm(false)
-  }, [deleteWorktree, worktree.id, projectId])
+  }, [deleteWorktree, worktree.id, projectId, worktree._server_id])
 
   return {
     // State

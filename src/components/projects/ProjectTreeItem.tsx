@@ -3,20 +3,32 @@ import {
   ArrowDown,
   ArrowUp,
   ChevronDown,
+  CloudUpload,
   MoreHorizontal,
   Plus,
+  Server,
 } from 'lucide-react'
-import { convertFileSrc, convertProjectFileSrc } from '@/lib/transport'
+import { useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
+import { convertFileSrc, convertProjectFileSrc, invoke } from '@/lib/transport'
 import { cn } from '@/lib/utils'
 import { dismissibleToast } from '@/lib/dismissible-toast'
-import type { Project } from '@/types/projects'
+import type { Project, RemoteClone } from '@/types/projects'
 import { isBaseSession } from '@/types/projects'
 import { useProjectsStore } from '@/store/projects-store'
 import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { useRemotePicker } from '@/hooks/useRemotePicker'
-import { useWorktrees, useAppDataDir } from '@/services/projects'
+import { useWorktrees, useAppDataDir, projectsQueryKeys } from '@/services/projects'
+import { useRemoteServers } from '@/services/remote-servers'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import {
   useFetchWorktreesStatus,
   useGitStatus,
@@ -35,6 +47,7 @@ import {
 } from '@/components/ui/tooltip'
 import { WorktreeList } from './WorktreeList'
 import { ProjectContextMenu } from './ProjectContextMenu'
+import { RunWhereModal } from '@/components/remote/RunWhereModal'
 
 interface ProjectTreeItemProps {
   project: Project
@@ -51,6 +64,39 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
   } = useProjectsStore()
   const { data: worktrees = [] } = useWorktrees(project.id)
   const { data: appDataDir = '' } = useAppDataDir()
+  const { data: remoteServers = [] } = useRemoteServers()
+  const queryClient = useQueryClient()
+
+  // Provisioned servers available for cloning
+  const cloneableServers = remoteServers.filter(s => s.http_token)
+  // Servers this project is already cloned onto
+  const clonedServerIds = new Set((project.remote_clones ?? []).map(c => c.server_id))
+
+  const handleCloneToServer = useCallback(
+    (serverId: string, serverName: string) => {
+      const toastId = toast.loading(`Cloning to ${serverName}...`)
+      invoke<RemoteClone>('clone_project_to_remote', {
+        projectId: project.id,
+        serverId,
+      })
+        .then(async clone => {
+          try {
+            await invoke('add_project', {
+              path: clone.remote_path,
+              _backendHandle: serverId,
+            })
+          } catch {
+            // Project might already be registered
+          }
+          queryClient.invalidateQueries({ queryKey: projectsQueryKeys.list() })
+          toast.success(`Cloned to ${serverName}`, { id: toastId })
+        })
+        .catch((err: unknown) => {
+          toast.error(`Clone failed: ${err}`, { id: toastId })
+        })
+    },
+    [project.id, queryClient]
+  )
   const hasWorktrees = worktrees.length > 0
   const isExpanded = hasWorktrees && expandedProjectIds.has(project.id)
   const setNewWorktreeModalOpen = useUIStore(
@@ -120,15 +166,19 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
     [project.id, toggleProjectExpanded]
   )
 
+  const [newWorktreeWhereOpen, setNewWorktreeWhereOpen] = useState(false)
+
   const handleAddWorktree = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation()
-      // Select this project first so the modal knows which project to use
       selectProject(project.id)
-      // Open the New Session modal
-      setNewWorktreeModalOpen(true)
+      if ((project.remote_clones?.length ?? 0) > 0) {
+        setNewWorktreeWhereOpen(true)
+      } else {
+        setNewWorktreeModalOpen(true)
+      }
     },
-    [project.id, selectProject, setNewWorktreeModalOpen]
+    [project.id, project.remote_clones, selectProject, setNewWorktreeModalOpen]
   )
 
   const handleBasePull = useCallback(
@@ -164,6 +214,7 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
   )
 
   return (
+    <>
     <ProjectContextMenu project={project}>
       <div>
         {/* Project Row */}
@@ -264,6 +315,73 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
             </div>
           )}
 
+          {/* Clone to remote server */}
+          {cloneableServers.length > 0 && (() => {
+            const singleServer = cloneableServers[0]
+            if (cloneableServers.length === 1 && singleServer && !clonedServerIds.has(singleServer.id)) {
+              return (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={e => {
+                        e.stopPropagation()
+                        handleCloneToServer(singleServer.id, singleServer.name)
+                      }}
+                      className="flex size-4 shrink-0 items-center justify-center rounded opacity-0 group-hover:opacity-50 hover:!opacity-100 hover:bg-accent-foreground/10"
+                    >
+                      <CloudUpload className="size-3.5" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>Clone to {singleServer.name}</TooltipContent>
+                </Tooltip>
+              )
+            }
+            return (
+              <DropdownMenu>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        onClick={e => e.stopPropagation()}
+                        className="flex size-4 shrink-0 items-center justify-center rounded opacity-0 group-hover:opacity-50 hover:!opacity-100 hover:bg-accent-foreground/10"
+                      >
+                        <CloudUpload className="size-3.5" />
+                      </button>
+                    </DropdownMenuTrigger>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {clonedServerIds.size > 0
+                      ? `Cloned to: ${cloneableServers.filter(s => clonedServerIds.has(s.id)).map(s => s.name).join(', ')}`
+                      : 'Clone to remote server'}
+                  </TooltipContent>
+                </Tooltip>
+                <DropdownMenuContent align="end" onClick={e => e.stopPropagation()}>
+                  {cloneableServers.map(server => (
+                    <DropdownMenuItem
+                      key={server.id}
+                      disabled={clonedServerIds.has(server.id)}
+                      onClick={() => handleCloneToServer(server.id, server.name)}
+                    >
+                      <Server className="mr-2 size-3.5" />
+                      {server.name}
+                      {clonedServerIds.has(server.id) && (
+                        <span className="ml-auto text-xs text-muted-foreground">cloned</span>
+                      )}
+                    </DropdownMenuItem>
+                  ))}
+                  {cloneableServers.every(s => clonedServerIds.has(s.id)) && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                        Already cloned to all servers
+                      </div>
+                    </>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )
+          })()}
+
           {/* Settings */}
           <Tooltip>
             <TooltipTrigger asChild>
@@ -305,5 +423,13 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
         )}
       </div>
     </ProjectContextMenu>
+    <RunWhereModal
+      open={newWorktreeWhereOpen}
+      onOpenChange={setNewWorktreeWhereOpen}
+      onSelect={serverId => setNewWorktreeModalOpen(true, serverId)}
+      projectName={project.name}
+      clonedServerIds={(project.remote_clones ?? []).map(c => c.server_id)}
+    />
+    </>
   )
 }

@@ -91,6 +91,11 @@ export function convertProjectFileSrc(filePath: string): string {
 
 /** Unlisten function type — compatible with Tauri's UnlistenFn. */
 export type UnlistenFn = () => void
+export interface BackendEvent<T> {
+  payload: T
+  /** Present when the event originated from a connected remote backend. */
+  backendHandle?: string
+}
 
 // ---------------------------------------------------------------------------
 // Public API (same signatures as Tauri)
@@ -118,7 +123,7 @@ export async function invoke<T>(
     const remote = _remoteTransports.get(backendHandle)
     if (!remote)
       throw new Error(`Remote transport '${backendHandle}' is not connected`)
-    const { _backendHandle: _, ...cleanArgs } = args!
+    const { _backendHandle: _, ...cleanArgs } = args ?? {}
     return remote.invoke<T>(command, cleanArgs)
   }
 
@@ -139,7 +144,7 @@ export async function invoke<T>(
  */
 export async function listen<T>(
   event: string,
-  handler: (event: { payload: T }) => void,
+  handler: (event: BackendEvent<T>) => void,
   backendHandle?: string | null
 ): Promise<() => void> {
   // E2E mock transport — route to in-memory event emitter
@@ -156,20 +161,28 @@ export async function listen<T>(
   // Route to a specific remote transport
   if (backendHandle) {
     const remote = _remoteTransports.get(backendHandle)
-    if (remote) return remote.listen<T>(event, handler)
-    return () => {}
+    if (remote)
+      return remote.listen<T>(event, remoteEvent =>
+        handler({ ...remoteEvent, backendHandle })
+      )
+    return () => undefined
   }
 
   if (isNativeApp()) {
     const { listen: tauriListen } = await import('@tauri-apps/api/event')
     const localUnsub = await tauriListen<T>(event, handler)
 
-    const typedHandler = handler as (event: { payload: unknown }) => void
+    const typedHandler = handler as (event: BackendEvent<unknown>) => void
     const entry: GlobalHandler = { fn: typedHandler, remoteUnsubs: new Map() }
 
     // Fan out to all currently-active remote transports
     for (const [serverId, transport] of _remoteTransports) {
-      entry.remoteUnsubs.set(serverId, transport.listen(event, typedHandler))
+      entry.remoteUnsubs.set(
+        serverId,
+        transport.listen(event, remoteEvent =>
+          typedHandler({ ...remoteEvent, backendHandle: serverId })
+        )
+      )
     }
 
     // Track this handler so future registerRemoteTransport() picks it up
@@ -515,6 +528,28 @@ class WsTransport {
     return this._connected
   }
 
+  waitUntilConnected(timeoutMs = WsTransport.CONNECT_TIMEOUT): Promise<void> {
+    if (this._connected) return Promise.resolve()
+
+    return new Promise((resolve, reject) => {
+      const unsubscribe = this.subscribe(() => {
+        if (this._connected) {
+          clearTimeout(timeout)
+          unsubscribe()
+          resolve()
+        } else if (this._authError) {
+          clearTimeout(timeout)
+          unsubscribe()
+          reject(new Error(this._authError))
+        }
+      })
+      const timeout = setTimeout(() => {
+        unsubscribe()
+        reject(new Error('Remote WebSocket connection timed out'))
+      }, timeoutMs)
+    })
+  }
+
   /** Get current data-ready snapshot for useSyncExternalStore. */
   getDataReadySnapshot(): boolean {
     return this._dataReady
@@ -576,6 +611,25 @@ class WsTransport {
     if (this._connectEnabled) return
     this._connectEnabled = true
     this.connect()
+  }
+
+  shutdown(): void {
+    this._connectEnabled = false
+    this.clearConnectWatchdog()
+    this.stopLivenessTimer()
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
+    if (this.ws) {
+      this.ws.onclose = null
+      this.ws.close()
+      this.ws = null
+    }
+    this.setConnected(false)
+    document.removeEventListener('visibilitychange', this.handleWake)
+    window.removeEventListener('online', this.handleWake)
+    window.removeEventListener('pageshow', this.handleWake)
   }
 
   private async validateAndConnect(token: string): Promise<void> {
@@ -1090,8 +1144,8 @@ const _remoteTransports = new Map<string, WsTransport>()
 
 // Track globally-registered listen() handlers (native mode, no backendHandle)
 // so new remote transports added later get the same handlers retroactively.
-type GlobalHandler = {
-  fn: (event: { payload: unknown }) => void
+interface GlobalHandler {
+  fn: (event: BackendEvent<unknown>) => void
   remoteUnsubs: Map<string, () => void>
 }
 const _globalHandlers = new Map<string, Set<GlobalHandler>>()
@@ -1101,11 +1155,11 @@ const _globalHandlers = new Map<string, Set<GlobalHandler>>()
  * All existing global listen() handlers are retroactively registered on it.
  * Call this after connect_remote_server succeeds.
  */
-export function registerRemoteTransport(
+export async function registerRemoteTransport(
   serverId: string,
   localPort: number,
   token: string
-): void {
+): Promise<void> {
   // Clean up any stale transport for this server
   unregisterRemoteTransport(serverId)
 
@@ -1118,11 +1172,22 @@ export function registerRemoteTransport(
   // Register all existing global handlers on this new transport
   for (const [event, entries] of _globalHandlers) {
     for (const entry of entries) {
-      entry.remoteUnsubs.set(serverId, transport.listen(event, entry.fn))
+      entry.remoteUnsubs.set(
+        serverId,
+        transport.listen(event, remoteEvent =>
+          entry.fn({ ...remoteEvent, backendHandle: serverId })
+        )
+      )
     }
   }
 
   transport.enableConnect()
+  try {
+    await transport.waitUntilConnected()
+  } catch (error) {
+    unregisterRemoteTransport(serverId)
+    throw error
+  }
 }
 
 /**
@@ -1140,6 +1205,7 @@ export function unregisterRemoteTransport(serverId: string): void {
     }
   }
 
+  transport.shutdown()
   _remoteTransports.delete(serverId)
 }
 

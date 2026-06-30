@@ -38,17 +38,25 @@ import { generateId } from '@/lib/uuid'
 
 export function CliLoginModal() {
   const [retryKey, setRetryKey] = useState(0)
-  const { isOpen, cliType, command, commandArgs, action, closeModal } =
-    useUIStore(
-      useShallow(state => ({
-        isOpen: state.cliLoginModalOpen,
-        cliType: state.cliLoginModalType,
-        command: state.cliLoginModalCommand,
-        commandArgs: state.cliLoginModalCommandArgs,
-        action: state.cliLoginModalAction,
-        closeModal: state.closeCliLoginModal,
-      }))
-    )
+  const {
+    isOpen,
+    cliType,
+    command,
+    commandArgs,
+    action,
+    backendHandle,
+    closeModal,
+  } = useUIStore(
+    useShallow(state => ({
+      isOpen: state.cliLoginModalOpen,
+      cliType: state.cliLoginModalType,
+      command: state.cliLoginModalCommand,
+      commandArgs: state.cliLoginModalCommandArgs,
+      action: state.cliLoginModalAction,
+      backendHandle: state.cliLoginModalBackendHandle,
+      closeModal: state.closeCliLoginModal,
+    }))
+  )
 
   // Only render when open to avoid unnecessary terminal setup
   if (!isOpen || !command) return null
@@ -60,6 +68,7 @@ export function CliLoginModal() {
       command={command}
       commandArgs={commandArgs}
       action={action}
+      backendHandle={backendHandle}
       onClose={closeModal}
       onRetry={() => setRetryKey(k => k + 1)}
     />
@@ -81,6 +90,7 @@ interface CliLoginModalContentProps {
   command: string
   commandArgs: string[] | null
   action: 'login' | 'update' | 'install'
+  backendHandle: string | null
   onClose: () => void
   onRetry: () => void
 }
@@ -90,6 +100,7 @@ function CliLoginModalContent({
   command,
   commandArgs,
   action,
+  backendHandle,
   onClose,
   onRetry,
 }: CliLoginModalContentProps) {
@@ -150,12 +161,13 @@ function CliLoginModalContent({
           outputBufferRef.current =
             outputBufferRef.current.slice(-MAX_OUTPUT_LINES)
         }
-      }
+      },
+      backendHandle
     )
     return () => {
       unlisten.then(fn => fn())
     }
-  }, [terminalId])
+  }, [terminalId, backendHandle])
 
   // Use a synthetic worktreeId for CLI login (not associated with any real worktree)
   const { initTerminal, fit } = useTerminal({
@@ -164,6 +176,7 @@ function CliLoginModalContent({
     worktreePath: '/tmp', // CLI commands don't depend on cwd
     command,
     commandArgs,
+    backendHandle,
   })
 
   const terminalBg = useTerminalBackgroundColor()
@@ -217,12 +230,15 @@ function CliLoginModalContent({
       if (observerRef.current) {
         observerRef.current.disconnect()
       }
-      invoke('stop_terminal', { terminalId }).catch(() => {
+      invoke('stop_terminal', {
+        terminalId,
+        ...(backendHandle ? { _backendHandle: backendHandle } : {}),
+      }).catch(() => {
         // Terminal may already be stopped
       })
       disposeTerminal(terminalId)
     }
-  }, [terminalId])
+  }, [terminalId, backendHandle])
 
   // Cleanup terminal when modal closes
   const handleOpenChange = useCallback(
@@ -230,7 +246,10 @@ function CliLoginModalContent({
       if (!open) {
         // Stop PTY process
         try {
-          await invoke('stop_terminal', { terminalId })
+          await invoke('stop_terminal', {
+            terminalId,
+            ...(backendHandle ? { _backendHandle: backendHandle } : {}),
+          })
         } catch {
           // Terminal may already be stopped
         }
@@ -239,7 +258,11 @@ function CliLoginModalContent({
 
         // Invalidate caches so views auto-refetch after login/update
         if (cliType === 'claude') {
-          queryClient.invalidateQueries({ queryKey: claudeCliQueryKeys.all })
+          queryClient.invalidateQueries({
+            queryKey: backendHandle
+              ? claudeCliQueryKeys.auth(backendHandle)
+              : claudeCliQueryKeys.all,
+          })
         } else if (cliType === 'gh') {
           queryClient.invalidateQueries({ queryKey: ghCliQueryKeys.all })
           queryClient.invalidateQueries({ queryKey: githubQueryKeys.all })
@@ -269,7 +292,7 @@ function CliLoginModalContent({
         onClose()
       }
     },
-    [terminalId, onClose, cliType, queryClient]
+    [terminalId, onClose, cliType, queryClient, backendHandle]
   )
 
   // Auto-close modal on success, show error on failure

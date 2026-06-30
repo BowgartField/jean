@@ -11,6 +11,7 @@ import {
   Terminal,
   Trash2,
 } from 'lucide-react'
+import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
@@ -45,6 +46,7 @@ import { isNativeApp } from '@/lib/environment'
 import { useRemoteServers } from '@/services/remote-servers'
 import { invoke } from '@/lib/transport'
 import type { RemoteClone } from '@/types/projects'
+import { RunWhereModal } from '@/components/remote/RunWhereModal'
 
 interface ProjectContextMenuProps {
   project: Project
@@ -55,6 +57,7 @@ export function ProjectContextMenu({
   project,
   children,
 }: ProjectContextMenuProps) {
+  const [runWhereOpen, setRunWhereOpen] = useState(false)
   const createBaseSession = useCreateBaseSession()
   const moveItem = useMoveItem()
   const removeProject = useRemoveProject()
@@ -103,13 +106,27 @@ export function ProjectContextMenu({
     })
   }
 
+  const [newWorktreeWhereOpen, setNewWorktreeWhereOpen] = useState(false)
+
   const handleNewWorktree = () => {
     selectProject(project.id)
-    setNewWorktreeModalOpen(true)
+    if ((project.remote_clones?.length ?? 0) > 0) {
+      setNewWorktreeWhereOpen(true)
+    } else {
+      setNewWorktreeModalOpen(true)
+    }
   }
 
   const handleNewBaseSession = () => {
-    createBaseSession.mutate(project.id)
+    if (cloneableServers.length > 0) {
+      setRunWhereOpen(true)
+    } else {
+      createBaseSession.mutate({ projectId: project.id })
+    }
+  }
+
+  const handleRunWhereSelect = (serverId: string | null) => {
+    createBaseSession.mutate({ projectId: project.id, serverId: serverId ?? undefined })
   }
 
   const handleRemoveProject = () => {
@@ -134,7 +151,17 @@ export function ProjectContextMenu({
       projectId: project.id,
       serverId,
     })
-      .then(() => {
+      .then(async clone => {
+        // Register the project on the remote jean-server so it appears in
+        // Remote view and sessions can be created there.
+        try {
+          await invoke('add_project', {
+            path: clone.remote_path,
+            _backendHandle: serverId,
+          })
+        } catch {
+          // Project might already be registered — not fatal
+        }
         queryClient.invalidateQueries({ queryKey: projectsQueryKeys.list() })
         toast.success(`Cloned to ${serverName}`, { id: toastId })
       })
@@ -144,6 +171,7 @@ export function ProjectContextMenu({
   }
 
   return (
+    <>
     <ContextMenu>
       <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
       <ContextMenuContent className="w-64">
@@ -243,5 +271,20 @@ export function ProjectContextMenu({
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
+    <RunWhereModal
+      open={runWhereOpen}
+      onOpenChange={setRunWhereOpen}
+      onSelect={handleRunWhereSelect}
+      projectName={project.name}
+      clonedServerIds={(project.remote_clones ?? []).map(c => c.server_id)}
+    />
+    <RunWhereModal
+      open={newWorktreeWhereOpen}
+      onOpenChange={setNewWorktreeWhereOpen}
+      onSelect={serverId => setNewWorktreeModalOpen(true, serverId)}
+      projectName={project.name}
+      clonedServerIds={(project.remote_clones ?? []).map(c => c.server_id)}
+    />
+    </>
   )
 }

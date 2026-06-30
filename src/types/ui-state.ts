@@ -105,6 +105,8 @@ export interface UIState {
     string,
     { worktree_id: string; session_id: string }
   >
+  /** Maps worktree ID → remote server ID (persists routing across restarts) */
+  worktree_remote_server_ids?: Record<string, string>
   version: number
 }
 

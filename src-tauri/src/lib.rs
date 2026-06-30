@@ -2387,6 +2387,10 @@ pub struct UIState {
     #[serde(default)]
     pub last_opened_per_project: std::collections::HashMap<String, LastOpenedEntry>,
 
+    /// Maps worktree ID → remote server ID (persists routing across restarts)
+    #[serde(default)]
+    pub worktree_remote_server_ids: std::collections::HashMap<String, String>,
+
     /// Version for future migration support
     #[serde(default = "default_ui_state_version")]
     pub version: u32,
@@ -2470,6 +2474,7 @@ impl Default for UIState {
             project_canvas_settings: std::collections::HashMap::new(),
             github_dashboard_favorite_project_ids: Vec::new(),
             last_opened_per_project: std::collections::HashMap::new(),
+            worktree_remote_server_ids: std::collections::HashMap::new(),
             version: default_ui_state_version(),
         }
     }
@@ -4574,6 +4579,8 @@ pub fn run() {
             remote::disconnect_remote_server,
             remote::get_remote_server_status,
             remote::clone_project_to_remote,
+            remote::get_local_tool_status,
+            remote::install_gh_on_remote,
             set_window_vibrancy,
             save_cli_profile,
             delete_cli_profile,

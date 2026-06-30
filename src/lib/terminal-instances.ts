@@ -839,11 +839,10 @@ function handleTerminalStopped(event: TerminalStoppedEvent): void {
     const stoppedHandle = inst.backendHandle
     setTimeout(() => {
       if (!instances.has(terminalId)) return // Already disposed
-      // eslint-disable-next-line @typescript-eslint/no-empty-function
       invoke('stop_terminal', {
         terminalId,
         ...(stoppedHandle ? { _backendHandle: stoppedHandle } : {}),
-      }).catch(() => {})
+      }).catch(() => undefined)
       disposeTerminal(terminalId)
       const { removeTerminal, setTerminalPanelOpen } =
         useTerminalStore.getState()

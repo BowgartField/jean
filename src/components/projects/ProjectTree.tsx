@@ -53,7 +53,6 @@ function getMaxSubtreeDepth(projects: Project[], itemId: string): number {
 
 interface ProjectTreeProps {
   projects: Project[]
-  remoteView?: boolean
 }
 
 function canMoveIntoFolder({
@@ -129,7 +128,6 @@ interface SortableItemProps {
   overFolderId: string | null
   insertBeforeId: string | null
   activeId: string | null
-  remoteView?: boolean
 }
 
 function SortableItem({
@@ -141,7 +139,6 @@ function SortableItem({
   overFolderId,
   insertBeforeId,
   activeId,
-  remoteView,
 }: SortableItemProps) {
   const elementRef = useRef<HTMLDivElement | null>(null)
 
@@ -195,14 +192,8 @@ function SortableItem({
     )
   }, [allProjects, item])
 
-  // In remote view, dim projects that haven't been cloned to any server
-  const isNotCloned =
-    remoteView &&
-    !isFolder(item) &&
-    !((item.remote_clones?.length ?? 0) > 0)
-
   const style: React.CSSProperties = {
-    opacity: activeId === item.id ? 0.35 : isNotCloned ? 0.5 : 1,
+    opacity: activeId === item.id ? 0.35 : 1,
     paddingLeft: depth > 0 ? `${depth * 12}px` : undefined,
   }
 
@@ -237,7 +228,6 @@ function SortableItem({
               overFolderId={overFolderId}
               insertBeforeId={insertBeforeId}
               activeId={activeId}
-              remoteView={remoteView}
             />
           )}
         </FolderTreeItem>
@@ -260,17 +250,6 @@ function SortableItem({
     </div>
   )
 
-  if (isNotCloned) {
-    return (
-      <Tooltip>
-        <TooltipTrigger asChild>{projectEl}</TooltipTrigger>
-        <TooltipContent side="right">
-          Not cloned on any remote server
-        </TooltipContent>
-      </Tooltip>
-    )
-  }
-
   return projectEl
 }
 
@@ -283,7 +262,6 @@ interface NestedItemsProps {
   overFolderId: string | null
   insertBeforeId: string | null
   activeId: string | null
-  remoteView?: boolean
 }
 
 function NestedItems({
@@ -294,7 +272,6 @@ function NestedItems({
   overFolderId,
   insertBeforeId,
   activeId,
-  remoteView,
 }: NestedItemsProps) {
   const items = projects
     .filter(p => p.parent_id === parentId)
@@ -317,7 +294,6 @@ function NestedItems({
           overFolderId={overFolderId}
           insertBeforeId={insertBeforeId}
           activeId={activeId}
-          remoteView={remoteView}
         />
       ))}
     </>
@@ -358,7 +334,7 @@ function RootDropZone({ isOver }: { isOver: boolean }) {
   )
 }
 
-export function ProjectTree({ projects, remoteView = false }: ProjectTreeProps) {
+export function ProjectTree({ projects,  }: ProjectTreeProps) {
   const reorderItems = useReorderItems()
   const moveItem = useMoveItem()
   const {
@@ -785,7 +761,6 @@ export function ProjectTree({ projects, remoteView = false }: ProjectTreeProps) 
           overFolderId={overFolderId}
           insertBeforeId={insertBeforeId}
           activeId={activeId}
-          remoteView={remoteView}
         />
       ))}
       {hasBothTypes && (
@@ -839,7 +814,6 @@ export function ProjectTree({ projects, remoteView = false }: ProjectTreeProps) 
           overFolderId={overFolderId}
           insertBeforeId={insertBeforeId}
           activeId={activeId}
-          remoteView={remoteView}
         />
       ))}
 

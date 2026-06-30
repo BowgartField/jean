@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import userEvent from '@testing-library/user-event'
 import { render, screen, waitFor } from '@/test/test-utils'
 import type { RemoteServerConfig } from '@/types/remote'
+import { useUIStore } from '@/store/ui-store'
 import { RemoteServersPane } from './RemoteServersPane'
 
 const mocks = vi.hoisted(() => ({
@@ -14,6 +15,25 @@ const mocks = vi.hoisted(() => ({
   connect: vi.fn(),
   disconnect: vi.fn(),
   refetch: vi.fn(),
+  claudeInstalled: true,
+  claudeAuthenticated: false,
+  invoke: vi.fn(),
+}))
+
+vi.mock('@/services/claude-cli', () => ({
+  useClaudeCliStatus: () => ({
+    data: {
+      installed: mocks.claudeInstalled,
+      version: '2.1.196',
+      path: '/opt/jean/bin/claude',
+      supports_auth_command: true,
+    },
+    isLoading: false,
+  }),
+  useClaudeCliAuth: () => ({
+    data: { authenticated: mocks.claudeAuthenticated, error: null },
+    isLoading: false,
+  }),
 }))
 
 vi.mock('@/services/remote-servers', () => ({
@@ -42,6 +62,7 @@ vi.mock('@/services/remote-servers', () => ({
 
 vi.mock('@/lib/transport', () => ({
   listen: vi.fn(async () => vi.fn()),
+  invoke: mocks.invoke,
 }))
 
 vi.mock('@/lib/platform', () => ({
@@ -61,10 +82,10 @@ const server: RemoteServerConfig = {
   name: 'Test server',
   host: '203.0.113.10',
   port: 22,
-  username: 'root',
+  username: 'test-user',
   auth: {
     type: 'ssh_key_path',
-    path: '~/.ssh/id_rsa',
+    path: '~/.ssh/id_test',
     passphrase: 'test-passphrase',
   },
   default: true,
@@ -83,6 +104,10 @@ describe('RemoteServersPane', () => {
       }
     })
     mocks.add.mockResolvedValue(server)
+    mocks.claudeInstalled = true
+    mocks.claudeAuthenticated = false
+    mocks.invoke.mockResolvedValue({ claude_cli: false, gh_cli: false })
+    useUIStore.getState().closeCliLoginModal()
     mocks.test.mockResolvedValue({
       success: true,
       message: 'SSH connection successful',
@@ -101,8 +126,10 @@ describe('RemoteServersPane', () => {
     )
     await user.type(screen.getByLabelText('Display name'), 'Test server')
     await user.type(screen.getByLabelText('Host or IP address'), '203.0.113.10')
+    await user.clear(screen.getByLabelText('SSH username'))
+    await user.type(screen.getByLabelText('SSH username'), 'test-user')
     await user.clear(screen.getByLabelText('Private key path'))
-    await user.type(screen.getByLabelText('Private key path'), '~/.ssh/id_rsa')
+    await user.type(screen.getByLabelText('Private key path'), '~/.ssh/id_test')
     await user.type(screen.getByLabelText(/Key passphrase/), 'test-passphrase')
     await user.click(screen.getByRole('button', { name: 'Add server' }))
 
@@ -111,10 +138,10 @@ describe('RemoteServersPane', () => {
         name: 'Test server',
         host: '203.0.113.10',
         port: 22,
-        username: 'root',
+        username: 'test-user',
         auth: {
           type: 'ssh_key_path',
-          path: '~/.ssh/id_rsa',
+          path: '~/.ssh/id_test',
           passphrase: 'test-passphrase',
         },
         default: false,
@@ -161,5 +188,32 @@ describe('RemoteServersPane', () => {
     await waitFor(() => {
       expect(mocks.provision).toHaveBeenCalledWith('server-1')
     })
+  })
+
+  it('detects missing Claude auth and opens login on the remote backend', async () => {
+    mocks.servers = [{ ...server, status: 'connected' }]
+    const user = userEvent.setup()
+    render(<RemoteServersPane />)
+
+    expect(screen.getByText('Login required')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Login' }))
+
+    expect(useUIStore.getState()).toMatchObject({
+      cliLoginModalOpen: true,
+      cliLoginModalType: 'claude',
+      cliLoginModalCommand: '/opt/jean/bin/claude',
+      cliLoginModalCommandArgs: ['auth', 'login'],
+      cliLoginModalBackendHandle: 'server-1',
+    })
+  })
+
+  it('shows when Claude is authenticated on the remote backend', () => {
+    mocks.servers = [{ ...server, status: 'connected' }]
+    mocks.claudeAuthenticated = true
+
+    render(<RemoteServersPane />)
+
+    expect(screen.getByText('Logged in')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Login' })).toBeNull()
   })
 })

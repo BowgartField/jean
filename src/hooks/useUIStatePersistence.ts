@@ -83,6 +83,7 @@ export function useUIStatePersistence() {
       activeSessionIds,
       reviewSidebarVisible,
       lastOpenedPerProject,
+      worktreeRemoteServerIds,
     } = useChatStore.getState()
     const {
       expandedProjectIds,
@@ -202,6 +203,7 @@ export function useUIStatePersistence() {
           { worktree_id: entry.worktreeId, session_id: entry.sessionId },
         ])
       ),
+      worktree_remote_server_ids: { ...worktreeRemoteServerIds },
       version: 1, // Reset for first release
     }
   }, [])
@@ -335,6 +337,14 @@ export function useUIStatePersistence() {
       const { setActiveSession } = useChatStore.getState()
       for (const [worktreeId, sessionId] of Object.entries(activeSessionIds)) {
         setActiveSession(worktreeId, sessionId, { markOpened: false })
+      }
+    }
+
+    // Restore worktree → remote server mapping
+    const worktreeRemoteServerIds = uiState.worktree_remote_server_ids ?? {}
+    if (Object.keys(worktreeRemoteServerIds).length > 0) {
+      for (const [worktreeId, serverId] of Object.entries(worktreeRemoteServerIds)) {
+        useChatStore.getState().setWorktreeRemoteServer(worktreeId, serverId)
       }
     }
 
@@ -941,6 +951,7 @@ export function useUIStatePersistence() {
 
     // Subscribe to chat-store changes (active worktree, sessions, and worktree-scoped state)
     // NOTE: Session-specific state is handled by useSessionStatePersistence
+    let prevRemoteServerIds = useChatStore.getState().worktreeRemoteServerIds
     const unsubChat = useChatStore.subscribe(state => {
       // Check if active worktree or active sessions changed
       const worktreeChanged =
@@ -952,12 +963,15 @@ export function useUIStatePersistence() {
         state.reviewSidebarVisible !== prevReviewSidebarVisible
       const lastOpenedChanged =
         state.lastOpenedPerProject !== prevLastOpenedPerProject
+      const remoteServersChanged =
+        state.worktreeRemoteServerIds !== prevRemoteServerIds
 
       if (
         worktreeChanged ||
         sessionsChanged ||
         reviewSidebarChanged ||
-        lastOpenedChanged
+        lastOpenedChanged ||
+        remoteServersChanged
       ) {
         prevWorktreeId = state.activeWorktreeId
         prevWorktreePath = state.activeWorktreePath
@@ -965,6 +979,7 @@ export function useUIStatePersistence() {
         prevActiveSessionIds = state.activeSessionIds
         prevReviewSidebarVisible = state.reviewSidebarVisible
         prevLastOpenedPerProject = state.lastOpenedPerProject
+        prevRemoteServerIds = state.worktreeRemoteServerIds
         const currentState = getCurrentUIState()
         debouncedSaveRef.current?.(currentState)
       }

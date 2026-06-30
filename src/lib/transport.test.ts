@@ -53,6 +53,18 @@ async function loadTransportModule() {
   return import('./transport')
 }
 
+async function loadNativeTransportModule() {
+  vi.resetModules()
+  vi.doMock('./environment', () => ({
+    isNativeApp: () => true,
+    setWsConnected: setWsConnectedMock,
+  }))
+  vi.doMock('@tauri-apps/api/event', () => ({
+    listen: vi.fn(async () => () => undefined),
+  }))
+  return import('./transport')
+}
+
 describe('transport bootstrap', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -238,6 +250,51 @@ describe('transport bootstrap', () => {
     getWs(0).receive({ type: 'heartbeat' })
 
     expect(handler).not.toHaveBeenCalled()
+  })
+
+  it('identifies the remote backend that emitted a global event', async () => {
+    const transport = await loadNativeTransportModule()
+    const handler = vi.fn()
+
+    const registration = transport.registerRemoteTransport(
+      'server-test',
+      3456,
+      'token'
+    )
+    await transport.listen('worktree:created', handler)
+    await flushAsync()
+    await registration
+
+    getWs(0).receive({
+      type: 'event',
+      event: 'worktree:created',
+      payload: { worktree: { id: 'worktree-1' } },
+    })
+
+    expect(handler).toHaveBeenCalledWith({
+      payload: { worktree: { id: 'worktree-1' } },
+      backendHandle: 'server-test',
+    })
+
+    transport.unregisterRemoteTransport('server-test')
+  })
+
+  it('waits for the remote websocket before registration succeeds', async () => {
+    const transport = await loadNativeTransportModule()
+    let registered = false
+
+    const registration = transport
+      .registerRemoteTransport('server-test', 3456, 'token')
+      .then(() => {
+        registered = true
+      })
+
+    expect(registered).toBe(false)
+    await flushAsync()
+    await registration
+    expect(registered).toBe(true)
+
+    transport.unregisterRemoteTransport('server-test')
   })
 
   it('keeps idle websocket alive when app-level heartbeats arrive', async () => {

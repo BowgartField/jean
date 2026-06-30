@@ -71,3 +71,13 @@ export interface RemoteServerStatusInfo {
   remote_port: number
   last_error?: string | null
 }
+
+export interface LocalToolStatus {
+  claude_cli: boolean
+  gh_cli: boolean
+}
+
+export interface ToolsToInstall {
+  claudeCli: boolean
+  ghCli: boolean
+}

@@ -39,6 +39,7 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
     createWorktree,
     createBaseSession,
     createWorktreeFromBranch,
+    newWorktreeServerId,
   } = data
 
   const {
@@ -146,7 +147,7 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
         toast.error('No project selected')
         return
       }
-      createWorktree.mutate({ projectId: selectedProjectId, customName })
+      createWorktree.mutate({ projectId: selectedProjectId, customName, serverId: newWorktreeServerId })
       handleOpenChange(false)
     },
     [selectedProjectId, createWorktree, handleOpenChange]
@@ -164,6 +165,10 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
       useChatStore
         .getState()
         .registerWorktreePath(baseSession.id, baseSession.path)
+      // Pin server routing if this is a remote base session
+      if (baseSession._server_id) {
+        useChatStore.getState().setWorktreeRemoteServer(baseSession.id, baseSession._server_id)
+      }
 
       // Close NewWorktreeModal first
       handleOpenChange(false)
@@ -180,13 +185,14 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
       toast.success(`Switched to base session: ${baseSession.name}`)
       return
     } else {
-      createBaseSession.mutate(selectedProjectId)
+      createBaseSession.mutate({ projectId: selectedProjectId, serverId: newWorktreeServerId ?? undefined })
     }
     handleOpenChange(false)
   }, [
     selectedProjectId,
     hasBaseSession,
     baseSession,
+    newWorktreeServerId,
     createBaseSession,
     handleOpenChange,
   ])
@@ -255,6 +261,7 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
           useUIStore.getState().incrementPendingBackgroundCreations()
         createWorktree.mutate({
           projectId: selectedProjectId,
+          serverId: newWorktreeServerId,
           issueContext,
           background,
         })
@@ -314,6 +321,7 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
 
         const worktree = await createWorktree.mutateAsync({
           projectId: selectedProjectId,
+          serverId: newWorktreeServerId,
           issueContext,
           background,
         })
@@ -389,6 +397,7 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
           useUIStore.getState().incrementPendingBackgroundCreations()
         createWorktree.mutate({
           projectId: selectedProjectId,
+          serverId: newWorktreeServerId,
           prContext,
           background,
         })
@@ -464,6 +473,7 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
 
         const worktree = await createWorktree.mutateAsync({
           projectId: selectedProjectId,
+          serverId: newWorktreeServerId,
           prContext,
           background,
         })
@@ -518,6 +528,7 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
           useUIStore.getState().incrementPendingBackgroundCreations()
         createWorktree.mutate({
           projectId: selectedProjectId,
+          serverId: newWorktreeServerId,
           securityContext,
           background,
         })
@@ -572,6 +583,7 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
 
         const worktree = await createWorktree.mutateAsync({
           projectId: selectedProjectId,
+          serverId: newWorktreeServerId,
           securityContext,
           background,
         })
@@ -630,6 +642,7 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
           useUIStore.getState().incrementPendingBackgroundCreations()
         createWorktree.mutate({
           projectId: selectedProjectId,
+          serverId: newWorktreeServerId,
           advisoryContext,
           background,
         })
@@ -686,6 +699,7 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
 
         const worktree = await createWorktree.mutateAsync({
           projectId: selectedProjectId,
+          serverId: newWorktreeServerId,
           advisoryContext,
           background,
         })
@@ -737,6 +751,7 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
           useUIStore.getState().incrementPendingBackgroundCreations()
         createWorktree.mutate({
           projectId: selectedProjectId,
+          serverId: newWorktreeServerId,
           linearContext,
           background,
         })
@@ -781,6 +796,7 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
           useUIStore.getState().incrementPendingBackgroundCreations()
         const worktree = await createWorktree.mutateAsync({
           projectId: selectedProjectId,
+          serverId: newWorktreeServerId,
           linearContext,
           background,
         })
@@ -822,6 +838,7 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
           projectId: selectedProjectId,
           baseBranch: pr.headRefName,
           background,
+          serverId: newWorktreeServerId,
         },
         {
           onError: () => setStackingFromPR(null),
@@ -849,6 +866,7 @@ export function useNewWorktreeHandlers(data: Data, setters: Setters) {
           projectId: selectedProjectId,
           baseBranch: branchName,
           background,
+          serverId: newWorktreeServerId,
         },
         {
           onError: () => setStackingFromBranch(null),

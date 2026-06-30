@@ -92,15 +92,26 @@ export function useProvisionRemoteServer() {
 }
 
 export function useConnectRemoteServer() {
+  const queryClient = useQueryClient()
   return useRemoteServerMutation<string, RemoteConnection>(async serverId => {
     const connection = await invoke<RemoteConnection>('connect_remote_server', {
       serverId,
     })
-    registerRemoteTransport(
-      connection.server_id,
-      connection.local_port,
-      connection.token
-    )
+    try {
+      await registerRemoteTransport(
+        connection.server_id,
+        connection.local_port,
+        connection.token
+      )
+    } catch (error) {
+      await invoke('disconnect_remote_server', { serverId }).catch(
+        () => undefined
+      )
+      throw error
+    }
+    await queryClient.invalidateQueries({
+      queryKey: ['projects', 'worktrees'],
+    })
     return connection
   })
 }

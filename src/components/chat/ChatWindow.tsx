@@ -264,6 +264,9 @@ export function ChatWindow({
   const storeWorktreePath = useChatStore(state => state.activeWorktreePath)
   const activeWorktreeId = propWorktreeId ?? storeWorktreeId
   const activeWorktreePath = propWorktreePath ?? storeWorktreePath
+  const earlyRemoteServerId = useChatStore(state =>
+    activeWorktreeId ? (state.worktreeRemoteServerIds[activeWorktreeId] ?? null) : null
+  )
   const hasPendingAutoInvestigate = useUIStore(state => {
     if (!activeWorktreeId) return false
     return (
@@ -378,7 +381,7 @@ export function ChatWindow({
     data: sessionsData,
     isLoading: isSessionsLoading,
     isFetching: isSessionsFetching,
-  } = useSessions(activeWorktreeId, activeWorktreePath)
+  } = useSessions(activeWorktreeId, activeWorktreePath, { serverId: earlyRemoteServerId ?? undefined })
 
   const uiStateInitialized = useUIStore(state => state.uiStateInitialized)
 
@@ -846,8 +849,16 @@ export function ChatWindow({
   // PERFORMANCE: Track hasValue via callback from ChatInput instead of store subscription
   // ChatInput notifies on mount, session change, and empty/non-empty boundary changes
   const [hasInputValue, setHasInputValue] = useState(false)
-  // Remote server to run this session on (null = local). Phase 3 feature.
-  const [remoteServerId, setRemoteServerId] = useState<string | null>(null)
+
+  // Remote server for this worktree — set at session creation or when clicking
+  // a remote worktree in the sidebar. Purely from the pinned store value.
+  const remoteServerId = useChatStore(s =>
+    activeWorktreeId ? (s.worktreeRemoteServerIds[activeWorktreeId] ?? null) : null
+  )
+  const remoteServerIdRef = useRef<string | null>(null)
+  remoteServerIdRef.current = remoteServerId
+
+
   // Per-session execution mode (defaults to preference or 'plan' for new sessions)
   // Uses deferredSessionId for display consistency with other content
   const defaultExecutionMode = preferences?.default_execution_mode ?? 'plan'
@@ -1370,6 +1381,7 @@ export function ChatWindow({
         thinkingLevel: yoloThinkingLevel,
         effortLevel: yoloEffortLevel,
         backend: yoloBackend,
+        backendHandle: remoteServerIdRef.current,
       })
     },
     [
@@ -1556,6 +1568,7 @@ export function ChatWindow({
         thinkingLevel: buildThinkingLevel,
         effortLevel: buildEffortLevel,
         backend: buildBackend,
+        backendHandle: remoteServerIdRef.current,
       })
     },
     [
@@ -1826,6 +1839,7 @@ export function ChatWindow({
         thinkingLevel,
         effortLevel,
         backend: modeBackend,
+        backendHandle: remoteServerIdRef.current,
       })
     },
     [
@@ -1919,6 +1933,7 @@ export function ChatWindow({
         backend: backend ?? undefined,
         executionMode,
         thinkingLevel: selectedThinkingLevelRef.current,
+        backendHandle: remoteServerIdRef.current,
       })
     },
     [

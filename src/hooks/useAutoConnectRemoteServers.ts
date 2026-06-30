@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { invoke, registerRemoteTransport } from '@/lib/transport'
 import type { RemoteConnection } from '@/types/remote'
 import { useRemoteServers } from '@/services/remote-servers'
@@ -10,6 +11,7 @@ import { useRemoteServers } from '@/services/remote-servers'
  */
 export function useAutoConnectRemoteServers(): void {
   const { data: servers } = useRemoteServers()
+  const queryClient = useQueryClient()
   const hasConnectedRef = useRef(false)
 
   useEffect(() => {
@@ -22,16 +24,27 @@ export function useAutoConnectRemoteServers(): void {
       if (!server.http_token) continue
 
       invoke<RemoteConnection>('connect_remote_server', { serverId: server.id })
-        .then(connection => {
-          registerRemoteTransport(
+        .then(async connection => {
+          await registerRemoteTransport(
             connection.server_id,
             connection.local_port,
             connection.token
           )
+          await Promise.all([
+            queryClient.invalidateQueries({
+              queryKey: ['projects', 'worktrees'],
+            }),
+            queryClient.invalidateQueries({
+              queryKey: ['remote-servers'],
+            }),
+          ])
         })
         .catch(() => {
+          void invoke('disconnect_remote_server', {
+            serverId: server.id,
+          }).catch(() => undefined)
           // Silent — failed connections are surfaced through server status polling
         })
     }
-  }, [servers])
+  }, [servers, queryClient])
 }

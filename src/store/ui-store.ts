@@ -92,6 +92,7 @@ interface UIState {
   resolveConflictsDialogOpen: boolean
   newWorktreeModalOpen: boolean
   newWorktreeModalDefaultTab: 'quick' | 'issues' | 'prs' | 'security' | null
+  newWorktreeServerId: string | null
   releaseNotesModalOpen: boolean
   updatePrModalOpen: boolean
   reviewCommentsModalOpen: boolean
@@ -105,6 +106,7 @@ interface UIState {
   cliLoginModalCommand: string | null
   cliLoginModalCommandArgs: string[] | null
   cliLoginModalAction: 'login' | 'update' | 'install'
+  cliLoginModalBackendHandle: string | null
   /** Worktree IDs that should auto-trigger investigate-issue when created */
   autoInvestigateWorktreeIds: Set<string>
   /** Worktree IDs that should auto-trigger investigate-pr when created */
@@ -178,7 +180,7 @@ interface UIState {
   setLinkedProjectsModalOpen: (open: boolean) => void
   setMagicModalOpen: (open: boolean) => void
   setResolveConflictsDialogOpen: (open: boolean) => void
-  setNewWorktreeModalOpen: (open: boolean) => void
+  setNewWorktreeModalOpen: (open: boolean, serverId?: string | null) => void
   setNewWorktreeModalDefaultTab: (
     tab: 'quick' | 'issues' | 'prs' | 'security' | null
   ) => void
@@ -196,7 +198,8 @@ interface UIState {
     type: Exclude<CliLoginModalType, null>,
     command: string,
     commandArgs?: string[],
-    action?: 'login' | 'update' | 'install'
+    action?: 'login' | 'update' | 'install',
+    backendHandle?: string | null
   ) => void
   closeCliLoginModal: () => void
   incrementPendingBackgroundCreations: () => void
@@ -278,6 +281,7 @@ export const useUIStore = create<UIState>()(
       resolveConflictsDialogOpen: false,
       newWorktreeModalOpen: false,
       newWorktreeModalDefaultTab: null,
+      newWorktreeServerId: null,
       releaseNotesModalOpen: false,
       updatePrModalOpen: false,
       reviewCommentsModalOpen: false,
@@ -291,6 +295,7 @@ export const useUIStore = create<UIState>()(
       cliLoginModalCommand: null,
       cliLoginModalCommandArgs: null,
       cliLoginModalAction: 'login',
+      cliLoginModalBackendHandle: null,
       autoInvestigateWorktreeIds: new Set(),
       autoInvestigatePRWorktreeIds: new Set(),
       autoInvestigateSecurityAlertWorktreeIds: new Set(),
@@ -505,11 +510,11 @@ export const useUIStore = create<UIState>()(
           'setResolveConflictsDialogOpen'
         ),
 
-      setNewWorktreeModalOpen: open =>
+      setNewWorktreeModalOpen: (open, serverId) =>
         set(
           {
             newWorktreeModalOpen: open,
-            ...(open ? {} : { newWorktreeModalDefaultTab: null }),
+            ...(open ? { newWorktreeServerId: serverId ?? null } : { newWorktreeModalDefaultTab: null, newWorktreeServerId: null }),
           },
           undefined,
           'setNewWorktreeModalOpen'
@@ -573,7 +578,13 @@ export const useUIStore = create<UIState>()(
           'closeCliUpdateModal'
         ),
 
-      openCliLoginModal: (type, command, commandArgs, action) =>
+      openCliLoginModal: (
+        type,
+        command,
+        commandArgs,
+        action,
+        backendHandle
+      ) =>
         set(
           {
             cliLoginModalOpen: true,
@@ -581,6 +592,7 @@ export const useUIStore = create<UIState>()(
             cliLoginModalCommand: command,
             cliLoginModalCommandArgs: commandArgs ?? null,
             cliLoginModalAction: action ?? 'login',
+            cliLoginModalBackendHandle: backendHandle ?? null,
           },
           undefined,
           'openCliLoginModal'
@@ -594,6 +606,7 @@ export const useUIStore = create<UIState>()(
             cliLoginModalCommand: null,
             cliLoginModalCommandArgs: null,
             cliLoginModalAction: 'login',
+            cliLoginModalBackendHandle: null,
           },
           undefined,
           'closeCliLoginModal'

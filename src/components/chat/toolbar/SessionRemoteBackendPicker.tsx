@@ -22,12 +22,12 @@ export function SessionRemoteBackendPicker({
   const [open, setOpen] = useState(false)
   const { data: servers = [] } = useRemoteServers()
 
-  const connectedServers = servers.filter(
-    s => s.status === 'connected' && s.http_token
-  )
+  // Show picker for any provisioned server (http_token set), regardless of
+  // live connection status — user may have clicked Remote tab to connect.
+  const provisionedServers = servers.filter(s => s.http_token)
 
   // Only show this control when remote servers are actually available
-  if (connectedServers.length === 0) return null
+  if (provisionedServers.length === 0) return null
 
   const selectedServer = value ? servers.find(s => s.id === value) : null
   const label = selectedServer ? selectedServer.name : 'Local'
@@ -39,8 +39,10 @@ export function SessionRemoteBackendPicker({
           type="button"
           aria-label={`Session runs on: ${label}`}
           className={cn(
-            'inline-flex h-7 shrink-0 items-center gap-1 rounded-md border border-transparent px-1.5 text-xs font-medium transition-colors',
-            'text-muted-foreground hover:border-border hover:bg-accent hover:text-foreground'
+            'inline-flex h-7 shrink-0 items-center gap-1 rounded-md border px-1.5 text-xs font-medium transition-colors',
+            selectedServer
+              ? 'border-primary/30 bg-primary/10 text-foreground hover:bg-primary/15'
+              : 'border-transparent text-muted-foreground hover:border-border hover:bg-accent hover:text-foreground'
           )}
         >
           {selectedServer ? (
@@ -84,7 +86,7 @@ export function SessionRemoteBackendPicker({
           )}
         </button>
 
-        {connectedServers.map(server => (
+        {provisionedServers.map(server => (
           <button
             key={server.id}
             type="button"
