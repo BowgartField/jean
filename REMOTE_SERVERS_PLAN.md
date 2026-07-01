@@ -2,19 +2,25 @@
 
 ## Context
 
-Today Jean runs all AI sessions (Claude/Codex/Pi/Cursor/OpenCode CLIs), terminals, git, and file ops **locally** on the machine where the desktop app runs. The goal: let the user register **remote servers** (IP, port, SSH key/password), and run sessions that actually execute **on that server** — terminals, git, and the AI CLIs all run remote — while **local and remote sessions coexist in the same window** (decision 1b).
+Before this work, Jean ran AI sessions, terminals, git, and file operations
+only on the machine hosting the desktop app. Remote server support now lets the
+user register a Linux server and run project-scoped work on it while local and
+remote sessions coexist in the same window.
 
-Key enabling fact discovered during exploration: Jean **already** ships a headless server mode (`jean --headless --host --port --token`, `lib.rs:3433`+, `start_http_server_headless`) that exposes the entire command surface over HTTP+WebSocket (`http_server/dispatch.rs`), and the frontend (`src/lib/transport.ts`) **already** has a `WsTransport` client used for "web access". So a remote session = a headless Jean on the cloud box, reached through an **SSH tunnel**, driven by a second `WsTransport`. PTY terminals, detached Claude, the Pi RPC socket, and Codex stdio all "just work" remotely because they are *local* from the remote backend's perspective.
+Key enabling fact discovered during exploration: Jean **already** ships a headless server mode (`jean --headless --host --port --token`, `lib.rs:3433`+, `start_http_server_headless`) that exposes the entire command surface over HTTP+WebSocket (`http_server/dispatch.rs`), and the frontend (`src/lib/transport.ts`) **already** has a `WsTransport` client used for "web access". So a remote session = a headless Jean on the cloud box, reached through an **SSH tunnel**, driven by a second `WsTransport`. PTY terminals, detached Claude, the Pi RPC socket, and Codex stdio all "just work" remotely because they are _local_ from the remote backend's perspective.
 
-This is large. Plan is phased; Phase 1 alone is shippable value (one remote box, attach, terminal + chat working).
+The implementation was delivered in three phases. The primary Claude flow has
+been validated end to end on a provisioned Linux server.
 
 ## Decisions (locked)
+
 - **1b** Mixed local + remote sessions in one window.
 - **2a** SSH via the **system `ssh`/`scp`** binary (ControlMaster, `-L`/`-R`), not a Rust SSH crate.
 - **3b** Jean **auto-provisions** the server: check/install OpenSSH server, install Jean as a service, start it headless. Jean does **not** manage server OS updates.
 - **4a** AI CLIs authenticate **on the server** (user runs `claude login` etc. via the remote terminal).
 
 ## Headless runtime
+
 Jean's current headless entrypoint clears the window configuration, but Tauri's
 Linux event loop still initializes GTK first. Provisioning therefore runs the
 signed AppImage through `xvfb-run` until the server is decoupled from
@@ -39,10 +45,11 @@ A **remote project** is a project whose data lives on server S. Every operation 
 
 ## Phase 1 — Server management + provisioning + tunnel (backend foundation)
 
-**Implementation status (2026-06-29):** backend code, persistence, IPC/WebSocket
-dispatch, signed artifact provisioning, tunnel lifecycle, tests, and developer
-documentation are implemented. Real Linux VM validation remains required before
-Phase 1 can be considered production-verified.
+**Implementation status (2026-06-30): complete and manually validated.**
+Backend persistence, IPC/WebSocket dispatch, signed artifact provisioning,
+tunnel lifecycle, tests, and developer documentation are implemented. A real
+Linux server was provisioned, connected, and used for the complete remote
+Claude workflow.
 
 New Rust module `src-tauri/src/remote/` :
 
@@ -65,47 +72,74 @@ Phase-1 acceptance: from a terminal you can `connect`, then hit the tunneled hea
 
 ## Phase 2 — Client transport routing (the 1b core)
 
-In `src/lib/transport.ts`:
-- Replace the single `wsTransport` singleton with a **registry**: `getTransport(handle?: string): WsTransport` keyed by server id (`'default'` = local). Each `WsTransport` already tracks its own token/URL/reconnect/`_lastSeqBySession` — multiple instances coexist cleanly.
-- `invoke<T>(command, args)`: if `args._backendHandle` set → route to that remote transport (even though `isNativeApp()` is true, remote sessions use WS, not native IPC); else current behavior.
-- `listen()`: expose per-transport listeners; `useStreamingEvents` and `terminal-instances.ts` register listeners on the transport(s) of the **active remote context** in addition to local.
+**Implementation status (2026-06-30): complete.**
 
-Backend-handle resolution (avoid editing all 269 call sites):
-- Add `server_id?: string | null` to `Project` (`projects/types.rs` + `src/types/projects.ts`) — a project owned by a remote server. Default null = local.
-- Add a small **active-backend context** derived from the currently-selected project's `server_id`; a thin wrapper resolves `_backendHandle` for the data hooks that operate within a project scope (chat send/stream, terminal start/write/resize/stop, git status/diff, file read, context save, PR/commit/review). These are the high-value sites (~20–30) identified in exploration; one-shot global queries (preferences, server list) stay local.
-- `connect_remote_server` result feeds the matching `WsTransport` its `localPort`+token before any remote project is opened.
+- `src/lib/transport.ts` maintains a `WsTransport` registry keyed by server ID.
+- `_backendHandle` routes project-scoped commands to the owning remote backend.
+- Remote events retain their backend origin so identical local and remote IDs
+  cannot cross-route updates.
+- Transport registration waits for the WebSocket open event instead of using a
+  fixed delay.
+- Project, worktree, session, chat, terminal, git, and file operations route
+  through the owning backend while global settings remain local.
+- Remote session lifecycle operations, including send, close, archive, cancel,
+  and resume, use the worktree's persisted server mapping.
 
 Phase-2 acceptance: open a remote project → its worktree list, a chat session, and a terminal all run on the server; a local session in another tab still works simultaneously.
 
 ## Phase 3 — Remote project lifecycle + polish
-- Create/clone a project **on** the remote (run `git clone` via the remote backend's existing project commands — they already shell out with `current_dir`). UI to add a remote project under a server.
-- Reverse-forward UI (expose a remote port locally for testing).
-- Reconnect UX: tunnel drop → reconnect ssh + WS replay (the WS layer already does `last_seq` replay + terminal replay).
-- Settings: `RemoteServersPane.tsx` in `src/components/preferences/panes/` (add to `PreferencesDialog` nav) — add/edit/test/provision/connect, status dots. Per-project server shown in `projects/panes/GeneralPane.tsx`.
-- Surface CLI-auth state: since CLIs auth on the server (4a), guide the user to run `claude login` in the remote terminal.
+
+**Implementation status (2026-06-30): primary lifecycle complete.**
+
+- Projects can be cloned to a selected server with SSH config alias resolution,
+  identity loading, and agent forwarding.
+- Worktrees can be created directly on a selected remote backend.
+- The server settings UI supports add, edit, test, provision, connect,
+  disconnect, status, and remote Claude login.
+- Provisioned servers auto-connect on startup. Worktree queries are refreshed
+  only after both the SSH tunnel and WebSocket are ready, so existing remote
+  worktrees reappear after restarting Jean.
+- Existing remote chat sessions preserve their backend mapping and resume after
+  restart.
+- Reverse port-forwarding UI remains a follow-up.
 
 ---
 
 ## Key files
+
 - New: `src-tauri/src/remote/{mod,types,ssh,provision,tunnel,commands}.rs`; `src/types/remote.ts`; `src/components/preferences/panes/RemoteServersPane.tsx`.
 - Edit: `src-tauri/src/lib.rs` (AppPreferences + handler registration), `src-tauri/src/http_server/dispatch.rs` (dispatch arms), `src-tauri/src/projects/types.rs` + `src/types/projects.ts` (`server_id`), `src/lib/transport.ts` (transport registry + routing), `src/hooks/useStreamingEvents.ts`, `src/lib/terminal-instances.ts`, `src/components/preferences/PreferencesDialog.tsx`, `src/components/projects/panes/GeneralPane.tsx`.
 - Reuse: `platform::process::silent_command` (ssh/scp), the Tauri updater minisign verification pattern, registry pattern from `terminal/registry.rs`, `WsTransport` from `transport.ts`.
 
 ## Out of scope (MVP)
+
 - Server OS/Jean auto-updates (user-managed, per 3b).
 - Pure-Rust SSH, SFTP file browser, multi-user servers.
 - A true headless runtime decoupled from Tauri's GTK event loop.
 - Encrypted-at-rest password vault (flag as security follow-up).
 
 ## Risks
+
 - **Virtual display dependency** — remove Xvfb only after a server binary starts successfully with both `DISPLAY` and `WAYLAND_DISPLAY` unset.
 - **Version skew** — client and remote headless Jean must speak the same dispatch protocol; pin/verify versions on connect.
 - **Secret handling** — SSH password / token storage in `preferences.json` is a security concern; prefer key-based auth and OS keychain later.
 - **Routing leakage** — a remote-project call that forgets its `_backendHandle` silently hits the local backend; add a dev assertion when a remote project is active.
 
-## Verification
-1. **Headless feasibility (do first):** on a throwaway Linux VM, copy a Jean AppImage, run `xvfb-run -a ./Jean.AppImage --headless --host 127.0.0.1 --port 5599 --token test`, then check the authenticated API endpoint.
-2. **Phase 1:** add a server in DB, `test_remote_server` green, `provision_remote_server` installs + starts the systemd service (check `systemctl status`), `connect_remote_server` opens the tunnel, curl the tunneled port locally.
-3. **Phase 2:** open a remote project, start a terminal → commands execute on the server (`hostname` shows the box); start a chat session → AI CLI runs remote; confirm a local session in parallel is unaffected.
-4. **Phase 3:** `git clone` a repo onto the server via UI; reverse-forward a remote dev server and hit it from the local browser; kill the tunnel and confirm auto-reconnect + stream replay.
-5. `bun run check:all`; add Rust tests for `provision` command-string building and `ssh` arg construction, TS tests for transport registry routing (`_backendHandle` → correct transport).
+## Verification status
+
+- Completed on a real Linux server: provision, connect, remote clone, remote
+  worktree creation, Claude login, chat prompt/response, Jean restart,
+  worktree rediscovery, and chat resume.
+- Automated coverage includes provisioning and SSH command construction,
+  transport routing and readiness, reconnect cache invalidation, remote Claude
+  authentication, server settings, remote chat lifecycle routing, tunnel
+  recreation after an SSH child failure, and stream replay after the local
+  tunnel port changes.
+- Docker integration coverage starts a real SSH forward, kills it, recreates it
+  on another local port, and verifies WebSocket event replay.
+- Lima integration coverage invokes the real server-management commands against
+  a systemd Linux VM and verifies the signed AppImage install, Xvfb/WebKitGTK
+  dependencies, service health, authenticated tunnel, and WebSocket dispatch.
+- Remaining release-hardening scenarios: concurrent local and remote sessions,
+  remote terminal execution, other AI backends, and the supported
+  Linux/platform matrix.

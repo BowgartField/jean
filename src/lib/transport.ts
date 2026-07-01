@@ -613,6 +613,37 @@ class WsTransport {
     this.connect()
   }
 
+  async reconnectTo(baseUrl: string, fixedToken: string): Promise<void> {
+    this._baseUrl = baseUrl
+    this._fixedToken = fixedToken
+    this._tokenValidated = false
+    this._connecting = false
+    this.reconnectAttempt = 0
+    this.setAuthError(null)
+    this.clearConnectWatchdog()
+    this.stopLivenessTimer()
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
+    if (this.ws) {
+      this.ws.onclose = null
+      this.ws.close()
+      this.ws = null
+    }
+    for (const pending of this.pending.values()) {
+      clearTimeout(pending.timeout)
+      pending.reject(new Error('WebSocket disconnected'))
+    }
+    this.pending.clear()
+    this.queue = []
+    this.eventBuffer.clear()
+    this.setConnected(false)
+    this._connectEnabled = true
+    this.connect()
+    await this.waitUntilConnected()
+  }
+
   shutdown(): void {
     this._connectEnabled = false
     this.clearConnectWatchdog()
@@ -1160,11 +1191,15 @@ export async function registerRemoteTransport(
   localPort: number,
   token: string
 ): Promise<void> {
-  // Clean up any stale transport for this server
-  unregisterRemoteTransport(serverId)
+  const baseUrl = `http://127.0.0.1:${localPort}`
+  const existing = _remoteTransports.get(serverId)
+  if (existing) {
+    await existing.reconnectTo(baseUrl, token)
+    return
+  }
 
   const transport = new WsTransport({
-    baseUrl: `http://127.0.0.1:${localPort}`,
+    baseUrl,
     fixedToken: token,
   })
   _remoteTransports.set(serverId, transport)

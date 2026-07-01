@@ -86,11 +86,13 @@ describe('transport bootstrap', () => {
     vi.doUnmock('./environment')
   })
 
-
   it('uses reconnect mode when refetching initial data after reconnect', async () => {
     const transport = await loadTransportModule()
 
-    await transport.refetchInitialData({ 'worktree-1': 'session-1' }, 'project-1')
+    await transport.refetchInitialData(
+      { 'worktree-1': 'session-1' },
+      'project-1'
+    )
 
     expect(fetch).toHaveBeenCalledWith(
       '/api/init?mode=reconnect&selected_project=project-1&active_sessions=worktree-1%3Asession-1'
@@ -293,6 +295,46 @@ describe('transport bootstrap', () => {
     await flushAsync()
     await registration
     expect(registered).toBe(true)
+
+    transport.unregisterRemoteTransport('server-test')
+  })
+
+  it('retains stream replay state when a tunnel reconnects on a new port', async () => {
+    const transport = await loadNativeTransportModule()
+
+    const firstRegistration = transport.registerRemoteTransport(
+      'server-test',
+      3456,
+      'token'
+    )
+    await flushAsync()
+    await firstRegistration
+
+    const firstWs = getWs(0)
+    firstWs.receive({
+      type: 'event',
+      event: 'chat:chunk',
+      payload: { session_id: 'session-1', content: 'before disconnect' },
+      seq: 7,
+    })
+
+    const secondRegistration = transport.registerRemoteTransport(
+      'server-test',
+      4567,
+      'token'
+    )
+    await flushAsync()
+    await secondRegistration
+
+    const secondWs = getWs(1)
+    expect(secondWs.url).toContain('127.0.0.1:4567')
+    expect(secondWs.send).toHaveBeenCalledWith(
+      JSON.stringify({
+        type: 'replay',
+        session_id: 'session-1',
+        last_seq: 7,
+      })
+    )
 
     transport.unregisterRemoteTransport('server-test')
   })

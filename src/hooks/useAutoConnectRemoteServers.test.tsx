@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
     {
       id: 'server-test',
       http_token: 'token',
+      status: 'disconnected',
     },
   ],
 }))
@@ -41,6 +42,13 @@ describe('useAutoConnectRemoteServers', () => {
       token: 'token',
     })
     mocks.registerRemoteTransport.mockResolvedValue(undefined)
+    mocks.servers = [
+      {
+        id: 'server-test',
+        http_token: 'token',
+        status: 'disconnected',
+      },
+    ]
   })
 
   it('refetches worktrees after the remote websocket is ready', async () => {
@@ -62,6 +70,42 @@ describe('useAutoConnectRemoteServers', () => {
       expect(invalidateQueries).toHaveBeenCalledWith({
         queryKey: ['projects', 'worktrees'],
       })
+    })
+  })
+
+  it('recreates an errored tunnel and registers its new local port', async () => {
+    const queryClient = new QueryClient()
+    const { rerender } = renderHook(() => useAutoConnectRemoteServers(), {
+      wrapper: createWrapper(queryClient),
+    })
+
+    await waitFor(() => {
+      expect(mocks.registerRemoteTransport).toHaveBeenCalledTimes(1)
+    })
+
+    mocks.invoke.mockResolvedValue({
+      server_id: 'server-test',
+      local_port: 58415,
+      token: 'token',
+    })
+    mocks.servers = [
+      {
+        id: 'server-test',
+        http_token: 'token',
+        status: 'error',
+      },
+    ]
+    rerender()
+
+    await waitFor(() => {
+      expect(mocks.registerRemoteTransport).toHaveBeenLastCalledWith(
+        'server-test',
+        58415,
+        'token'
+      )
+    })
+    expect(mocks.invoke).toHaveBeenCalledWith('connect_remote_server', {
+      serverId: 'server-test',
     })
   })
 })

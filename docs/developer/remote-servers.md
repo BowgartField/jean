@@ -1,8 +1,9 @@
 # Remote Servers
 
 Remote servers let the desktop app provision and connect to a headless Jean
-backend through an SSH local-forward. Local projects continue to use Tauri IPC;
-remote transport routing is introduced separately.
+backend through an SSH local-forward. Local projects continue to use Tauri IPC,
+while project-scoped remote operations use a WebSocket transport associated
+with the server that owns the project or worktree.
 
 ## Phase 1 backend
 
@@ -88,6 +89,62 @@ accepted only when token validation succeeds and the remote Jean version matches
 the desktop backend version. Tunnel status is runtime-only; persisted server
 records are normalized to disconnected when loaded.
 
+## Client transport routing
+
+`src/lib/transport.ts` owns a registry of remote `WsTransport` instances keyed
+by server ID. Native calls without a backend handle continue to use Tauri IPC.
+Calls carrying `_backendHandle` use the corresponding remote WebSocket.
+
+Remote event payloads include their backend origin. Project and chat services
+use that origin, persisted project clone metadata, and worktree-to-server
+mappings to prevent remote updates from being applied to local cache entries.
+Transport registration completes only after the WebSocket opens; callers do
+not rely on fixed startup delays.
+
+## Project and session lifecycle
+
+Projects can be cloned onto a connected server. SSH-style git URLs are resolved
+through the local SSH config, the selected identity is loaded into the local
+agent, and agent forwarding lets the remote git process authenticate without
+copying the private key to the server.
+
+New worktrees can target local execution or a connected remote server. Remote
+worktrees retain their server ownership in query caches and persisted UI state.
+Session reads and mutations derive the backend from that ownership, including
+message send, close, archive, cancel, and resume operations.
+
+Claude CLI installation and authentication are queried independently on each
+server. The login terminal is created on the selected remote backend. Other
+backend-specific authentication flows still require explicit validation.
+
+## Startup and recovery
+
+Provisioned servers auto-connect when Jean starts. The SSH tunnel is opened
+first, then its WebSocket transport is registered. Once ready, remote server and
+worktree queries are invalidated so existing worktrees become visible without
+being recreated. Failed registrations disconnect the partial tunnel.
+
+The WebSocket client tracks per-session sequence numbers for replay after a
+socket reconnect. Runtime status polling detects an exited SSH child, recreates
+the tunnel, and updates the existing transport to its new local port so replay
+state is retained.
+
+Run `bun run test:remote-tunnel` for a real SSH transport test using Docker. It
+starts an ephemeral `sshd` and sequenced WebSocket backend, kills the local
+forward, creates a replacement tunnel on another port, and verifies replay of
+the missed event. This covers tunnel and transport recovery without requiring a
+cloud server. It does not validate systemd, AppImage provisioning, or Xvfb.
+
+Run `bun run test:remote-provision` on macOS for the full provisioning path
+using a Lima Linux VM. The test invokes Jean's real `add_remote_server`,
+`test_remote_server`, `provision_remote_server`, and `connect_remote_server`
+commands from an isolated local profile. It verifies the signed release
+download, AppImage installation, Xvfb and WebKitGTK packages, the enabled and
+running systemd service, authenticated tunnel health, and remote WebSocket
+dispatch. Install Lima with `brew install lima` first and build the local debug
+Jean binary. The test reuses an existing `jean-remote-provision-test` VM when
+present; otherwise it creates an ephemeral VM and deletes it afterward.
+
 ## Commands
 
 - `add_remote_server`
@@ -102,3 +159,14 @@ records are normalized to disconnected when loaded.
 
 Mutating WebSocket dispatch arms emit cache invalidations for
 `remote-servers` and, when persisted data changes, `preferences`.
+
+## Remaining constraints
+
+- Linux provisioning requires systemd and a supported package manager.
+- Xvfb is required until the server runtime is decoupled from Tauri's GTK
+  initialization.
+- SSH passwords remain in local preferences; SSH key authentication is
+  recommended.
+- Reverse port-forwarding UI is not implemented.
+- Remote self-update/reprovisioning and multi-user server management are out of
+  scope for the MVP.

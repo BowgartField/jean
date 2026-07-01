@@ -1,0 +1,11 @@
+services:
+  remote:
+    image: jean-remote-tunnel-test:local
+    build:
+      context: .
+    environment:
+      JEAN_TEST_TOKEN: test-token
+    ports:
+      - '127.0.0.1:${JEAN_TEST_SSH_PORT}:22'
+    volumes:
+      - '${JEAN_TEST_AUTHORIZED_KEY}:/tmp/test_key.pub:ro'
