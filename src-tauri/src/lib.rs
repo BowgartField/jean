@@ -110,6 +110,21 @@ fn greet(name: &str) -> String {
     format!("Hello, {name}! You've been greeted from Rust!")
 }
 
+#[tauri::command]
+fn get_server_platform() -> &'static str {
+    server_platform_name()
+}
+
+pub(crate) fn server_platform_name() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "windows"
+    } else if cfg!(target_os = "macos") {
+        "mac"
+    } else {
+        "linux"
+    }
+}
+
 // ── WSL commands ────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -289,7 +304,7 @@ pub struct AppPreferences {
     pub default_codex_reasoning_effort: String, // Codex reasoning effort: low, medium, high, xhigh
     #[serde(default = "default_codex_goal_execution_mode")]
     pub codex_goal_execution_mode: String, // Codex /goal execution mode: build or yolo
-    #[serde(default)]
+    #[serde(default = "default_codex_multi_agent_enabled")]
     pub codex_multi_agent_enabled: bool, // Enable multi-agent collaboration (experimental)
     #[serde(default = "default_codex_auto_steer")]
     pub codex_auto_steer_enabled: bool, // Steer prompts into a running Codex turn instead of queueing (default: true)
@@ -607,6 +622,15 @@ fn maybe_auto_select_system_coderabbit(
     false
 }
 
+fn normalize_parallel_execution_preferences(preferences: &mut AppPreferences) -> bool {
+    if preferences.parallel_execution_prompt_enabled && !preferences.codex_multi_agent_enabled {
+        preferences.codex_multi_agent_enabled = true;
+        return true;
+    }
+
+    false
+}
+
 fn default_codex_model() -> String {
     "gpt-5.5".to_string()
 }
@@ -641,6 +665,10 @@ fn default_codex_reasoning_effort() -> String {
 
 fn default_codex_goal_execution_mode() -> String {
     "build".to_string()
+}
+
+fn default_codex_multi_agent_enabled() -> bool {
+    true
 }
 
 fn default_codex_max_agent_threads() -> u32 {
@@ -723,6 +751,40 @@ mod tests {
         assert!(prompt.contains("Always implement the simplest maintainable solution"));
         assert!(prompt.contains("Clickable References"));
         assert!(prompt.contains("include clickable links when available"));
+    }
+
+    #[test]
+    fn codex_multi_agent_defaults_on_with_parallel_prompting() {
+        let prefs = AppPreferences::default();
+
+        assert!(prefs.parallel_execution_prompt_enabled);
+        assert!(prefs.codex_multi_agent_enabled);
+    }
+
+    #[test]
+    fn parallel_prompting_enables_codex_multi_agent_for_existing_preferences() {
+        let mut prefs = AppPreferences {
+            parallel_execution_prompt_enabled: true,
+            codex_multi_agent_enabled: false,
+            ..Default::default()
+        };
+
+        super::normalize_parallel_execution_preferences(&mut prefs);
+
+        assert!(prefs.codex_multi_agent_enabled);
+    }
+
+    #[test]
+    fn disabled_parallel_prompting_does_not_force_codex_multi_agent() {
+        let mut prefs = AppPreferences {
+            parallel_execution_prompt_enabled: false,
+            codex_multi_agent_enabled: false,
+            ..Default::default()
+        };
+
+        super::normalize_parallel_execution_preferences(&mut prefs);
+
+        assert!(!prefs.codex_multi_agent_enabled);
     }
 
     #[test]
@@ -2094,7 +2156,7 @@ impl Default for AppPreferences {
             selected_grok_model: default_grok_model(),
             default_codex_reasoning_effort: default_codex_reasoning_effort(),
             codex_goal_execution_mode: default_codex_goal_execution_mode(),
-            codex_multi_agent_enabled: false,
+            codex_multi_agent_enabled: default_codex_multi_agent_enabled(),
             codex_auto_steer_enabled: default_codex_auto_steer(),
             opencode_auto_steer_enabled: default_opencode_auto_steer(),
             pi_auto_steer_enabled: default_pi_auto_steer(),
@@ -2399,6 +2461,7 @@ pub fn load_preferences_sync(app: &AppHandle) -> Result<AppPreferences, String> 
         serde_json::from_str(&contents).map_err(|e| format!("Failed to parse preferences: {e}"))?;
     let mut preferences: AppPreferences = serde_json::from_value(raw_preferences.clone())
         .map_err(|e| format!("Failed to parse preferences: {e}"))?;
+    normalize_parallel_execution_preferences(&mut preferences);
     maybe_auto_select_system_coderabbit(app, &mut preferences, Some(&raw_preferences));
     Ok(preferences)
 }
@@ -2446,6 +2509,7 @@ async fn load_preferences(app: AppHandle) -> Result<AppPreferences, String> {
         preferences.selected_model = new_model.to_string();
         needs_resave = true;
     }
+    needs_resave |= normalize_parallel_execution_preferences(&mut preferences);
 
     // Migrate legacy magic-prompt model names ("opus" → "claude-opus-4-8[1m]")
     // and legacy auto-naming models ("haiku" → "sonnet")
@@ -2517,6 +2581,9 @@ async fn load_preferences(app: AppHandle) -> Result<AppPreferences, String> {
 
 #[tauri::command]
 async fn save_preferences(app: AppHandle, preferences: AppPreferences) -> Result<(), String> {
+    let mut preferences = preferences;
+    normalize_parallel_execution_preferences(&mut preferences);
+
     // Validate theme value
     validate_theme(&preferences.theme)?;
 
@@ -4452,6 +4519,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             greet,
+            get_server_platform,
             load_preferences,
             save_preferences,
             patch_preferences,

@@ -70,6 +70,7 @@ import {
   collectWorktreePaths,
 } from './lib/initial-data-cache'
 import { useExternalLinkInterceptor } from './hooks/useExternalLinkInterceptor'
+import { WebAccessAuthScreen } from './components/web/WebAccessAuthScreen'
 
 interface AutoFixStoppedEvent {
   projectId: string
@@ -108,25 +109,17 @@ function WsAuthErrorOverlay() {
 
   if (!authError) return null
 
+  const handleTokenSubmit = (token: string) => {
+    localStorage.setItem('jean-http-token', token)
+    window.location.reload()
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/90">
-      <div className="mx-4 max-w-md rounded-lg border border-destructive/50 bg-background p-6 shadow-lg">
-        <div className="flex items-center gap-2 text-destructive">
-          <svg
-            className="size-5 shrink-0"
-            viewBox="0 0 20 20"
-            fill="currentColor"
-          >
-            <path
-              fillRule="evenodd"
-              d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z"
-              clipRule="evenodd"
-            />
-          </svg>
-          <h2 className="text-sm font-semibold">Connection Failed</h2>
-        </div>
-        <p className="mt-2 text-sm text-muted-foreground">{authError}</p>
-      </div>
+      <WebAccessAuthScreen
+        authError={authError}
+        onTokenSubmit={handleTokenSubmit}
+      />
     </div>
   )
 }
@@ -134,6 +127,7 @@ function WsAuthErrorOverlay() {
 function App() {
   // Track preloading state for web view
   const [isPreloading, setIsPreloading] = useState(!isNativeApp())
+  const [platformVersion, setPlatformVersion] = useState(0)
   const queryClient = useQueryClient()
   const { data: preferences } = usePreferences()
   const onboardingOpen = useUIStore(state => state.onboardingOpen)
@@ -152,6 +146,19 @@ function App() {
   // Holds the update object so the title bar indicator can trigger install later
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const pendingUpdateRef = useRef<any>(null)
+
+  useEffect(() => {
+    if (!isNativeApp()) return
+
+    invoke<'mac' | 'windows' | 'linux'>('get_server_platform')
+      .then(platform => {
+        setServerPlatform(platform)
+        setPlatformVersion(version => version + 1)
+      })
+      .catch(error => {
+        logger.warn('Failed to load server platform', { error })
+      })
+  }, [])
 
   useEffect(() => {
     let unlisten: (() => void) | undefined
@@ -246,6 +253,7 @@ function App() {
 
       if (data.serverPlatform) {
         setServerPlatform(data.serverPlatform)
+        setPlatformVersion(version => version + 1)
       }
 
       // Seed projects into TanStack Query cache
@@ -913,6 +921,7 @@ function App() {
     isOpencodeAuthLoading,
     isGhAuthLoading,
     cliCheckReady,
+    platformVersion,
     queryClient,
   ])
 

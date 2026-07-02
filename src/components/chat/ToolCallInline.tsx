@@ -926,7 +926,8 @@ function getToolDisplay(toolCall: ToolCall): ToolDisplay {
     }
 
     case 'WaitForAgents': {
-      const receiverIds = input.receiver_thread_ids as string[] | undefined
+      const receiverIds = (input.receiver_thread_ids ??
+        input.receiverThreadIds) as string[] | undefined
       return {
         icon: <Clock className="h-4 w-4 shrink-0" />,
         label: 'Waiting for Agents',

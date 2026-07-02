@@ -94,6 +94,43 @@ export function removeSessionFromAllSessionsCache(
 }
 
 /**
+ * Refresh one worktree's session list and mirror it into the cross-project
+ * ['all-sessions'] cache. This keeps the finished-session bell in sync when a
+ * background operation (like review) completes outside normal session polling.
+ */
+export async function refreshWorktreeSessionsCaches(
+  queryClient: QueryClient,
+  worktreeId: string,
+  worktreePath: string
+): Promise<WorktreeSessions | null> {
+  try {
+    const sessions = await invoke<WorktreeSessions>('get_sessions', {
+      worktreeId,
+      worktreePath,
+    })
+    queryClient.setQueryData(chatQueryKeys.sessions(worktreeId), sessions)
+    queryClient.setQueryData<AllSessionsResponse>(['all-sessions'], old => {
+      if (!old?.entries) return old
+      return {
+        ...old,
+        entries: old.entries.map(entry =>
+          entry.worktree_id === worktreeId
+            ? { ...entry, sessions: sessions.sessions }
+            : entry
+        ),
+      }
+    })
+    return sessions
+  } catch (error) {
+    logger.warn('Failed to refresh worktree sessions caches', {
+      error,
+      worktreeId,
+    })
+    return null
+  }
+}
+
+/**
  * Whether a session can be reconnected — i.e. it's a native CLI terminal
  * session with a known way to relaunch (a backend resume id, or its persisted
  * terminal command). Used to gate the "Reconnect" menu item.

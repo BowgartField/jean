@@ -93,7 +93,7 @@ import {
 } from '@/types/preferences'
 import { useRemotePicker } from '@/hooks/useRemotePicker'
 import { useInstalledBackends } from '@/hooks/useInstalledBackends'
-import { chatQueryKeys } from '@/services/chat'
+import { chatQueryKeys, refreshWorktreeSessionsCaches } from '@/services/chat'
 import {
   linkWorktreePr,
   saveWorktreePr,
@@ -1635,14 +1635,20 @@ ${resolveInstructions}`
               unlistenReviewJob?.()
               if (reviewJob.status === 'completed') {
                 const completedSessionId = reviewJob.sessionId
-                queryClient.invalidateQueries({
-                  queryKey: chatQueryKeys.sessions(selectedWorktreeId),
+                void refreshWorktreeSessionsCaches(
+                  queryClient,
+                  selectedWorktreeId,
+                  worktree.path
+                ).finally(() => {
+                  queryClient.invalidateQueries({
+                    queryKey: chatQueryKeys.sessions(selectedWorktreeId),
+                  })
+                  queryClient.invalidateQueries({ queryKey: ['all-sessions'] })
                 })
-                queryClient.invalidateQueries({ queryKey: ['all-sessions'] })
+                toast.dismiss(toastId)
                 toast.success(
                   `${reviewLabel} done on ${reviewTarget} (${reviewJob.findingCount ?? 0} findings)`,
                   {
-                    id: toastId,
                     action: completedSessionId
                       ? {
                           label: toastActionLabel('Open'),
@@ -1674,13 +1680,12 @@ ${resolveInstructions}`
                   }
                 )
               } else if (reviewJob.status === 'cancelled') {
-                toast.info(`Review cancelled for ${reviewTarget}`, {
-                  id: toastId,
-                })
+                toast.dismiss(toastId)
+                toast.info(`Review cancelled for ${reviewTarget}`)
               } else {
+                toast.dismiss(toastId)
                 toast.error(
-                  `Review failed: ${reviewJob.error ?? 'Unknown error'}`,
-                  { id: toastId }
+                  `Review failed: ${reviewJob.error ?? 'Unknown error'}`
                 )
               }
             }

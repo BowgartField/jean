@@ -9,7 +9,7 @@ import { generateId } from '@/lib/uuid'
 import { useChatStore } from '@/store/chat-store'
 import { useProjectsStore } from '@/store/projects-store'
 import { useUIStore } from '@/store/ui-store'
-import { chatQueryKeys } from '@/services/chat'
+import { chatQueryKeys, refreshWorktreeSessionsCaches } from '@/services/chat'
 import { buildMcpConfigJson } from '@/services/mcp'
 import { saveWorktreePr, projectsQueryKeys } from '@/services/projects'
 import {
@@ -858,14 +858,20 @@ export function useGitOperations({
           unlistenReviewJob?.()
           if (reviewJob.status === 'completed') {
             const completedSessionId = reviewJob.sessionId
-            queryClient.invalidateQueries({
-              queryKey: chatQueryKeys.sessions(activeWorktreeId),
+            void refreshWorktreeSessionsCaches(
+              queryClient,
+              activeWorktreeId,
+              activeWorktreePath
+            ).finally(() => {
+              queryClient.invalidateQueries({
+                queryKey: chatQueryKeys.sessions(activeWorktreeId),
+              })
+              queryClient.invalidateQueries({ queryKey: ['all-sessions'] })
             })
-            queryClient.invalidateQueries({ queryKey: ['all-sessions'] })
+            toast.dismiss(toastId)
             toast.success(
               `${reviewLabel} done on ${projectName}/${worktreeName} (${reviewJob.findingCount ?? 0} findings)`,
               {
-                id: toastId,
                 action: completedSessionId
                   ? {
                       label: toastActionLabel('Open'),
@@ -889,14 +895,11 @@ export function useGitOperations({
               }
             )
           } else if (reviewJob.status === 'cancelled') {
-            toast.info(`Review cancelled for ${reviewTarget}`, { id: toastId })
+            toast.dismiss(toastId)
+            toast.info(`Review cancelled for ${reviewTarget}`)
           } else {
-            toast.error(
-              `Review failed: ${reviewJob.error ?? 'Unknown error'}`,
-              {
-                id: toastId,
-              }
-            )
+            toast.dismiss(toastId)
+            toast.error(`Review failed: ${reviewJob.error ?? 'Unknown error'}`)
           }
         }
 

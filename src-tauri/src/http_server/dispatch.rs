@@ -89,6 +89,7 @@ pub async fn dispatch_command(
         // =====================================================================
         // Preferences & UI State
         // =====================================================================
+        "get_server_platform" => to_value(crate::server_platform_name()),
         "load_preferences" => {
             let result = crate::load_preferences(app.clone()).await?;
             to_value(result)

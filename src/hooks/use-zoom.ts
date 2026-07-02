@@ -22,7 +22,14 @@ function findNearestTickIndex(zoom: number): number {
 }
 
 async function applyZoom(scaleFactor: number) {
-  if (!isNativeApp()) return
+  if (!isNativeApp()) {
+    const style = document.documentElement.style as CSSStyleDeclaration & {
+      zoom: string
+    }
+    style.zoom = String(scaleFactor)
+    return
+  }
+
   try {
     const { getCurrentWebview } = await import('@tauri-apps/api/webview')
     await getCurrentWebview().setZoom(scaleFactor)

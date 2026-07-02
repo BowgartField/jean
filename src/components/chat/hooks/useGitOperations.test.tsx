@@ -1,5 +1,5 @@
 import React, { type RefObject } from 'react'
-import { act, renderHook } from '@testing-library/react'
+import { act, renderHook, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useChatStore } from '@/store/chat-store'
@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   toastInfo: vi.fn(),
   toastWarning: vi.fn(),
   toastError: vi.fn(),
+  toastDismiss: vi.fn(),
 }))
 
 vi.mock('@/lib/transport', () => ({
@@ -34,6 +35,7 @@ vi.mock('sonner', () => ({
     warning: mocks.toastWarning,
     error: mocks.toastError,
     success: mocks.toastSuccess,
+    dismiss: mocks.toastDismiss,
   },
 }))
 vi.mock('@/services/git-status', () => ({
@@ -243,6 +245,22 @@ describe('useGitOperations conflict resolution', () => {
   })
 
   it('reconciles a review job that finished before the listener is active', async () => {
+    const reviewSession: Session = {
+      id: 'review-session',
+      name: 'Code Review',
+      order: 1,
+      created_at: 1,
+      updated_at: 2,
+      messages: [],
+      backend: 'claude',
+      is_reviewing: false,
+      last_run_status: 'completed',
+      review_results: {
+        summary: 'Two findings.',
+        approval_status: 'changes_requested',
+        findings: [],
+      },
+    }
     mocks.invoke.mockImplementation((command: string) => {
       if (command === 'start_review_job') {
         return Promise.resolve({
@@ -273,10 +291,30 @@ describe('useGitOperations conflict resolution', () => {
           updatedAt: 2,
         })
       }
+      if (command === 'get_sessions') {
+        return Promise.resolve({
+          worktree_id: 'wt-1',
+          active_session_id: 'review-session',
+          version: 2,
+          sessions: [reviewSession],
+        })
+      }
       return Promise.resolve(undefined)
     })
 
-    const { result } = renderGitOperations()
+    const { result, queryClient } = renderGitOperations()
+    queryClient.setQueryData(['all-sessions'], {
+      entries: [
+        {
+          project_id: 'project-1',
+          project_name: 'Project',
+          worktree_id: 'wt-1',
+          worktree_name: 'feature',
+          worktree_path: '/repo/worktree',
+          sessions: [],
+        },
+      ],
+    })
 
     await act(async () => {
       await result.current.handleReview()
@@ -291,7 +329,39 @@ describe('useGitOperations conflict resolution', () => {
     })
     expect(mocks.toastSuccess).toHaveBeenCalledWith(
       'Review done on Project/feature (2 findings)',
-      expect.objectContaining({ id: 'toast-1' })
+      expect.objectContaining({
+        action: expect.objectContaining({ onClick: expect.any(Function) }),
+      })
+    )
+    expect(mocks.toastDismiss).toHaveBeenCalledWith('toast-1')
+    expect(mocks.toastSuccess.mock.calls[0]?.[1]).not.toHaveProperty('cancel')
+    await waitFor(() => {
+      expect(queryClient.getQueryData(['all-sessions'])).toMatchObject({
+        entries: [
+          {
+            worktree_id: 'wt-1',
+            sessions: [
+              {
+                id: 'review-session',
+                last_run_status: 'completed',
+                review_results: {
+                  summary: 'Two findings.',
+                },
+              },
+            ],
+          },
+        ],
+      })
+    })
+    expect(mocks.invoke).toHaveBeenCalledWith('get_sessions', {
+      worktreeId: 'wt-1',
+      worktreePath: '/repo/worktree',
+    })
+    expect(mocks.toastLoading).toHaveBeenLastCalledWith(
+      'Review running for Project/feature...',
+      expect.objectContaining({
+        cancel: expect.objectContaining({ label: 'Cancel' }),
+      })
     )
   })
 })

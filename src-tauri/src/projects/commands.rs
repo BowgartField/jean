@@ -1058,12 +1058,20 @@ pub async fn get_worktree_diff(
     let (worktree, project_default_branch) =
         resolve_worktree_and_project_default(&app, &worktree_id)?;
     let base_branch = worktree.base_branch.unwrap_or(project_default_branch);
+    let has_head = git_has_head(&worktree.path);
     let mut args = match diff_type.as_str() {
-        "uncommitted" => vec![
-            "diff".to_string(),
-            "HEAD".to_string(),
-            "--unified=3".to_string(),
-        ],
+        "uncommitted" => {
+            let diff_base = if has_head {
+                "HEAD"
+            } else {
+                "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+            };
+            vec![
+                "diff".to_string(),
+                diff_base.to_string(),
+                "--unified=3".to_string(),
+            ]
+        }
         "branch" => vec![
             "diff".to_string(),
             "--unified=3".to_string(),
@@ -1122,6 +1130,15 @@ fn git_output(repo_path: &str, args: &[&str]) -> Result<String, String> {
         return Err(format!("git {} failed: {stderr}", args.join(" ")));
     }
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+fn git_has_head(repo_path: &str) -> bool {
+    silent_command("git")
+        .args(["rev-parse", "--verify", "HEAD"])
+        .current_dir(repo_path)
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
 }
 
 fn parse_porcelain_files(porcelain: &str) -> Vec<(String, String)> {

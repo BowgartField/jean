@@ -9,6 +9,7 @@
 import { useSyncExternalStore } from 'react'
 import { isNativeApp, setWsConnected } from './environment'
 import { generateId } from './uuid'
+import { isServerWindows } from './platform'
 
 // ---------------------------------------------------------------------------
 // File source URL conversion (drop-in for Tauri's convertFileSrc)
@@ -44,7 +45,7 @@ export function convertFileSrc(filePath: string, protocol = 'asset'): string {
     }
     // Fallback (should not reach in native app)
     const path = encodeURIComponent(filePath)
-    return navigator.userAgent.includes('Windows')
+    return isServerWindows()
       ? `https://${protocol}.localhost/${path}`
       : `${protocol}://localhost/${path}`
   }

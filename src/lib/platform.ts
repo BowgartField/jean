@@ -1,22 +1,19 @@
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { isNativeApp } from './environment'
 
-export const isMacOS = navigator.platform.includes('Mac')
-export const isWindows = navigator.platform.includes('Win')
-export const isLinux = navigator.platform.includes('Linux')
-
 export type PlatformName = 'mac' | 'windows' | 'linux'
 
-function browserPlatform(): PlatformName {
-  if (isMacOS) return 'mac'
-  if (isWindows) return 'windows'
-  return 'linux'
-}
+let serverPlatform: PlatformName = 'linux'
 
-let serverPlatform: PlatformName = browserPlatform()
+export let isMacOS = false
+export let isWindows = false
+export let isLinux = true
 
 export function setServerPlatform(platform: PlatformName): void {
   serverPlatform = platform
+  isMacOS = platform === 'mac'
+  isWindows = platform === 'windows'
+  isLinux = platform === 'linux'
 }
 
 export function getServerPlatform(): PlatformName {

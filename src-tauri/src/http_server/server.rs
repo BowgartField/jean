@@ -119,16 +119,6 @@ impl Default for WebBuildInfo {
     }
 }
 
-fn server_platform_name() -> &'static str {
-    if cfg!(target_os = "windows") {
-        "windows"
-    } else if cfg!(target_os = "macos") {
-        "mac"
-    } else {
-        "linux"
-    }
-}
-
 async fn read_web_build_info(dist_path: &std::path::Path) -> WebBuildInfo {
     let path = dist_path.join("jean-build.json");
     match tokio::fs::read_to_string(&path).await {
@@ -478,6 +468,7 @@ async fn reconnect_init_response(params: WsAuth, state: AppState) -> Response {
     let build_info = read_web_build_info(&state.dist_path).await;
     response["webBuildId"] = Value::String(build_info.web_build_id);
     response["appVersion"] = Value::String(build_info.app_version);
+    response["serverPlatform"] = Value::String(crate::server_platform_name().to_string());
 
     if let Ok(app_data_dir) = state.app.path().app_data_dir() {
         response["appDataDir"] = Value::String(app_data_dir.to_string_lossy().to_string());
@@ -666,7 +657,7 @@ async fn init_handler(
     let build_info = read_web_build_info(&state.dist_path).await;
     response["webBuildId"] = Value::String(build_info.web_build_id.clone());
     response["appVersion"] = Value::String(build_info.app_version.clone());
-    response["serverPlatform"] = Value::String(server_platform_name().to_string());
+    response["serverPlatform"] = Value::String(crate::server_platform_name().to_string());
 
     let projects = match projects_result {
         Ok(projects) => projects,
@@ -1574,6 +1565,22 @@ mod tests {
     }
 
     #[test]
+    fn reconnect_init_response_includes_server_platform() {
+        let source = include_str!("server.rs");
+        let start = source
+            .find("async fn reconnect_init_response")
+            .expect("reconnect_init_response should exist");
+        let rest = &source[start..];
+        let end = rest
+            .find("async fn init_handler")
+            .expect("init_handler should follow reconnect_init_response");
+        let body = &rest[..end];
+
+        assert!(body.contains("response[\"serverPlatform\"]"));
+        assert!(body.contains("server_platform_name()"));
+    }
+
+    #[test]
     fn validate_bind_host_trims_and_normalizes_localhost() {
         assert_eq!(validate_bind_host(" LOCALHOST ").unwrap(), "localhost");
         assert_eq!(
@@ -1768,7 +1775,7 @@ mod tests {
     #[test]
     fn server_platform_name_matches_supported_frontend_values() {
         assert!(matches!(
-            super::server_platform_name(),
+            crate::server_platform_name(),
             "mac" | "windows" | "linux"
         ));
     }

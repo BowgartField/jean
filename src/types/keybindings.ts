@@ -1,4 +1,6 @@
 // Keybinding action identifiers - extensible for future shortcuts
+import { isMacOS } from '@/lib/platform'
+
 export type KeybindingAction =
   | 'focus_chat_input'
   | 'toggle_left_sidebar'
@@ -412,24 +414,22 @@ export function formatShortcutDisplay(
 ): string {
   if (!shortcut) return ''
 
-  const isMac =
-    typeof navigator !== 'undefined' && navigator.platform.includes('Mac')
   // On macOS web, Cmd shortcuts are intercepted by the browser.
   // Ctrl+key already works (both map to "mod"), so show ⌃ instead of ⌘.
   const isWeb =
     typeof window !== 'undefined' && !('__TAURI_INTERNALS__' in window)
-  const useMacCtrl = isMac && isWeb
+  const useMacCtrl = isMacOS && isWeb
 
   return shortcut
     .split('+')
     .map(part => {
       switch (part) {
         case 'mod':
-          return useMacCtrl ? '⌃' : isMac ? '⌘' : 'Ctrl'
+          return useMacCtrl ? '⌃' : isMacOS ? '⌘' : 'Ctrl'
         case 'shift':
-          return isMac ? '⇧' : 'Shift'
+          return isMacOS ? '⇧' : 'Shift'
         case 'alt':
-          return isMac ? '⌥' : 'Alt'
+          return isMacOS ? '⌥' : 'Alt'
         case 'comma':
           return ','
         case 'period':
@@ -445,9 +445,9 @@ export function formatShortcutDisplay(
         case 'slash':
           return '/'
         case 'backspace':
-          return isMac ? '⌫' : 'Backspace'
+          return isMacOS ? '⌫' : 'Backspace'
         case 'enter':
-          return isMac ? '↩' : 'Enter'
+          return isMacOS ? '↩' : 'Enter'
         case 'tab':
           return 'Tab'
         case 'escape':
