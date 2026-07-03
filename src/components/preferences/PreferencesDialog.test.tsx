@@ -168,15 +168,21 @@ describe('PreferencesDialog', () => {
 
     for (const label of ['PI', 'Command Code']) {
       const button = within(navigationMenu).getByText(label).closest('button')
-      expect(button).not.toBeNull()
-      expect(within(button!).getByText('Beta')).toHaveClass('bg-yellow-500/10')
+      if (!button) {
+        throw new Error(`Expected ${label} navigation button to be rendered`)
+      }
+
+      expect(within(button).getByText('Beta')).toHaveClass('bg-yellow-500/10')
     }
 
     const grokButton = within(navigationMenu)
       .getByText('Grok')
       .closest('button')
-    expect(grokButton).not.toBeNull()
-    expect(within(grokButton!).getByText('Beta')).toHaveClass(
+    if (!grokButton) {
+      throw new Error('Expected Grok navigation button to be rendered')
+    }
+
+    expect(within(grokButton).getByText('Beta')).toHaveClass(
       'bg-yellow-500/10'
     )
   })
