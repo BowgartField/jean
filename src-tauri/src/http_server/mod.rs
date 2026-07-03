@@ -6,7 +6,7 @@ pub mod websocket;
 
 use serde::Serialize;
 use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::broadcast;
@@ -54,6 +54,10 @@ const TERMINAL_REPLAYABLE_EVENTS: &[&str] = &["terminal:output", "terminal:start
 /// Managed as Tauri state so any code with an AppHandle can broadcast.
 pub struct WsBroadcaster {
     tx: broadcast::Sender<WsEvent>,
+    /// True while the HTTP server is running. When false, `broadcast()` is a
+    /// no-op so native-only usage pays zero serialization/buffering cost on
+    /// every emitted event.
+    active: AtomicBool,
     /// Per-session ring buffer for event replay on WebSocket reconnect.
     /// Key: session_id extracted from the event payload.
     session_buffers: Mutex<HashMap<String, VecDeque<(u64, Arc<str>)>>>,
@@ -134,6 +138,7 @@ impl WsBroadcaster {
         (
             Self {
                 tx,
+                active: AtomicBool::new(false),
                 session_buffers: Mutex::new(HashMap::new()),
                 terminal_buffers: Mutex::new(HashMap::new()),
             },
@@ -144,7 +149,26 @@ impl WsBroadcaster {
     /// Serialize the payload once into the wire-format JSON envelope.
     /// Each broadcast receiver gets an `Arc<str>` clone (cheap ref-count
     /// increment) instead of re-serializing per client.
+    /// Mark the broadcaster active/inactive alongside HTTP server start/stop.
+    /// Deactivating clears replay buffers — a stopped server has no clients to
+    /// replay to, and this frees the buffered event memory.
+    pub fn set_active(&self, active: bool) {
+        self.active.store(active, Ordering::Relaxed);
+        if !active {
+            if let Ok(mut buffers) = self.session_buffers.lock() {
+                buffers.clear();
+            }
+            if let Ok(mut buffers) = self.terminal_buffers.lock() {
+                buffers.clear();
+            }
+        }
+    }
+
     pub fn broadcast<S: Serialize>(&self, event: &str, payload: &S) {
+        // Skip all serialization/buffering when the HTTP server isn't running.
+        if !self.active.load(Ordering::Relaxed) {
+            return;
+        }
         let seq = EVENT_SEQ.fetch_add(1, Ordering::Relaxed);
         let envelope = WsEnvelope {
             msg_type: "event",
@@ -307,9 +331,53 @@ mod tests {
         serde_json::from_str(json).expect("event json should parse")
     }
 
+    fn active_broadcaster() -> (WsBroadcaster, broadcast::Sender<WsEvent>) {
+        let (broadcaster, tx) = WsBroadcaster::new();
+        broadcaster.set_active(true);
+        (broadcaster, tx)
+    }
+
+    #[test]
+    fn inactive_broadcaster_skips_buffering() {
+        let (broadcaster, _tx) = WsBroadcaster::new();
+
+        broadcaster.broadcast(
+            "terminal:output",
+            &json!({ "terminal_id": "term-1", "data": "dropped" }),
+        );
+        broadcaster.broadcast(
+            "chat:chunk",
+            &json!({ "session_id": "s1", "content": "hi" }),
+        );
+
+        assert!(broadcaster.replay_terminal_events("term-1", 0).is_empty());
+        assert!(broadcaster.replay_events("s1", 0).is_empty());
+    }
+
+    #[test]
+    fn deactivating_clears_replay_buffers() {
+        let (broadcaster, _tx) = active_broadcaster();
+
+        broadcaster.broadcast(
+            "terminal:output",
+            &json!({ "terminal_id": "term-1", "data": "live" }),
+        );
+        broadcaster.broadcast(
+            "chat:chunk",
+            &json!({ "session_id": "s1", "content": "hi" }),
+        );
+        assert_eq!(broadcaster.replay_terminal_events("term-1", 0).len(), 1);
+        assert_eq!(broadcaster.replay_events("s1", 0).len(), 1);
+
+        broadcaster.set_active(false);
+
+        assert!(broadcaster.replay_terminal_events("term-1", 0).is_empty());
+        assert!(broadcaster.replay_events("s1", 0).is_empty());
+    }
+
     #[test]
     fn terminal_replay_buffers_only_matching_terminal_events() {
-        let (broadcaster, _tx) = WsBroadcaster::new();
+        let (broadcaster, _tx) = active_broadcaster();
 
         broadcaster.broadcast(
             "terminal:started",
@@ -339,7 +407,7 @@ mod tests {
 
     #[test]
     fn terminal_replay_respects_after_sequence() {
-        let (broadcaster, _tx) = WsBroadcaster::new();
+        let (broadcaster, _tx) = active_broadcaster();
 
         broadcaster.broadcast(
             "terminal:output",
@@ -358,7 +426,7 @@ mod tests {
 
     #[test]
     fn terminal_stopped_drops_terminal_replay_buffer() {
-        let (broadcaster, _tx) = WsBroadcaster::new();
+        let (broadcaster, _tx) = active_broadcaster();
 
         broadcaster.broadcast(
             "terminal:output",
@@ -376,7 +444,7 @@ mod tests {
 
     #[test]
     fn terminal_replay_buffer_is_capped_by_payload_bytes() {
-        let (broadcaster, _tx) = WsBroadcaster::new();
+        let (broadcaster, _tx) = active_broadcaster();
         const REPLAY_PAYLOAD_BUDGET_BYTES: usize = 3 * 1024 * 1024;
         const CHUNK_BYTES: usize = 4096;
         let chunk = "x".repeat(CHUNK_BYTES);

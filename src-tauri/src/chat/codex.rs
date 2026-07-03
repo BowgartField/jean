@@ -8,6 +8,7 @@
 //! directly since they don't need streaming.
 
 use super::claude::CancelledEvent;
+use super::coalesce::ChunkCoalescer;
 use super::types::{
     CodexCommandAction, CodexCommandApprovalRequest, CodexCommandApprovalRequestEvent,
     CodexDynamicToolCallRequest, CodexDynamicToolCallRequestEvent, CodexNetworkApprovalContext,
@@ -1404,6 +1405,61 @@ fn start_new_thread(
     Ok(thread_id)
 }
 
+/// Emit a (possibly coalesced) `chat:chunk` batch.
+fn emit_chunk_batch(
+    app: &tauri::AppHandle,
+    session_id: &str,
+    worktree_id: &str,
+    run_id: &str,
+    content: String,
+) {
+    let _ = app.emit_all(
+        "chat:chunk",
+        &ChunkEvent {
+            session_id: session_id.to_string(),
+            worktree_id: worktree_id.to_string(),
+            content,
+            run_id: Some(run_id.to_string()),
+        },
+    );
+}
+
+/// Emit a (possibly coalesced) `chat:thinking` batch.
+fn emit_thinking_batch(
+    app: &tauri::AppHandle,
+    session_id: &str,
+    worktree_id: &str,
+    content: String,
+) {
+    let _ = app.emit_all(
+        "chat:thinking",
+        &ThinkingEvent {
+            session_id: session_id.to_string(),
+            worktree_id: worktree_id.to_string(),
+            content,
+        },
+    );
+}
+
+/// Flush buffered text/thinking deltas. Must run before any other event is
+/// emitted for this session and before terminal events (done/cancel/error)
+/// so event ordering and content integrity are preserved.
+fn flush_stream_coalescers(
+    app: &tauri::AppHandle,
+    session_id: &str,
+    worktree_id: &str,
+    run_id: &str,
+    chunk_coalescer: &mut ChunkCoalescer,
+    thinking_coalescer: &mut ChunkCoalescer,
+) {
+    if let Some(content) = chunk_coalescer.flush() {
+        emit_chunk_batch(app, session_id, worktree_id, run_id, content);
+    }
+    if let Some(content) = thinking_coalescer.flush() {
+        emit_thinking_batch(app, session_id, worktree_id, content);
+    }
+}
+
 /// Process turn events from the app-server, emitting Tauri events.
 #[allow(clippy::too_many_arguments)]
 fn process_turn_events(
@@ -1433,6 +1489,12 @@ fn process_turn_events(
     let mut usage: Option<UsageData> = None;
     let mut received_completed_agent_message = false;
 
+    // Coalesce token-rate text/thinking deltas into fewer, larger
+    // chat:chunk / chat:thinking events. Flushed before any other event is
+    // emitted and whenever the event stream idles past the window.
+    let mut chunk_coalescer = ChunkCoalescer::new();
+    let mut thinking_coalescer = ChunkCoalescer::new();
+
     // Open output file for history
     let mut output_writer = std::fs::OpenOptions::new()
         .create(true)
@@ -1441,87 +1503,122 @@ fn process_turn_events(
         .ok();
 
     'outer: loop {
-        let event = match status_poll_interval {
-            Some(interval) => match event_rx.recv_timeout(interval) {
+        // While deltas are buffered, only wait until the coalescing window
+        // deadline so text is not held back while the stream idles. At most
+        // one coalescer is non-empty at a time (they flush each other), but
+        // take the earliest deadline defensively.
+        let coalesce_deadline = match (chunk_coalescer.deadline(), thinking_coalescer.deadline()) {
+            (Some(chunk), Some(thinking)) => Some(chunk.min(thinking)),
+            (chunk, thinking) => chunk.or(thinking),
+        };
+        let event = if let Some(deadline) = coalesce_deadline {
+            let timeout = deadline.saturating_duration_since(std::time::Instant::now());
+            match event_rx.recv_timeout(timeout) {
                 Ok(e) => e,
                 Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                    let snapshot = super::codex_server::send_request(
-                        "thread/read",
-                        serde_json::json!({
-                            "threadId": thread_id,
-                            "includeTurns": true,
-                        }),
+                    flush_stream_coalescers(
+                        app,
+                        session_id,
+                        worktree_id,
+                        run_id,
+                        &mut chunk_coalescer,
+                        &mut thinking_coalescer,
                     );
-                    match snapshot {
-                        Ok(snapshot) => {
-                            let disposition =
-                                classify_codex_resume(&snapshot, recovery_turn_id, true);
-                            if disposition == CodexResumeDisposition::Active {
-                                continue;
-                            }
-
-                            if let Some(ref mut writer) = output_writer {
-                                let _ = writer.flush();
-                            }
-                            if let Err(e) = append_codex_thread_snapshot_to_history_file(
-                                output_file,
-                                &snapshot,
-                                recovery_turn_id,
-                                false,
-                            ) {
-                                log::warn!("Failed to append Codex snapshot after idle poll: {e}");
-                            }
-
-                            match disposition {
-                                CodexResumeDisposition::Failed => {
-                                    if let Some(turn) =
-                                        select_codex_recovery_turn(&snapshot, recovery_turn_id)
-                                    {
-                                        let raw_error = codex_turn_error_message(turn)
-                                            .unwrap_or_else(|| "Unknown Codex error".to_string());
-                                        let _ = app.emit_all(
-                                            "chat:error",
-                                            &ErrorEvent {
-                                                session_id: session_id.to_string(),
-                                                worktree_id: worktree_id.to_string(),
-                                                error: format_codex_user_error(&raw_error),
-                                            },
-                                        );
-                                    }
-                                    error_emitted = true;
-                                    break 'outer;
-                                }
-                                CodexResumeDisposition::Interrupted => {
-                                    cancelled = true;
-                                    server_interrupted = true;
-                                    break 'outer;
-                                }
-                                CodexResumeDisposition::Idle => {
-                                    break 'outer;
-                                }
-                                CodexResumeDisposition::Active => unreachable!(),
-                            }
-                        }
-                        Err(e) => {
-                            log::warn!("Codex recovery status poll failed: {e}");
-                            continue;
-                        }
-                    }
+                    continue;
                 }
                 Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
                     log::warn!("Event channel disconnected for session {session_id}");
                     cancelled = true;
                     break 'outer;
                 }
-            },
-            None => match event_rx.recv() {
-                Ok(e) => e,
-                Err(_) => {
-                    log::warn!("Event channel disconnected for session {session_id}");
-                    cancelled = true;
-                    break 'outer;
-                }
-            },
+            }
+        } else {
+            match status_poll_interval {
+                Some(interval) => match event_rx.recv_timeout(interval) {
+                    Ok(e) => e,
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                        let snapshot = super::codex_server::send_request(
+                            "thread/read",
+                            serde_json::json!({
+                                "threadId": thread_id,
+                                "includeTurns": true,
+                            }),
+                        );
+                        match snapshot {
+                            Ok(snapshot) => {
+                                let disposition =
+                                    classify_codex_resume(&snapshot, recovery_turn_id, true);
+                                if disposition == CodexResumeDisposition::Active {
+                                    continue;
+                                }
+
+                                if let Some(ref mut writer) = output_writer {
+                                    let _ = writer.flush();
+                                }
+                                if let Err(e) = append_codex_thread_snapshot_to_history_file(
+                                    output_file,
+                                    &snapshot,
+                                    recovery_turn_id,
+                                    false,
+                                ) {
+                                    log::warn!(
+                                        "Failed to append Codex snapshot after idle poll: {e}"
+                                    );
+                                }
+
+                                match disposition {
+                                    CodexResumeDisposition::Failed => {
+                                        if let Some(turn) =
+                                            select_codex_recovery_turn(&snapshot, recovery_turn_id)
+                                        {
+                                            let raw_error = codex_turn_error_message(turn)
+                                                .unwrap_or_else(|| {
+                                                    "Unknown Codex error".to_string()
+                                                });
+                                            let _ = app.emit_all(
+                                                "chat:error",
+                                                &ErrorEvent {
+                                                    session_id: session_id.to_string(),
+                                                    worktree_id: worktree_id.to_string(),
+                                                    error: format_codex_user_error(&raw_error),
+                                                },
+                                            );
+                                        }
+                                        error_emitted = true;
+                                        break 'outer;
+                                    }
+                                    CodexResumeDisposition::Interrupted => {
+                                        cancelled = true;
+                                        server_interrupted = true;
+                                        break 'outer;
+                                    }
+                                    CodexResumeDisposition::Idle => {
+                                        break 'outer;
+                                    }
+                                    CodexResumeDisposition::Active => unreachable!(),
+                                }
+                            }
+                            Err(e) => {
+                                log::warn!("Codex recovery status poll failed: {e}");
+                                continue;
+                            }
+                        }
+                    }
+                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                        log::warn!("Event channel disconnected for session {session_id}");
+                        cancelled = true;
+                        break 'outer;
+                    }
+                },
+                None => match event_rx.recv() {
+                    Ok(e) => e,
+                    Err(_) => {
+                        log::warn!("Event channel disconnected for session {session_id}");
+                        cancelled = true;
+                        break 'outer;
+                    }
+                },
+            }
         };
 
         match event {
@@ -1553,6 +1650,8 @@ fn process_turn_events(
                     &mut error_emitted,
                     &mut received_completed_agent_message,
                     is_plan_mode,
+                    &mut chunk_coalescer,
+                    &mut thinking_coalescer,
                 );
 
                 // Update turn_id for cancellation + crash recovery
@@ -1600,6 +1699,16 @@ fn process_turn_events(
                     );
                 }
 
+                // Approval requests emit their own events — flush buffered
+                // deltas first to preserve event ordering.
+                flush_stream_coalescers(
+                    app,
+                    session_id,
+                    worktree_id,
+                    run_id,
+                    &mut chunk_coalescer,
+                    &mut thinking_coalescer,
+                );
                 handle_approval_request(
                     app,
                     session_id,
@@ -1613,6 +1722,14 @@ fn process_turn_events(
             }
             ServerEvent::ServerDied => {
                 log::error!("Codex app-server died during turn for session {session_id}");
+                flush_stream_coalescers(
+                    app,
+                    session_id,
+                    worktree_id,
+                    run_id,
+                    &mut chunk_coalescer,
+                    &mut thinking_coalescer,
+                );
                 if !error_emitted {
                     let _ = app.emit_all(
                         "chat:error",
@@ -1634,6 +1751,17 @@ fn process_turn_events(
             break 'outer;
         }
     }
+
+    // Flush any deltas still buffered when the loop exited (completion,
+    // cancellation, disconnect) before the terminal events below.
+    flush_stream_coalescers(
+        app,
+        session_id,
+        worktree_id,
+        run_id,
+        &mut chunk_coalescer,
+        &mut thinking_coalescer,
+    );
 
     // Write accumulated text to JSONL for cancelled/interrupted runs only when
     // Codex never emitted a completed agent_message item. If one was already
@@ -1859,8 +1987,37 @@ fn process_server_notification(
     error_emitted: &mut bool,
     received_completed_agent_message: &mut bool,
     is_plan_mode: bool,
+    chunk_coalescer: &mut ChunkCoalescer,
+    thinking_coalescer: &mut ChunkCoalescer,
 ) {
     log::trace!("[codex-server] Notification: {method} for session {session_id}");
+
+    // Ordering invariant: buffered deltas must be flushed before any other
+    // event for this session is emitted. Text deltas only flush the thinking
+    // buffer (and vice versa) so consecutive same-type deltas keep
+    // coalescing; every other notification flushes both.
+    match method {
+        "item/agentMessage/delta" => {
+            if let Some(content) = thinking_coalescer.flush() {
+                emit_thinking_batch(app, session_id, worktree_id, content);
+            }
+        }
+        "item/reasoning/textDelta" | "item/reasoning/summaryTextDelta" => {
+            if let Some(content) = chunk_coalescer.flush() {
+                emit_chunk_batch(app, session_id, worktree_id, run_id, content);
+            }
+        }
+        _ => {
+            flush_stream_coalescers(
+                app,
+                session_id,
+                worktree_id,
+                run_id,
+                chunk_coalescer,
+                thinking_coalescer,
+            );
+        }
+    }
 
     match method {
         "thread/started" => {
@@ -1874,19 +2031,13 @@ fn process_server_notification(
             }
         }
         "item/agentMessage/delta" => {
-            // Streaming text delta — emit immediately
+            // Streaming text delta — coalesced into batched chat:chunk events
             if let Some(delta) = params.get("delta").and_then(|v| v.as_str()) {
                 if !delta.is_empty() {
                     full_content.push_str(delta);
-                    let _ = app.emit_all(
-                        "chat:chunk",
-                        &ChunkEvent {
-                            session_id: session_id.to_string(),
-                            worktree_id: worktree_id.to_string(),
-                            content: delta.to_string(),
-                            run_id: Some(run_id.to_string()),
-                        },
-                    );
+                    if let Some(content) = chunk_coalescer.push(delta) {
+                        emit_chunk_batch(app, session_id, worktree_id, run_id, content);
+                    }
                 }
             }
         }
@@ -2187,17 +2338,12 @@ fn process_server_notification(
             }
         }
         "item/reasoning/textDelta" | "item/reasoning/summaryTextDelta" => {
-            // Streaming reasoning/thinking text
+            // Streaming reasoning/thinking text — coalesced like text deltas
             if let Some(delta) = params.get("delta").and_then(|v| v.as_str()) {
                 if !delta.is_empty() {
-                    let _ = app.emit_all(
-                        "chat:thinking",
-                        &ThinkingEvent {
-                            session_id: session_id.to_string(),
-                            worktree_id: worktree_id.to_string(),
-                            content: delta.to_string(),
-                        },
-                    );
+                    if let Some(content) = thinking_coalescer.push(delta) {
+                        emit_thinking_batch(app, session_id, worktree_id, content);
+                    }
                 }
             }
         }
@@ -4079,6 +4225,15 @@ pub fn execute_one_shot_codex(
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
 
+    // Run in a new process group so a timeout kill can take down the whole tree.
+    // Codex spawns MCP server children (e.g. chrome-devtools-mcp) that survive a
+    // plain child.kill() and linger as orphans.
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+
     if !wsl.enabled {
         if let Some(dir) = working_dir {
             cmd.current_dir(dir);
@@ -4112,7 +4267,12 @@ pub fn execute_one_shot_codex(
             Ok(None) => {
                 // Still running
                 if start.elapsed() > timeout {
+                    // Kill the whole process group, not just the direct child —
+                    // otherwise codex's MCP children leak as orphaned processes.
+                    let _ = crate::platform::kill_process_tree(child.id());
                     let _ = child.kill();
+                    let _ = child.wait();
+                    let _ = std::fs::remove_file(&schema_file);
                     return Err(
                         "Codex CLI timed out after 120s. This often happens when an MCP server \
                          is stuck connecting. Check your Codex MCP server configuration."

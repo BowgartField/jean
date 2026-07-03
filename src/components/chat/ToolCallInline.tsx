@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { usePreferences } from '@/services/preferences'
 import { useChatStore } from '@/store/chat-store'
+import { useVisibilityAwareTicker } from '@/hooks/useVisibilityAwareTicker'
 import {
   FileText,
   Edit,
@@ -683,13 +684,17 @@ function getToolSummaryName(name: string): string {
 /** Live-ticking remaining seconds for a pending ScheduleWakeup. */
 function useWakeupRemaining(fireAtUnix: number | undefined): number | null {
   const [nowUnix, setNowUnix] = useState<number | null>(null)
+  const updateNow = useCallback(
+    () => setNowUnix(Math.floor(Date.now() / 1000)),
+    []
+  )
+
   useEffect(() => {
-    if (!fireAtUnix) return
-    const updateNow = () => setNowUnix(Math.floor(Date.now() / 1000))
-    updateNow()
-    const id = setInterval(updateNow, 1000)
-    return () => clearInterval(id)
+    if (!fireAtUnix) setNowUnix(null)
   }, [fireAtUnix])
+
+  useVisibilityAwareTicker(!!fireAtUnix, updateNow)
+
   if (!fireAtUnix) return null
   if (nowUnix === null) return null
   return Math.max(0, fireAtUnix - nowUnix)

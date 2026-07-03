@@ -246,7 +246,14 @@ pub async fn start_server(
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
     let bind_host_for_log = bind_host.clone();
 
+    // Enable WS broadcasting only while the server runs — otherwise every
+    // emitted event pays serialization/replay-buffering cost for no clients.
+    if let Some(ws) = app.try_state::<WsBroadcaster>() {
+        ws.set_active(true);
+    }
+
     // Spawn the server
+    let app_for_shutdown = app.clone();
     tokio::spawn(async move {
         log::info!(
             "HTTP server listening on {local_addr} (bind_host: {bind_host_for_log}, localhost_only: {localhost_only})"
@@ -258,6 +265,9 @@ pub async fn start_server(
             })
             .await
             .unwrap_or_else(|e| log::error!("HTTP server error: {e}"));
+        if let Some(ws) = app_for_shutdown.try_state::<WsBroadcaster>() {
+            ws.set_active(false);
+        }
     });
 
     Ok(HttpServerHandle {

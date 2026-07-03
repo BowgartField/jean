@@ -32,7 +32,11 @@ import { convertFileSrc } from '@/lib/transport'
 
 interface MarkdownProps {
   children: string
-  /** Enable streaming mode with incomplete markdown handling */
+  /**
+   * Enable streaming mode: auto-closes incomplete markdown and skips the
+   * expensive rehype-raw HTML pass (raw HTML shows as literal text until the
+   * completed message re-renders without `streaming`).
+   */
   streaming?: boolean
   className?: string
   /** Rendering context; tool-call markdown needs a wider ordered-list gutter. */
@@ -539,6 +543,13 @@ const compactComponents: Components = {
   ),
 }
 
+// Module-level plugin arrays keep references stable across renders.
+const remarkPlugins = [remarkGfm]
+// rehype-raw re-parses the full accumulated text as HTML on every render —
+// the dominant per-frame cost while streaming — so streaming mode skips it
+// and only completed (non-streaming) renders apply it.
+const rehypePlugins = [rehypeRaw]
+
 /**
  * Memoized markdown renderer to prevent expensive re-parsing
  * ReactMarkdown is expensive, so we avoid re-renders when content hasn't changed
@@ -575,8 +586,8 @@ const Markdown = memo(function Markdown({
       <MarkdownTableContext.Provider value={contextValue}>
         <ReactMarkdown
           components={componentsToUse}
-          remarkPlugins={[remarkGfm]}
-          rehypePlugins={[rehypeRaw]}
+          remarkPlugins={remarkPlugins}
+          rehypePlugins={streaming ? undefined : rehypePlugins}
         >
           {content}
         </ReactMarkdown>

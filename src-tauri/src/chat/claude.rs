@@ -1,5 +1,6 @@
 use tauri::Manager;
 
+use super::coalesce::ChunkCoalescer;
 use super::types::{
     is_claude_compaction_summary_text, CompactMetadata, ContentBlock, EffortLevel,
     PermissionDenial, PermissionDeniedEvent, ThinkingLevel, ToolCall, UsageData,
@@ -1237,6 +1238,40 @@ pub fn execute_claude_detached(
 // File-based tailing for detached Claude CLI
 // =============================================================================
 
+/// Emit a (possibly coalesced) `chat:chunk` batch.
+fn emit_chunk_batch(
+    app: &tauri::AppHandle,
+    session_id: &str,
+    worktree_id: &str,
+    run_id: &Option<String>,
+    content: String,
+) {
+    let chunk = ChunkEvent {
+        session_id: session_id.to_string(),
+        worktree_id: worktree_id.to_string(),
+        content,
+        run_id: run_id.clone(),
+    };
+    if let Err(e) = app.emit_all("chat:chunk", &chunk) {
+        log::error!("Failed to emit chunk: {e}");
+    }
+}
+
+/// Flush buffered text deltas. Must run before any other event is emitted
+/// for this session and before terminal events (done/cancel/error) so event
+/// ordering and content integrity are preserved.
+fn flush_pending_chunks(
+    app: &tauri::AppHandle,
+    session_id: &str,
+    worktree_id: &str,
+    run_id: &Option<String>,
+    coalescer: &mut ChunkCoalescer,
+) {
+    if let Some(content) = coalescer.flush() {
+        emit_chunk_batch(app, session_id, worktree_id, run_id, content);
+    }
+}
+
 /// Tail an NDJSON output file and emit events as new lines appear.
 ///
 /// This is used for detached Claude CLI processes where the CLI writes
@@ -1254,7 +1289,7 @@ pub fn tail_claude_output(
     pid: u32,
 ) -> Result<ClaudeResponse, String> {
     use super::detached::is_process_alive;
-    use super::tail::{NdjsonTailer, POLL_INTERVAL, POLL_INTERVAL_FAST};
+    use super::tail::{next_poll_interval, NdjsonTailer};
     use std::time::{Duration, Instant};
 
     log::trace!("Starting to tail NDJSON output for session: {session_id}");
@@ -1266,6 +1301,10 @@ pub fn tail_claude_output(
 
     // Create tailer starting from beginning (we want all content)
     let mut tailer = NdjsonTailer::new_from_start(output_file)?;
+
+    // Coalesce consecutive text blocks into fewer, larger chat:chunk events.
+    // Flushed before any other event is emitted and after each drained batch.
+    let mut chunk_coalescer = ChunkCoalescer::new();
 
     let mut full_content = String::new();
     let mut claude_session_id = String::new();
@@ -1392,6 +1431,12 @@ pub fn tail_claude_output(
                 .map(|s| s.to_string());
 
             let msg_type = msg.get("type").and_then(|v| v.as_str()).unwrap_or("");
+
+            // Non-assistant lines can emit non-chunk events or terminate the
+            // stream — flush buffered text first to preserve event ordering.
+            if msg_type != "assistant" {
+                flush_pending_chunks(app, session_id, worktree_id, &run_id, &mut chunk_coalescer);
+            }
 
             if msg_type == "stream_event" {
                 if let Some(tool) = stream_event_tool_use(&msg) {
@@ -1564,17 +1609,15 @@ pub fn tail_claude_output(
                                                         content_blocks.push(ContentBlock::Text {
                                                             text: chat_buf.clone(),
                                                         });
-                                                        let chunk = ChunkEvent {
-                                                            session_id: session_id.to_string(),
-                                                            worktree_id: worktree_id.to_string(),
-                                                            content: chat_buf.clone(),
-                                                            run_id: run_id.clone(),
-                                                        };
-                                                        if let Err(e) =
-                                                            app.emit_all("chat:chunk", &chunk)
+                                                        if let Some(content) =
+                                                            chunk_coalescer.push(&chat_buf)
                                                         {
-                                                            log::error!(
-                                                                "Failed to emit chunk: {e}"
+                                                            emit_chunk_batch(
+                                                                app,
+                                                                session_id,
+                                                                worktree_id,
+                                                                &run_id,
+                                                                content,
                                                             );
                                                         }
                                                         chat_buf.clear();
@@ -1582,6 +1625,15 @@ pub fn tail_claude_output(
                                                     if let Some(ref mon_id) = monitor_target {
                                                         let line = trimmed.trim();
                                                         if !line.is_empty() {
+                                                            // Monitor events must not overtake
+                                                            // buffered text.
+                                                            flush_pending_chunks(
+                                                                app,
+                                                                session_id,
+                                                                worktree_id,
+                                                                &run_id,
+                                                                &mut chunk_coalescer,
+                                                            );
                                                             let evt = ToolEventEvent {
                                                                 session_id: session_id.to_string(),
                                                                 worktree_id: worktree_id
@@ -1612,20 +1664,31 @@ pub fn tail_claude_output(
                                                 content_blocks.push(ContentBlock::Text {
                                                     text: chat_buf.clone(),
                                                 });
-                                                let chunk = ChunkEvent {
-                                                    session_id: session_id.to_string(),
-                                                    worktree_id: worktree_id.to_string(),
-                                                    content: chat_buf,
-                                                    run_id: run_id.clone(),
-                                                };
-                                                if let Err(e) = app.emit_all("chat:chunk", &chunk) {
-                                                    log::error!("Failed to emit chunk: {e}");
+                                                if let Some(content) =
+                                                    chunk_coalescer.push(&chat_buf)
+                                                {
+                                                    emit_chunk_batch(
+                                                        app,
+                                                        session_id,
+                                                        worktree_id,
+                                                        &run_id,
+                                                        content,
+                                                    );
                                                 }
                                             }
                                             continue;
                                         }
                                     }
                                     "tool_use" => {
+                                        // Tool events must not overtake buffered text.
+                                        flush_pending_chunks(
+                                            app,
+                                            session_id,
+                                            worktree_id,
+                                            &run_id,
+                                            &mut chunk_coalescer,
+                                        );
+
                                         let id = block
                                             .get("id")
                                             .and_then(|v| v.as_str())
@@ -1779,6 +1842,14 @@ pub fn tail_claude_output(
                                         if let Some(thinking) =
                                             block.get("thinking").and_then(|v| v.as_str())
                                         {
+                                            // Thinking events must not overtake buffered text.
+                                            flush_pending_chunks(
+                                                app,
+                                                session_id,
+                                                worktree_id,
+                                                &run_id,
+                                                &mut chunk_coalescer,
+                                            );
                                             content_blocks.push(ContentBlock::Thinking {
                                                 thinking: thinking.to_string(),
                                             });
@@ -2191,6 +2262,10 @@ pub fn tail_claude_output(
             }
         }
 
+        // Batch drained — flush buffered text before the monitor sweep,
+        // completion checks, and sleep so text is not held while idle.
+        flush_pending_chunks(app, session_id, worktree_id, &run_id, &mut chunk_coalescer);
+
         // Disarm Monitors whose declared timeout (+5s grace) has elapsed.
         if !armed_monitors.is_empty() {
             let now = Instant::now();
@@ -2285,14 +2360,15 @@ pub fn tail_claude_output(
             }
         }
 
-        // Adaptive sleep: poll faster when actively receiving data (5ms)
-        // to reduce per-event latency, back off to 50ms when idle.
-        std::thread::sleep(if had_data {
-            POLL_INTERVAL_FAST
-        } else {
-            POLL_INTERVAL
-        });
+        // Adaptive sleep: poll fast (5ms) while data flows to reduce
+        // per-event latency, 50ms when briefly idle, and back off to 250ms
+        // after a sustained quiet period (e.g. long thinking phases).
+        std::thread::sleep(next_poll_interval(had_data, last_output_time.elapsed()));
     }
+
+    // Flush any text still buffered when the loop exited before the
+    // terminal events below (defensive: every break follows a batch flush).
+    flush_pending_chunks(app, session_id, worktree_id, &run_id, &mut chunk_coalescer);
 
     // Drain any still-armed Monitors (process died / user cancel / completed)
     // so the UI flips their status pill away from "armed".

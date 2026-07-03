@@ -15,6 +15,7 @@ import {
   Loader2,
   AlertCircle,
   Wand2,
+  Star,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { getModifierSymbol } from '@/lib/platform'
@@ -40,6 +41,7 @@ import {
 } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { useUIStore } from '@/store/ui-store'
+import { useProjectsStore } from '@/store/projects-store'
 import { useProjects, isTauri, useCreateWorktree } from '@/services/projects'
 import { isFolder } from '@/types/projects'
 import {
@@ -81,6 +83,29 @@ interface PreviewState {
 function getDashboardErrorMessage(error: unknown): string {
   if (!error) return 'Failed to load GitHub dashboard data'
   return error instanceof Error ? error.message : String(error)
+}
+
+function sortProjectsByFavorites(
+  projects: Project[],
+  favoriteProjectIds: string[]
+): Project[] {
+  if (favoriteProjectIds.length === 0) return projects
+
+  const favoriteOrder = new Map(
+    favoriteProjectIds.map((projectId, index) => [projectId, index])
+  )
+
+  return [...projects].sort((a, b) => {
+    const aFavoriteIndex = favoriteOrder.get(a.id)
+    const bFavoriteIndex = favoriteOrder.get(b.id)
+    const aIsFavorite = aFavoriteIndex !== undefined
+    const bIsFavorite = bFavoriteIndex !== undefined
+
+    if (aIsFavorite && bIsFavorite) return aFavoriteIndex - bFavoriteIndex
+    if (aIsFavorite) return -1
+    if (bIsFavorite) return 1
+    return 0
+  })
 }
 
 // =============================================================================
@@ -531,6 +556,12 @@ export function GitHubDashboardModal() {
   const [activeTab, setActiveTab] = useState<DashboardTab>('issues')
   const [searchQuery, setSearchQuery] = useState('')
   const [projectFilter, setProjectFilter] = useState<string>('all')
+  const githubDashboardFavoriteProjectIds = useProjectsStore(
+    state => state.githubDashboardFavoriteProjectIds
+  )
+  const toggleGitHubDashboardFavoriteProject = useProjectsStore(
+    state => state.toggleGitHubDashboardFavoriteProject
+  )
 
   const handleLabelClick = useCallback((labelName: string) => {
     const token = `label:"${labelName}"`
@@ -561,6 +592,18 @@ export function GitHubDashboardModal() {
     () => allProjects.filter(p => !isFolder(p) && p.path),
     [allProjects]
   )
+
+  const sortedProjects = useMemo(
+    () => sortProjectsByFavorites(projects, githubDashboardFavoriteProjectIds),
+    [projects, githubDashboardFavoriteProjectIds]
+  )
+  const selectedProject = useMemo(
+    () => projects.find(p => p.id === projectFilter) ?? null,
+    [projects, projectFilter]
+  )
+  const selectedProjectIsFavorite = selectedProject
+    ? githubDashboardFavoriteProjectIds.includes(selectedProject.id)
+    : false
 
   // Fetch issues for all projects in parallel
   const issueResults = useQueries({
@@ -907,9 +950,9 @@ export function GitHubDashboardModal() {
   const filteredProjects = useMemo(
     () =>
       projectFilter === 'all'
-        ? projects
-        : projects.filter(p => p.id === projectFilter),
-    [projects, projectFilter]
+        ? sortedProjects
+        : sortedProjects.filter(p => p.id === projectFilter),
+    [sortedProjects, projectFilter]
   )
 
   const { labels: labelFilters, textQuery: q } = useMemo(
@@ -1008,7 +1051,7 @@ export function GitHubDashboardModal() {
   return (
     <Dialog open={githubDashboardOpen} onOpenChange={setGitHubDashboardOpen}>
       <DialogContent
-        className="!w-screen !h-dvh !max-w-screen !max-h-none !rounded-none sm:!w-[90vw] sm:!max-w-[90vw] sm:!h-[85vh] sm:!max-h-[85vh] sm:!rounded-lg p-0 flex flex-col overflow-hidden"
+        className="!w-[calc(100vw-4rem)] !h-[calc(100dvh-6rem)] !max-w-[calc(100vw-4rem)] !max-h-[calc(100dvh-6rem)] !rounded-lg p-0 flex flex-col overflow-hidden"
         aria-describedby={undefined}
       >
         <DialogHeader className="px-4 pt-5 pb-2 flex-shrink-0">
@@ -1020,13 +1063,48 @@ export function GitHubDashboardModal() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Projects</SelectItem>
-                {projects.map(p => (
+                {sortedProjects.map(p => (
                   <SelectItem key={p.id} value={p.id}>
                     {p.name}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  disabled={!selectedProject}
+                  aria-label={
+                    selectedProject
+                      ? `${selectedProjectIsFavorite ? 'Unfavorite' : 'Favorite'} ${selectedProject.name} in GitHub dashboard`
+                      : 'Select a project to favorite it in GitHub dashboard'
+                  }
+                  className={cn(
+                    'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40',
+                    selectedProjectIsFavorite &&
+                      'text-yellow-500 hover:text-yellow-500'
+                  )}
+                  onClick={() => {
+                    if (selectedProject) {
+                      toggleGitHubDashboardFavoriteProject(selectedProject.id)
+                    }
+                  }}
+                >
+                  <Star
+                    className="h-3.5 w-3.5"
+                    fill={selectedProjectIsFavorite ? 'currentColor' : 'none'}
+                  />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>
+                {selectedProject
+                  ? selectedProjectIsFavorite
+                    ? 'Remove from GitHub Dashboard favorites'
+                    : 'Favorite this project in the GitHub Dashboard'
+                  : 'Choose a project to favorite it'}
+              </TooltipContent>
+            </Tooltip>
             <div className="relative max-w-xs flex-1">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
               <Input

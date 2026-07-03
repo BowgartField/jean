@@ -5,7 +5,7 @@ import {
   shouldShowCodeReviewLoadingPanel,
   type ChatStoreState,
 } from './session-card-utils'
-import type { Session } from '@/types/chat'
+import type { ContentBlock, Session } from '@/types/chat'
 
 describe('computeSessionCardData', () => {
   function createBaseSession(overrides: Partial<Session> = {}): Session {
@@ -21,6 +21,16 @@ describe('computeSessionCardData', () => {
     }
   }
 
+  function streamingTextGetter(
+    contents: Record<string, string> = {},
+    blocks: Record<string, ContentBlock[]> = {}
+  ): ChatStoreState['getStreamingText'] {
+    return sessionId => ({
+      content: contents[sessionId] ?? '',
+      blocks: blocks[sessionId] ?? [],
+    })
+  }
+
   function createBaseStoreState(
     overrides: Partial<ChatStoreState> = {}
   ): ChatStoreState {
@@ -29,8 +39,7 @@ describe('computeSessionCardData', () => {
       executingModes: {},
       executionModes: {},
       activeToolCalls: {},
-      streamingContents: {},
-      streamingContentBlocks: {},
+      getStreamingText: streamingTextGetter(),
       answeredQuestions: {},
       waitingForInputSessionIds: {},
       reviewingSessions: {},
@@ -59,19 +68,21 @@ describe('computeSessionCardData', () => {
           },
         ],
       },
-      streamingContents: {
-        'session-1':
-          'Repo inspected.\n\nPlan:\n- Implement changes\n- Add tests',
-      },
-      streamingContentBlocks: {
-        'session-1': [
-          { type: 'tool_use', tool_call_id: 'plan-1' },
-          {
-            type: 'text',
-            text: 'Repo inspected.\n\nPlan:\n- Implement changes\n- Add tests',
-          },
-        ],
-      },
+      getStreamingText: streamingTextGetter(
+        {
+          'session-1':
+            'Repo inspected.\n\nPlan:\n- Implement changes\n- Add tests',
+        },
+        {
+          'session-1': [
+            { type: 'tool_use', tool_call_id: 'plan-1' },
+            {
+              type: 'text',
+              text: 'Repo inspected.\n\nPlan:\n- Implement changes\n- Add tests',
+            },
+          ],
+        }
+      ),
     })
 
     const card = computeSessionCardData(session, storeState)
@@ -103,19 +114,21 @@ describe('computeSessionCardData', () => {
           },
         ],
       },
-      streamingContents: {
-        'session-1':
-          'Repo inspected.\n\nPlan:\n- Implement changes\n- Add tests',
-      },
-      streamingContentBlocks: {
-        'session-1': [
-          { type: 'tool_use', tool_call_id: 'plan-1' },
-          {
-            type: 'text',
-            text: 'Repo inspected.\n\nPlan:\n- Implement changes\n- Add tests',
-          },
-        ],
-      },
+      getStreamingText: streamingTextGetter(
+        {
+          'session-1':
+            'Repo inspected.\n\nPlan:\n- Implement changes\n- Add tests',
+        },
+        {
+          'session-1': [
+            { type: 'tool_use', tool_call_id: 'plan-1' },
+            {
+              type: 'text',
+              text: 'Repo inspected.\n\nPlan:\n- Implement changes\n- Add tests',
+            },
+          ],
+        }
+      ),
     }
 
     const card = computeSessionCardData(session, storeState)

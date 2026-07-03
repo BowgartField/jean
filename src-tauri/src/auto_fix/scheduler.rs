@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
@@ -31,6 +32,41 @@ struct PendingAutoYolo {
 static LAST_PROJECT_CHECKS: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new();
 static PENDING_YOLO: OnceLock<Mutex<HashMap<String, PendingAutoYolo>>> = OnceLock::new();
 static YOLO_IN_FLIGHT: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+
+/// Cached knowledge of whether any project has auto-fix enabled, so idle
+/// scheduler ticks can skip reading and parsing projects.json entirely.
+/// `UNKNOWN` (boot) forces one full scan, which refreshes the cache through
+/// `load_projects_data`; afterwards every projects.json load/save keeps it
+/// current via `refresh_auto_fix_scan_cache`.
+const AUTO_FIX_CACHE_UNKNOWN: u8 = 0;
+const AUTO_FIX_CACHE_DISABLED: u8 = 1;
+const AUTO_FIX_CACHE_ENABLED: u8 = 2;
+static AUTO_FIX_ENABLED_CACHE: AtomicU8 = AtomicU8::new(AUTO_FIX_CACHE_UNKNOWN);
+
+fn any_project_has_auto_fix_enabled(projects: &[Project]) -> bool {
+    projects.iter().any(|project| {
+        !project.is_folder
+            && project
+                .auto_fix_settings
+                .as_ref()
+                .is_some_and(|settings| settings.enabled)
+    })
+}
+
+/// Refresh the scheduler gate from freshly loaded/saved projects data.
+/// Called from `projects::storage` so every projects.json mutation updates it.
+pub fn refresh_auto_fix_scan_cache(projects: &[Project]) {
+    let state = if any_project_has_auto_fix_enabled(projects) {
+        AUTO_FIX_CACHE_ENABLED
+    } else {
+        AUTO_FIX_CACHE_DISABLED
+    };
+    AUTO_FIX_ENABLED_CACHE.store(state, Ordering::Relaxed);
+}
+
+fn auto_fix_scan_may_be_needed() -> bool {
+    AUTO_FIX_ENABLED_CACHE.load(Ordering::Relaxed) != AUTO_FIX_CACHE_DISABLED
+}
 
 fn last_project_checks() -> &'static Mutex<HashMap<String, u64>> {
     LAST_PROJECT_CHECKS.get_or_init(|| Mutex::new(HashMap::new()))
@@ -144,7 +180,9 @@ pub fn start_auto_fix_scheduler(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         loop {
             run_auto_yolo_watch(&app).await;
-            run_auto_fix_scan(&app).await;
+            if auto_fix_scan_may_be_needed() {
+                run_auto_fix_scan(&app).await;
+            }
             tokio::time::sleep(Duration::from_secs(AUTO_FIX_TICK_SECONDS)).await;
         }
     });
@@ -783,6 +821,54 @@ fn default_model_for_backend(backend: &str) -> String {
 mod tests {
     use super::*;
 
+    fn test_auto_fix_settings(enabled: bool) -> ProjectAutoFixSettings {
+        ProjectAutoFixSettings {
+            enabled,
+            interval_minutes: 15,
+            issue_limit: 1,
+            max_parallel_worktrees: 1,
+            included_labels: Vec::new(),
+            excluded_labels: Vec::new(),
+            planning_backend: "claude".to_string(),
+            planning_model: None,
+            auto_yolo_enabled: false,
+            yolo_backend: "claude".to_string(),
+            yolo_model: None,
+            active_hours_enabled: false,
+            active_hours_start: 20,
+            active_hours_end: 8,
+        }
+    }
+
+    fn test_project(
+        id: &str,
+        auto_fix_settings: Option<ProjectAutoFixSettings>,
+        is_folder: bool,
+    ) -> Project {
+        Project {
+            id: id.to_string(),
+            name: id.to_string(),
+            path: String::new(),
+            default_branch: String::new(),
+            added_at: 0,
+            order: 0,
+            parent_id: None,
+            is_folder,
+            avatar_path: None,
+            default_avatar_path: None,
+            enabled_mcp_servers: None,
+            known_mcp_servers: Vec::new(),
+            custom_system_prompt: None,
+            default_provider: None,
+            default_backend: None,
+            worktrees_dir: None,
+            linear_api_key: None,
+            linear_team_id: None,
+            linked_project_ids: Vec::new(),
+            auto_fix_settings,
+        }
+    }
+
     fn test_worktree(
         id: &str,
         issue_number: Option<u32>,
@@ -831,6 +917,46 @@ mod tests {
             label: None,
             last_opened_at: None,
         }
+    }
+
+    #[test]
+    fn detects_any_project_with_auto_fix_enabled() {
+        assert!(!any_project_has_auto_fix_enabled(&[]));
+        assert!(!any_project_has_auto_fix_enabled(&[
+            test_project("no-settings", None, false),
+            test_project("disabled", Some(test_auto_fix_settings(false)), false),
+        ]));
+        // Folders are skipped by the scan, so they must not keep the gate open.
+        assert!(!any_project_has_auto_fix_enabled(&[test_project(
+            "folder",
+            Some(test_auto_fix_settings(true)),
+            true,
+        )]));
+        assert!(any_project_has_auto_fix_enabled(&[
+            test_project("disabled", Some(test_auto_fix_settings(false)), false),
+            test_project("enabled", Some(test_auto_fix_settings(true)), false),
+        ]));
+    }
+
+    #[test]
+    fn scan_cache_skips_ticks_only_when_known_disabled() {
+        // Unknown (boot) must scan so the cache can be populated.
+        AUTO_FIX_ENABLED_CACHE.store(AUTO_FIX_CACHE_UNKNOWN, Ordering::Relaxed);
+        assert!(auto_fix_scan_may_be_needed());
+
+        refresh_auto_fix_scan_cache(&[test_project(
+            "disabled",
+            Some(test_auto_fix_settings(false)),
+            false,
+        )]);
+        assert!(!auto_fix_scan_may_be_needed());
+
+        refresh_auto_fix_scan_cache(&[test_project(
+            "enabled",
+            Some(test_auto_fix_settings(true)),
+            false,
+        )]);
+        assert!(auto_fix_scan_may_be_needed());
     }
 
     #[test]

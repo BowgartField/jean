@@ -1,5 +1,6 @@
 //! PI Coding Agent execution engine.
 
+use super::coalesce::ChunkCoalescer;
 use super::types::{ChatMessage, ContentBlock, MessageRole, RunEntry, ToolCall, UsageData};
 use crate::http_server::EmitExt;
 #[cfg(unix)]
@@ -778,9 +779,6 @@ pub fn run_pi_rpc_host_from_args() -> Result<(), String> {
     let _ = std::fs::remove_file(&socket_path);
     let listener = UnixListener::bind(&socket_path)
         .map_err(|e| format!("Failed to bind PI RPC host socket: {e}"))?;
-    listener
-        .set_nonblocking(true)
-        .map_err(|e| format!("Failed to set PI RPC socket nonblocking: {e}"))?;
 
     let stop = Arc::new(AtomicBool::new(false));
     let listener_stop = stop.clone();
@@ -800,15 +798,18 @@ pub fn run_pi_rpc_host_from_args() -> Result<(), String> {
             }
         }
 
+        // Blocking accept: the thread parks in the kernel until a client connects.
+        // Shutdown wakes it via a dummy self-connect after setting the stop flag.
         while !listener_stop.load(Ordering::SeqCst) {
             match listener.accept() {
                 Ok((stream, _)) => {
+                    if listener_stop.load(Ordering::SeqCst) {
+                        break;
+                    }
                     let stdin = listener_stdin.clone();
                     std::thread::spawn(move || handle_client(stream, stdin));
                 }
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    std::thread::sleep(Duration::from_millis(25));
-                }
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
                 Err(e) => {
                     eprintln!("[pi-rpc-host] listener error: {e}");
                     std::thread::sleep(Duration::from_millis(100));
@@ -862,6 +863,10 @@ pub fn run_pi_rpc_host_from_args() -> Result<(), String> {
     }
 
     stop.store(true, Ordering::SeqCst);
+    // Wake the blocking accept() so the listener thread observes the stop flag.
+    // Must happen before the socket file is removed. The dummy connection sends
+    // no data, so a spawned client handler just reads EOF and exits.
+    let _ = UnixStream::connect(&socket_path);
     let _ = child.kill();
     let _ = child.wait();
     let _ = std::fs::remove_file(&socket_path);
@@ -878,103 +883,164 @@ fn parse_pi_stream<R: BufRead>(
     session_id: &str,
     worktree_id: &str,
     run_id: Option<&str>,
-    reader: R,
+    mut reader: R,
 ) -> Result<PiResponse, String> {
     let mut response = empty_pi_response();
+    let mut text_coalescer = ChunkCoalescer::new();
+    let mut thinking_coalescer = ChunkCoalescer::new();
+    // Raw bytes read so far that don't yet form a complete line.
+    let mut carry: Vec<u8> = Vec::new();
+    let mut eof = false;
 
-    for line in reader.lines() {
-        let line = line.map_err(|e| format!("Failed to read PI output: {e}"))?;
-        let Ok(value) = serde_json::from_str::<Value>(&line) else {
-            continue;
-        };
-
-        let before_content_len = response.content.len();
-        let before_tool_count = response.tool_calls.len();
-        // Merge only this line — no re-parse of the whole accumulated buffer.
-        merge_pi_line(&mut response, &value);
-
-        if let Some(app) = app {
-            if response.content.len() > before_content_len {
-                let content = response.content[before_content_len..].to_string();
-                let _ = app.emit_all(
-                    "chat:chunk",
-                    &ChunkEvent {
-                        session_id: session_id.to_string(),
-                        worktree_id: worktree_id.to_string(),
-                        content,
-                        run_id: run_id.map(ToOwned::to_owned),
-                    },
-                );
+    loop {
+        // Drain every complete line that is immediately available.
+        while let Some(pos) = carry.iter().position(|&byte| byte == b'\n') {
+            let mut line_bytes: Vec<u8> = carry.drain(..=pos).collect();
+            line_bytes.pop();
+            if line_bytes.last() == Some(&b'\r') {
+                line_bytes.pop();
             }
-            if response.tool_calls.len() > before_tool_count {
-                for tool in &response.tool_calls[before_tool_count..] {
-                    let _ = app.emit_all(
-                        "chat:tool_use",
-                        &ToolUseEvent {
-                            session_id: session_id.to_string(),
-                            worktree_id: worktree_id.to_string(),
-                            id: tool.id.clone(),
-                            name: tool.name.clone(),
-                            input: tool.input.clone(),
-                            parent_tool_use_id: tool.parent_tool_use_id.clone(),
-                        },
-                    );
-                    let _ = app.emit_all(
-                        "chat:tool_block",
-                        &ToolBlockEvent {
-                            session_id: session_id.to_string(),
-                            worktree_id: worktree_id.to_string(),
-                            tool_call_id: tool.id.clone(),
-                        },
-                    );
-                }
-            }
-            if matches!(
-                value.get("type").and_then(Value::as_str),
-                Some("tool_execution_end" | "tool_result")
-            ) {
-                if let Some(tool_id) = pi_tool_call_id(&value) {
-                    if let Some(tool) = response.tool_calls.iter().find(|tool| tool.id == tool_id) {
-                        if let Some(output) = &tool.output {
-                            let _ = app.emit_all(
-                                "chat:tool_result",
-                                &ToolResultEvent {
-                                    session_id: session_id.to_string(),
-                                    worktree_id: worktree_id.to_string(),
-                                    tool_use_id: tool_id.to_string(),
-                                    output: output.clone(),
-                                },
-                            );
-                        }
+            let line = match String::from_utf8(line_bytes) {
+                Ok(line) => line,
+                Err(e) => {
+                    if let Some(app) = app {
+                        flush_pi_coalescers(
+                            app,
+                            session_id,
+                            worktree_id,
+                            run_id,
+                            &mut text_coalescer,
+                            &mut thinking_coalescer,
+                        );
                     }
+                    return Err(format!("Failed to read PI output: {e}"));
                 }
-            }
-            if let Some(thinking) = value
-                .get("delta")
-                .and_then(|d| {
-                    if d.get("type").and_then(Value::as_str) == Some("thinking_delta") {
-                        d.get("text").and_then(Value::as_str)
-                    } else {
-                        None
-                    }
-                })
-                .or_else(|| value.get("thinking").and_then(Value::as_str))
-            {
-                let _ = app.emit_all(
-                    "chat:thinking",
-                    &ThinkingEvent {
-                        session_id: session_id.to_string(),
-                        worktree_id: worktree_id.to_string(),
-                        content: thinking.to_string(),
-                    },
+            };
+            let Ok(value) = serde_json::from_str::<Value>(&line) else {
+                continue;
+            };
+
+            let before_content_len = response.content.len();
+            let before_tool_count = response.tool_calls.len();
+            // Merge only this line — no re-parse of the whole accumulated buffer.
+            merge_pi_line(&mut response, &value);
+
+            if let Some(app) = app {
+                emit_pi_delta_events(
+                    app,
+                    session_id,
+                    worktree_id,
+                    run_id,
+                    &value,
+                    &response,
+                    before_content_len,
+                    before_tool_count,
+                    &mut text_coalescer,
+                    &mut thinking_coalescer,
                 );
             }
         }
+        if eof {
+            break;
+        }
+
+        // No complete line left — flush buffered deltas before blocking on
+        // more output so text is not held back while PI idles mid-stream.
+        if let Some(app) = app {
+            flush_pi_coalescers(
+                app,
+                session_id,
+                worktree_id,
+                run_id,
+                &mut text_coalescer,
+                &mut thinking_coalescer,
+            );
+        }
+
+        let read_len = {
+            let chunk = reader
+                .fill_buf()
+                .map_err(|e| format!("Failed to read PI output: {e}"))?;
+            if chunk.is_empty() {
+                eof = true;
+                0
+            } else {
+                carry.extend_from_slice(chunk);
+                chunk.len()
+            }
+        };
+        if read_len > 0 {
+            reader.consume(read_len);
+        } else if !carry.is_empty() {
+            // Terminate the final unterminated line so the drain loop above
+            // processes it (parity with BufRead::lines()).
+            carry.push(b'\n');
+        }
+    }
+
+    if let Some(app) = app {
+        flush_pi_coalescers(
+            app,
+            session_id,
+            worktree_id,
+            run_id,
+            &mut text_coalescer,
+            &mut thinking_coalescer,
+        );
     }
 
     Ok(response)
 }
 
+fn emit_pi_chunk_batch(
+    app: &AppHandle,
+    session_id: &str,
+    worktree_id: &str,
+    run_id: Option<&str>,
+    content: String,
+) {
+    let _ = app.emit_all(
+        "chat:chunk",
+        &ChunkEvent {
+            session_id: session_id.to_string(),
+            worktree_id: worktree_id.to_string(),
+            content,
+            run_id: run_id.map(ToOwned::to_owned),
+        },
+    );
+}
+
+fn emit_pi_thinking_batch(app: &AppHandle, session_id: &str, worktree_id: &str, content: String) {
+    let _ = app.emit_all(
+        "chat:thinking",
+        &ThinkingEvent {
+            session_id: session_id.to_string(),
+            worktree_id: worktree_id.to_string(),
+            content,
+        },
+    );
+}
+
+/// Flush buffered text/thinking deltas. Must run before any other event is
+/// emitted for this session and before terminal events (done/cancel/error)
+/// so event ordering and content integrity are preserved.
+fn flush_pi_coalescers(
+    app: &AppHandle,
+    session_id: &str,
+    worktree_id: &str,
+    run_id: Option<&str>,
+    text_coalescer: &mut ChunkCoalescer,
+    thinking_coalescer: &mut ChunkCoalescer,
+) {
+    if let Some(content) = text_coalescer.flush() {
+        emit_pi_chunk_batch(app, session_id, worktree_id, run_id, content);
+    }
+    if let Some(content) = thinking_coalescer.flush() {
+        emit_pi_thinking_batch(app, session_id, worktree_id, content);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn emit_pi_delta_events(
     app: &AppHandle,
     session_id: &str,
@@ -984,20 +1050,29 @@ fn emit_pi_delta_events(
     response: &PiResponse,
     before_content_len: usize,
     before_tool_count: usize,
+    text_coalescer: &mut ChunkCoalescer,
+    thinking_coalescer: &mut ChunkCoalescer,
 ) {
     if response.content.len() > before_content_len {
-        let content = response.content[before_content_len..].to_string();
-        let _ = app.emit_all(
-            "chat:chunk",
-            &ChunkEvent {
-                session_id: session_id.to_string(),
-                worktree_id: worktree_id.to_string(),
-                content,
-                run_id: run_id.map(ToOwned::to_owned),
-            },
-        );
+        // Flush buffered thinking first so cross-stream ordering is
+        // preserved, then coalesce this text delta.
+        if let Some(content) = thinking_coalescer.flush() {
+            emit_pi_thinking_batch(app, session_id, worktree_id, content);
+        }
+        if let Some(batch) = text_coalescer.push(&response.content[before_content_len..]) {
+            emit_pi_chunk_batch(app, session_id, worktree_id, run_id, batch);
+        }
     }
     if response.tool_calls.len() > before_tool_count {
+        // Tool events must never overtake buffered deltas.
+        flush_pi_coalescers(
+            app,
+            session_id,
+            worktree_id,
+            run_id,
+            text_coalescer,
+            thinking_coalescer,
+        );
         for tool in &response.tool_calls[before_tool_count..] {
             let _ = app.emit_all(
                 "chat:tool_use",
@@ -1027,6 +1102,14 @@ fn emit_pi_delta_events(
         if let Some(tool_id) = pi_tool_call_id(value) {
             if let Some(tool) = response.tool_calls.iter().find(|tool| tool.id == tool_id) {
                 if let Some(output) = &tool.output {
+                    flush_pi_coalescers(
+                        app,
+                        session_id,
+                        worktree_id,
+                        run_id,
+                        text_coalescer,
+                        thinking_coalescer,
+                    );
                     let _ = app.emit_all(
                         "chat:tool_result",
                         &ToolResultEvent {
@@ -1051,14 +1134,14 @@ fn emit_pi_delta_events(
         })
         .or_else(|| value.get("thinking").and_then(Value::as_str))
     {
-        let _ = app.emit_all(
-            "chat:thinking",
-            &ThinkingEvent {
-                session_id: session_id.to_string(),
-                worktree_id: worktree_id.to_string(),
-                content: thinking.to_string(),
-            },
-        );
+        // Flush buffered text first so cross-stream ordering is preserved,
+        // then coalesce this thinking delta.
+        if let Some(content) = text_coalescer.flush() {
+            emit_pi_chunk_batch(app, session_id, worktree_id, run_id, content);
+        }
+        if let Some(batch) = thinking_coalescer.push(thinking) {
+            emit_pi_thinking_batch(app, session_id, worktree_id, batch);
+        }
     }
 }
 
@@ -1069,11 +1152,13 @@ pub fn tail_pi_output(
     output_file: &Path,
     pid: u32,
 ) -> Result<PiResponse, String> {
-    use super::tail::{NdjsonTailer, POLL_INTERVAL, POLL_INTERVAL_FAST};
+    use super::tail::{next_poll_interval, NdjsonTailer};
     use crate::platform::is_process_alive;
 
     let mut tailer = NdjsonTailer::new_from_start(output_file)?;
     let mut response = empty_pi_response();
+    let mut text_coalescer = ChunkCoalescer::new();
+    let mut thinking_coalescer = ChunkCoalescer::new();
     let run_id = output_file.file_stem().and_then(|stem| stem.to_str());
     let started_at = Instant::now();
     let startup_timeout = Duration::from_secs(120);
@@ -1108,10 +1193,23 @@ pub fn tail_pi_output(
                 &response,
                 before_content_len,
                 before_tool_count,
+                &mut text_coalescer,
+                &mut thinking_coalescer,
             );
             received_output = true;
             last_output_at = Instant::now();
         }
+
+        // Batch drained — flush buffered deltas before sleeping or exiting
+        // so text is not held back while the tail idles.
+        flush_pi_coalescers(
+            app,
+            session_id,
+            worktree_id,
+            run_id,
+            &mut text_coalescer,
+            &mut thinking_coalescer,
+        );
 
         if completed {
             break;
@@ -1129,11 +1227,7 @@ pub fn tail_pi_output(
             }
         }
 
-        std::thread::sleep(if got_lines {
-            POLL_INTERVAL_FAST
-        } else {
-            POLL_INTERVAL
-        });
+        std::thread::sleep(next_poll_interval(got_lines, last_output_at.elapsed()));
     }
 
     response.cancelled = cancelled && !completed;

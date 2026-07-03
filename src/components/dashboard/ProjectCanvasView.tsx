@@ -174,6 +174,7 @@ import {
   type CanvasPredefinedFilterTab,
   type CanvasPredefinedFilterTabItem,
 } from './canvas-worktree-filters'
+import { getCanvasStatusRefreshMs } from './canvas-status-refresh'
 import { getWorktreeLabelContainerClassName } from './worktree-label-layout'
 const GitDiffModal = lazy(() =>
   import('@/components/chat/GitDiffModal').then(mod => ({
@@ -2815,14 +2816,15 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
   useEffect(() => {
     if (!isTauri() || !projectId || readyWorktrees.length === 0) return
 
+    const refreshMs = getCanvasStatusRefreshMs(preferences?.git_poll_interval)
     const interval = setInterval(() => {
       if (document.hasFocus()) {
         fetchWorktreesStatus(projectId)
       }
-    }, 60_000) // 1 minute
+    }, refreshMs)
 
     return () => clearInterval(interval)
-  }, [projectId, readyWorktrees.length])
+  }, [projectId, readyWorktrees.length, preferences?.git_poll_interval])
 
   // Refresh git status when session modal closes (user returns to canvas)
   const prevModalRef = useRef(selectedWorktreeModal)
@@ -3527,8 +3529,6 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
           }
         />
       ) : null}
-
-
 
       {/* Worktree Label Modal */}
       <LabelModal

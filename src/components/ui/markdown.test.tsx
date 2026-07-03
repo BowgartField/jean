@@ -57,6 +57,24 @@ describe('Markdown', () => {
     expect(container.querySelector('pre')).not.toBeNull()
   })
 
+  it('renders raw HTML in completed messages', () => {
+    const { container } = render(
+      <Markdown>{'before <b>bold</b> after'}</Markdown>
+    )
+
+    expect(container.querySelector('b')).not.toBeNull()
+    expect(container.querySelector('b')?.textContent).toBe('bold')
+  })
+
+  it('skips the rehype-raw HTML pass while streaming', () => {
+    const { container } = render(
+      <Markdown streaming>{'before <b>bold</b> after'}</Markdown>
+    )
+
+    expect(container.querySelector('b')).toBeNull()
+    expect(container.textContent).toContain('<b>bold</b>')
+  })
+
   it('converts app-data image paths into loadable file URLs', () => {
     const { container } = render(
       <Markdown>

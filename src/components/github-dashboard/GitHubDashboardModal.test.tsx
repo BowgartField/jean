@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import userEvent from '@testing-library/user-event'
 import { screen, waitFor, render } from '@/test/test-utils'
 import { useUIStore } from '@/store/ui-store'
+import { useProjectsStore } from '@/store/projects-store'
 import { GitHubDashboardModal } from './GitHubDashboardModal'
 
 const mockInvoke = vi.hoisted(() => vi.fn())
@@ -49,6 +51,12 @@ const project = {
   path: '/tmp/project-1',
 }
 
+const favoriteProject = {
+  id: 'project-2',
+  name: 'Favorite Project',
+  path: '/tmp/project-2',
+}
+
 function renderDashboard() {
   useUIStore.setState({ githubDashboardOpen: true })
   render(<GitHubDashboardModal />)
@@ -74,10 +82,17 @@ describe('GitHubDashboardModal auth error handling', () => {
       unobserve = vi.fn()
       disconnect = vi.fn()
     }
+    Element.prototype.hasPointerCapture ??= vi.fn(() => false)
+    Element.prototype.setPointerCapture ??= vi.fn()
+    Element.prototype.releasePointerCapture ??= vi.fn()
+    Element.prototype.scrollIntoView ??= vi.fn()
 
     mockInvoke.mockReset()
     mockUseProjects.mockReset()
     mockUseGhCliAuth.mockReset()
+    useProjectsStore.setState({
+      githubDashboardFavoriteProjectIds: [],
+    })
 
     mockUseProjects.mockReturnValue({ data: [project] })
     mockUseGhCliAuth.mockReturnValue({
@@ -158,5 +173,50 @@ describe('GitHubDashboardModal auth error handling', () => {
     expect(
       await screen.findByTestId('gh-auth-error', {}, { timeout: 3000 })
     ).toBeInTheDocument()
+  })
+
+  it('renders as a padded large modal instead of full-screen or the old smaller modal', () => {
+    mockInvoke.mockImplementation(resolveEmptyDashboardCommand)
+
+    renderDashboard()
+
+    const dashboard = screen.getByRole('dialog', { name: 'GitHub Dashboard' })
+    expect(dashboard).toHaveClass(
+      '!w-[calc(100vw-4rem)]',
+      '!h-[calc(100dvh-6rem)]',
+      '!max-w-[calc(100vw-4rem)]',
+      '!max-h-[calc(100dvh-6rem)]',
+      '!rounded-lg'
+    )
+    expect(dashboard.className).not.toContain('!w-screen')
+    expect(dashboard.className).not.toContain('!h-dvh')
+    expect(dashboard.className).not.toContain('sm:!w-[90vw]')
+    expect(dashboard.className).not.toContain('sm:!h-[85vh]')
+  })
+
+  it('lets projects be favorited and keeps favorites at the top of the project filter', async () => {
+    const user = userEvent.setup()
+    mockUseProjects.mockReturnValue({ data: [project, favoriteProject] })
+    mockInvoke.mockImplementation(resolveEmptyDashboardCommand)
+
+    renderDashboard()
+
+    await user.click(screen.getByRole('combobox'))
+    await user.click(screen.getByRole('option', { name: 'Favorite Project' }))
+    await user.click(
+      screen.getByRole('button', {
+        name: 'Favorite Favorite Project in GitHub dashboard',
+      })
+    )
+
+    const favoriteIds =
+      useProjectsStore.getState().githubDashboardFavoriteProjectIds
+    expect(favoriteIds).toEqual(['project-2'])
+
+    await user.click(screen.getByRole('combobox'))
+    const options = screen
+      .getAllByRole('option')
+      .map(option => option.textContent)
+    expect(options).toEqual(['All Projects', 'Favorite Project', 'Project 1'])
   })
 })

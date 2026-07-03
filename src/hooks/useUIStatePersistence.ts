@@ -91,6 +91,7 @@ export function useUIStatePersistence() {
       projectAccessTimestamps,
       dashboardWorktreeCollapseOverrides,
       projectCanvasSettings,
+      githubDashboardFavoriteProjectIds,
     } = useProjectsStore.getState()
     const {
       leftSidebarSize,
@@ -193,6 +194,7 @@ export function useUIStatePersistence() {
           },
         ])
       ),
+      github_dashboard_favorite_project_ids: githubDashboardFavoriteProjectIds,
       // Last opened worktree+session per project (convert camelCase → snake_case keys)
       last_opened_per_project: Object.fromEntries(
         Object.entries(lastOpenedPerProject).map(([projectId, entry]) => [
@@ -668,6 +670,17 @@ export function useUIStatePersistence() {
       )
     }
 
+    const githubDashboardFavoriteProjectIds =
+      uiState.github_dashboard_favorite_project_ids ?? []
+    if (githubDashboardFavoriteProjectIds.length > 0) {
+      logger.debug('Restoring GitHub dashboard favorite projects', {
+        count: githubDashboardFavoriteProjectIds.length,
+      })
+      useProjectsStore
+        .getState()
+        .setGitHubDashboardFavoriteProjectIds(githubDashboardFavoriteProjectIds)
+    }
+
     // Restore browser pane state (per-worktree tabs + 3-surface visibility)
     const persistedBrowserTabs = uiState.browser_tabs ?? {}
     const browserActiveTabIds = uiState.browser_active_tab_ids ?? {}
@@ -824,6 +837,8 @@ export function useUIStatePersistence() {
       useProjectsStore.getState().dashboardWorktreeCollapseOverrides
     let prevProjectCanvasSettings =
       useProjectsStore.getState().projectCanvasSettings
+    let prevGitHubDashboardFavoriteProjectIds =
+      useProjectsStore.getState().githubDashboardFavoriteProjectIds
     let prevLeftSidebarSize = useUIStore.getState().leftSidebarSize
     let prevLeftSidebarVisible = useUIStore.getState().leftSidebarVisible
     let prevSessionTerminalIds = useUIStore.getState().sessionTerminalIds
@@ -872,6 +887,9 @@ export function useUIStatePersistence() {
         prevDashboardCollapseOverrides
       const projectCanvasSettingsChanged =
         state.projectCanvasSettings !== prevProjectCanvasSettings
+      const githubDashboardFavoritesChanged =
+        state.githubDashboardFavoriteProjectIds !==
+        prevGitHubDashboardFavoriteProjectIds
 
       if (
         projectIdsChanged ||
@@ -879,7 +897,8 @@ export function useUIStatePersistence() {
         selectedProjectChanged ||
         accessTimestampsChanged ||
         collapseOverridesChanged ||
-        projectCanvasSettingsChanged
+        projectCanvasSettingsChanged ||
+        githubDashboardFavoritesChanged
       ) {
         prevExpandedProjectIds = state.expandedProjectIds
         prevExpandedFolderIds = state.expandedFolderIds
@@ -888,6 +907,8 @@ export function useUIStatePersistence() {
         prevDashboardCollapseOverrides =
           state.dashboardWorktreeCollapseOverrides
         prevProjectCanvasSettings = state.projectCanvasSettings
+        prevGitHubDashboardFavoriteProjectIds =
+          state.githubDashboardFavoriteProjectIds
         const currentState = getCurrentUIState()
         debouncedSaveRef.current?.(currentState)
       }

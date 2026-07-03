@@ -381,6 +381,14 @@ interface ChatUIState {
 
   // Actions - Streaming content (session-based)
   appendStreamingContent: (sessionId: string, chunk: string) => void
+  /**
+   * Hot path: append a streamed text chunk to BOTH `streamingContents` and
+   * `streamingContentBlocks` in a single atomic set(). The rAF chunk flush
+   * calls this once per frame — one set() means one subscriber notification
+   * sweep instead of two (appendStreamingContent + addTextBlock), and no
+   * transient state where the string and blocks disagree.
+   */
+  appendStreamingChunk: (sessionId: string, text: string) => void
   setStreamingContent: (sessionId: string, content: string) => void
   clearStreamingContent: (sessionId: string) => void
 
@@ -1317,6 +1325,39 @@ export const useChatStore = create<ChatUIState>()(
           }),
           undefined,
           'appendStreamingContent'
+        ),
+
+      appendStreamingChunk: (sessionId, text) =>
+        set(
+          state => {
+            if (!text) return state
+            const blocks = state.streamingContentBlocks[sessionId] ?? []
+            const lastBlock = blocks[blocks.length - 1]
+            // Mirror addTextBlock: merge into a trailing text block, otherwise
+            // start a new one (e.g. after a tool_use/thinking block).
+            let newBlocks: ContentBlock[]
+            if (lastBlock && lastBlock.type === 'text') {
+              newBlocks = [...blocks]
+              newBlocks[newBlocks.length - 1] = {
+                type: 'text',
+                text: lastBlock.text + text,
+              }
+            } else {
+              newBlocks = [...blocks, { type: 'text', text }]
+            }
+            return {
+              streamingContents: {
+                ...state.streamingContents,
+                [sessionId]: (state.streamingContents[sessionId] ?? '') + text,
+              },
+              streamingContentBlocks: {
+                ...state.streamingContentBlocks,
+                [sessionId]: newBlocks,
+              },
+            }
+          },
+          undefined,
+          'appendStreamingChunk'
         ),
 
       setStreamingContent: (sessionId, content) =>

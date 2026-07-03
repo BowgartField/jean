@@ -278,11 +278,10 @@ export default function useStreamingEvents({
     if (!isTauri()) return
 
     const {
-      appendStreamingContent,
+      appendStreamingChunk,
       addToolCall,
       updateToolCallOutput,
       appendToolEvent,
-      addTextBlock,
       addToolBlock,
       addThinkingBlock,
       addUserInputBlock,
@@ -410,8 +409,10 @@ export default function useStreamingEvents({
     function flushChunkBuffer() {
       chunkRafId = null
       for (const [sid, buffered] of Object.entries(chunkBuffer)) {
-        appendStreamingContent(sid, buffered)
-        addTextBlock(sid, buffered)
+        // Single atomic set() updates both streamingContents (string fallback,
+        // load-bearing for resume/dedupe/error paths) and streamingContentBlocks
+        // — one subscriber sweep per frame instead of two.
+        appendStreamingChunk(sid, buffered)
       }
       chunkBuffer = {}
     }

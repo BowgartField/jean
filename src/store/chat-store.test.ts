@@ -399,6 +399,73 @@ describe('ChatStore', () => {
     })
   })
 
+  describe('appendStreamingChunk (atomic string + block append)', () => {
+    it('appends to both streamingContents and streamingContentBlocks', () => {
+      const { appendStreamingChunk } = useChatStore.getState()
+
+      appendStreamingChunk('session-1', 'Hello ')
+      appendStreamingChunk('session-1', 'World')
+
+      const state = useChatStore.getState()
+      expect(state.streamingContents['session-1']).toBe('Hello World')
+      expect(state.streamingContentBlocks['session-1']).toEqual([
+        { type: 'text', text: 'Hello World' },
+      ])
+    })
+
+    it('matches the state produced by appendStreamingContent + addTextBlock', () => {
+      const { appendStreamingChunk, appendStreamingContent, addTextBlock } =
+        useChatStore.getState()
+
+      appendStreamingChunk('combined', 'part one ')
+      appendStreamingChunk('combined', 'part two')
+
+      appendStreamingContent('separate', 'part one ')
+      addTextBlock('separate', 'part one ')
+      appendStreamingContent('separate', 'part two')
+      addTextBlock('separate', 'part two')
+
+      const state = useChatStore.getState()
+      expect(state.streamingContents['combined']).toBe(
+        state.streamingContents['separate']
+      )
+      expect(state.streamingContentBlocks['combined']).toEqual(
+        state.streamingContentBlocks['separate']
+      )
+    })
+
+    it('starts a new text block after a tool block while the string keeps accumulating', () => {
+      const { appendStreamingChunk, addToolBlock } = useChatStore.getState()
+
+      appendStreamingChunk('session-1', 'Before tool. ')
+      addToolBlock('session-1', 'tool-1')
+      appendStreamingChunk('session-1', 'After tool.')
+
+      const state = useChatStore.getState()
+      expect(state.streamingContents['session-1']).toBe(
+        'Before tool. After tool.'
+      )
+      expect(state.streamingContentBlocks['session-1']).toEqual([
+        { type: 'text', text: 'Before tool. ' },
+        { type: 'tool_use', tool_call_id: 'tool-1' },
+        { type: 'text', text: 'After tool.' },
+      ])
+    })
+
+    it('is a no-op for empty text (state references unchanged)', () => {
+      const { appendStreamingChunk } = useChatStore.getState()
+
+      appendStreamingChunk('session-1', 'Hello')
+      const before = useChatStore.getState()
+
+      appendStreamingChunk('session-1', '')
+
+      const after = useChatStore.getState()
+      expect(after.streamingContents).toBe(before.streamingContents)
+      expect(after.streamingContentBlocks).toBe(before.streamingContentBlocks)
+    })
+  })
+
   describe('tool calls', () => {
     const mockToolCall: ToolCall = {
       id: 'tool-1',

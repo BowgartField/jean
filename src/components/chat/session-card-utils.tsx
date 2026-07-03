@@ -114,8 +114,17 @@ export interface ChatStoreState {
   executingModes: Record<string, ExecutionMode>
   executionModes: Record<string, ExecutionMode>
   activeToolCalls: Record<string, ToolCall[]>
-  streamingContents: Record<string, string>
-  streamingContentBlocks: Record<string, ContentBlock[]>
+  /**
+   * Lazy accessor for a session's live streaming text. Streaming text changes
+   * every animation frame during a run; exposing it as a getter instead of
+   * subscribed maps keeps card recomputation off the per-frame hot path —
+   * cards re-read it whenever any subscribed field (tool calls, sending
+   * state, …) changes.
+   */
+  getStreamingText: (sessionId: string) => {
+    content: string
+    blocks: ContentBlock[]
+  }
   answeredQuestions: Record<string, Set<string>>
   waitingForInputSessionIds: Record<string, boolean>
   reviewingSessions: Record<string, boolean>
@@ -187,8 +196,7 @@ export function computeSessionCardData(
     executingModes,
     executionModes,
     activeToolCalls,
-    streamingContents,
-    streamingContentBlocks,
+    getStreamingText,
     answeredQuestions,
     waitingForInputSessionIds,
     reviewingSessions,
@@ -198,8 +206,6 @@ export function computeSessionCardData(
 
   const sessionSending = sendingSessionIds[session.id] ?? false
   const toolCalls = activeToolCalls[session.id] ?? []
-  const streamingContent = streamingContents[session.id] ?? ''
-  const currentStreamingContentBlocks = streamingContentBlocks[session.id] ?? []
   const answeredSet = answeredQuestions[session.id]
 
   // Check streaming tool calls for waiting state
@@ -222,12 +228,14 @@ export function computeSessionCardData(
     session.pending_plan_message_id ?? null
 
   // Helper to extract inline plan from any plan tool call
-  const getInlinePlan = (tcs: typeof toolCalls): string | null =>
-    resolvePlanContent({
+  const getInlinePlan = (tcs: typeof toolCalls): string | null => {
+    const streaming = getStreamingText(session.id)
+    return resolvePlanContent({
       toolCalls: tcs,
-      messageContent: streamingContent,
-      contentBlocks: currentStreamingContentBlocks,
+      messageContent: streaming.content,
+      contentBlocks: streaming.blocks,
     }).content
+  }
 
   // Mirrors `canBeWaiting` filter in prefetchSessions (src/services/chat.ts).
   // A session's waiting flag is only meaningful while the run is active, resumable,
