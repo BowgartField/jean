@@ -1218,7 +1218,9 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
                       <SelectItem value="codex">Codex</SelectItem>
                     )}
                     {installedBackends.includes('grok') && (
-                      <SelectItem value="grok">Grok (Beta)</SelectItem>
+                      <SelectItem value="grok">
+                        <BackendLabel backend="grok" />
+                      </SelectItem>
                     )}
                   </SelectContent>
                 </Select>

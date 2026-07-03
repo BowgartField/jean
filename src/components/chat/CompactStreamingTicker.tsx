@@ -11,6 +11,7 @@ import {
   TOOL_CALL_ROW_CLASS,
   TOOL_CALL_DETAIL_PILL_CLASS,
 } from './ToolCallInline'
+import { EditedFilesDisplay } from './EditedFilesDisplay'
 import { StreamingMessage } from './StreamingMessage'
 import { SteeredPromptGroup } from './SteeredPromptGroup'
 import {
@@ -267,6 +268,10 @@ export const CompactStreamingTicker = memo(function CompactStreamingTicker(
           </CollapsibleContent>
         </div>
       </Collapsible>
+      <EditedFilesDisplay
+        toolCalls={activityToolCalls}
+        worktreePath={worktreePath}
+      />
       {hasPlan && (
         <StreamingMessage
           {...props}

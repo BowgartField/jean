@@ -147,9 +147,9 @@ describe('PreferencesDialog', () => {
       'Codex',
       'OpenCode',
       'Cursor',
-      'PI',
-      'Command Code',
-      'Grok (Beta)',
+      'PIBeta',
+      'Command CodeBeta',
+      'GrokBeta',
       'GitHub CLI',
       'CodeRabbit CLI',
       'Terminal',
@@ -165,6 +165,20 @@ describe('PreferencesDialog', () => {
     expect(
       navigationMenu.querySelectorAll('[data-sidebar="separator"]')
     ).toHaveLength(5)
+
+    for (const label of ['PI', 'Command Code']) {
+      const button = within(navigationMenu).getByText(label).closest('button')
+      expect(button).not.toBeNull()
+      expect(within(button!).getByText('Beta')).toHaveClass('bg-yellow-500/10')
+    }
+
+    const grokButton = within(navigationMenu)
+      .getByText('Grok')
+      .closest('button')
+    expect(grokButton).not.toBeNull()
+    expect(within(grokButton!).getByText('Beta')).toHaveClass(
+      'bg-yellow-500/10'
+    )
   })
 
   it('keeps the dialog open when Escape clears the desktop search', async () => {

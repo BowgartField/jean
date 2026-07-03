@@ -50,6 +50,7 @@ interface CliSetupInterface {
     version: string,
     options?: { onSuccess?: () => void; onError?: (error: Error) => void }
   ) => void
+  checkManualVersion?: (version: string) => Promise<boolean>
   refetchStatus: () => void
 }
 
@@ -443,6 +444,7 @@ function CliReinstallModalUI({
               currentVersion={isReinstall ? setup.status?.version : null}
               isLoading={setup.isVersionsLoading}
               onVersionChange={setSelectedVersion}
+              onCheckManualVersion={setup.checkManualVersion}
               onInstall={handleInstall}
             />
           )}

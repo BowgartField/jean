@@ -1583,6 +1583,55 @@ async fn find_asset_url(
     Err(format!("Release for version {version} not found"))
 }
 
+#[tauri::command]
+pub async fn check_codex_cli_version_exists(
+    app: AppHandle,
+    version: String,
+) -> Result<bool, String> {
+    let version = version.trim().trim_start_matches('v');
+    if version.is_empty() {
+        return Ok(false);
+    }
+
+    let target = resolve_codex_runtime_target()?;
+    let asset_names = codex_asset_name_candidates(target);
+    let client = build_github_client()?;
+    let token = resolve_github_api_token(&app);
+    let tags = [
+        format!("rust-v{version}"),
+        format!("codex-v{version}"),
+        format!("v{version}"),
+    ];
+
+    for tag in tags {
+        let mut request = client
+            .get(format!("{CODEX_RELEASES_API}/tags/{tag}"))
+            .header("Accept", GITHUB_API_ACCEPT)
+            .header("X-GitHub-Api-Version", GITHUB_API_VERSION);
+        if let Some(ref token) = token {
+            request = request.bearer_auth(token);
+        }
+
+        let response = request
+            .send()
+            .await
+            .map_err(|e| format!("Failed to check Codex version: {e}"))?;
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            continue;
+        }
+        if !response.status().is_success() {
+            return Err(format!("GitHub API returned status: {}", response.status()));
+        }
+        let release: GitHubRelease = response
+            .json()
+            .await
+            .map_err(|e| format!("Failed to parse Codex release: {e}"))?;
+        return Ok(find_matching_asset_url(&release, &asset_names).is_some());
+    }
+
+    Ok(false)
+}
+
 fn find_matching_candidate_asset(
     release: &GitHubRelease,
     candidates: &[CodexAssetCandidate],

@@ -213,6 +213,9 @@ export function useGrokCliSetup() {
     })
   }
 
+  const checkManualVersion = (version: string) =>
+    invoke<boolean>('check_grok_cli_version_exists', { version })
+
   return {
     status: status.data,
     isStatusLoading: status.isLoading,
@@ -225,6 +228,7 @@ export function useGrokCliSetup() {
     installError: installMutation.error,
     progress: null,
     install,
+    checkManualVersion,
     refetchStatus: status.refetch,
   }
 }

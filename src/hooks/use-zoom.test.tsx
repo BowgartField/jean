@@ -32,18 +32,42 @@ describe('useZoom', () => {
     mockIsNativeApp = false
     mockSetZoom.mockReset()
     document.documentElement.style.zoom = ''
+    document.documentElement.style.fontSize = ''
+    document.documentElement.style.removeProperty('--app-zoom')
   })
 
   afterEach(() => {
     document.documentElement.style.zoom = ''
+    document.documentElement.style.fontSize = ''
+    document.documentElement.style.removeProperty('--app-zoom')
   })
 
-  it('applies zoom with CSS in headless web clients', async () => {
+  it('applies layout-safe zoom in headless web clients', async () => {
+    document.documentElement.style.zoom = '1.5'
+
     renderHook(() => useZoom())
 
     await waitFor(() => {
-      expect(document.documentElement.style.zoom).toBe('1.25')
+      expect(document.documentElement.style.getPropertyValue('--app-zoom')).toBe(
+        '1.25'
+      )
     })
+    expect(document.documentElement.style.fontSize).toBe('20px')
+    expect(document.documentElement.style.zoom).toBe('')
     expect(mockSetZoom).not.toHaveBeenCalled()
+  })
+
+  it('uses native webview zoom in the desktop app', async () => {
+    mockIsNativeApp = true
+
+    renderHook(() => useZoom())
+
+    await waitFor(() => {
+      expect(mockSetZoom).toHaveBeenCalledWith(1.25)
+    })
+    expect(document.documentElement.style.getPropertyValue('--app-zoom')).toBe(
+      ''
+    )
+    expect(document.documentElement.style.fontSize).toBe('')
   })
 })

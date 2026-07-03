@@ -4828,6 +4828,7 @@ pub fn run() {
             claude_cli::detect_claude_in_path,
             claude_cli::get_claude_usage,
             claude_cli::get_available_cli_versions,
+            claude_cli::check_claude_cli_version_exists,
             claude_cli::install_claude_cli,
             claude_cli::uninstall_claude_cli,
             // Codex CLI management commands
@@ -4836,6 +4837,7 @@ pub fn run() {
             codex_cli::check_codex_cli_auth,
             codex_cli::get_codex_usage,
             codex_cli::get_available_codex_versions,
+            codex_cli::check_codex_cli_version_exists,
             codex_cli::install_codex_cli,
             codex_cli::uninstall_codex_cli,
             // CodeRabbit CLI management commands
@@ -4843,6 +4845,7 @@ pub fn run() {
             coderabbit_cli::detect_coderabbit_in_path,
             coderabbit_cli::check_coderabbit_cli_auth,
             coderabbit_cli::get_available_coderabbit_versions,
+            coderabbit_cli::check_coderabbit_cli_version_exists,
             coderabbit_cli::install_coderabbit_cli,
             coderabbit_cli::uninstall_coderabbit_cli,
             coderabbit_cli::update_coderabbit_cli,
@@ -4852,6 +4855,7 @@ pub fn run() {
             commandcode_cli::check_commandcode_cli_auth,
             commandcode_cli::list_commandcode_models,
             commandcode_cli::get_available_commandcode_versions,
+            commandcode_cli::check_commandcode_cli_version_exists,
             commandcode_cli::get_commandcode_install_command,
             commandcode_cli::install_commandcode_cli,
             commandcode_cli::uninstall_commandcode_cli,
@@ -4862,6 +4866,7 @@ pub fn run() {
             pi_cli::check_pi_cli_auth,
             pi_cli::list_pi_models,
             pi_cli::get_available_pi_versions,
+            pi_cli::check_pi_cli_version_exists,
             pi_cli::install_pi_cli,
             pi_cli::uninstall_pi_cli,
             // Cursor CLI management commands
@@ -4876,6 +4881,7 @@ pub fn run() {
             grok_cli::check_grok_cli_auth,
             grok_cli::list_grok_models,
             grok_cli::get_available_grok_versions,
+            grok_cli::check_grok_cli_version_exists,
             grok_cli::get_grok_install_command,
             grok_cli::install_grok_cli,
             grok_cli::uninstall_grok_cli,
@@ -4886,6 +4892,7 @@ pub fn run() {
             opencode_cli::detect_opencode_in_path,
             opencode_cli::check_opencode_cli_auth,
             opencode_cli::get_available_opencode_versions,
+            opencode_cli::check_opencode_cli_version_exists,
             opencode_cli::install_opencode_cli,
             opencode_cli::uninstall_opencode_cli,
             opencode_cli::list_opencode_models,
@@ -4894,6 +4901,7 @@ pub fn run() {
             gh_cli::detect_gh_in_path,
             gh_cli::check_gh_cli_auth,
             gh_cli::get_available_gh_versions,
+            gh_cli::check_gh_cli_version_exists,
             gh_cli::install_gh_cli,
             gh_cli::uninstall_gh_cli,
             // Generic CLI update command (path-installed CLIs)

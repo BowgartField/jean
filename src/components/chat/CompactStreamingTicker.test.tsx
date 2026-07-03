@@ -122,4 +122,39 @@ describe('CompactStreamingTicker', () => {
     expect(screen.getByRole('button', { name: /Created `tmp\/test\.txt`\./ })).toBeVisible()
     expect(screen.queryByRole('button', { name: /^`\./ })).not.toBeInTheDocument()
   })
+
+  it('surfaces edited files outside the collapsed streaming ticker', () => {
+    render(
+      <CompactStreamingTicker
+        {...baseProps}
+        worktreePath="/tmp/worktree"
+        contentBlocks={[{ type: 'tool_use', tool_call_id: 'change-1' }]}
+        toolCalls={[
+          {
+            id: 'change-1',
+            name: 'FileChange',
+            input: [
+              {
+                path: 'src/components/chat/CompactStreamingTicker.tsx',
+                diff: '@@ -1 +1 @@\n-old\n+new\n',
+              },
+            ],
+          },
+        ]}
+      />
+    )
+
+    const ticker = screen.getByRole('button', { name: /FileChange/ })
+    const editedFiles = screen.getByText('Edited 1 file:')
+
+    expect(editedFiles).toBeVisible()
+    expect(ticker.closest('.rounded-md.border')).not.toContainElement(
+      editedFiles
+    )
+    expect(
+      screen.getByRole('button', {
+        name: /View changes to CompactStreamingTicker\.tsx/,
+      })
+    ).toBeVisible()
+  })
 })

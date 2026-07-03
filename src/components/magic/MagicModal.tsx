@@ -107,6 +107,7 @@ import {
   GROK_MODEL_OPTIONS,
 } from '@/components/chat/toolbar/toolbar-options'
 import { formatOpencodeModelLabel } from '@/components/chat/toolbar/toolbar-utils'
+import { BackendLabel } from '@/components/ui/backend-label'
 import { ReviewMethodModal } from '@/components/chat/ReviewMethodModal'
 
 type MagicOption =
@@ -674,7 +675,7 @@ export function MagicModal() {
       case 'cursor':
         return 'Cursor'
       case 'grok':
-        return 'Grok (Beta)'
+        return 'Grok'
       default:
         return 'Claude'
     }
@@ -2427,7 +2428,9 @@ ${resolveInstructions}`
                           <SelectItem value="opencode">OpenCode</SelectItem>
                         )}
                         {installedBackends.includes('grok') && (
-                          <SelectItem value="grok">Grok (Beta)</SelectItem>
+                          <SelectItem value="grok">
+                            <BackendLabel backend="grok" />
+                          </SelectItem>
                         )}
                       </SelectContent>
                     </Select>
@@ -2580,7 +2583,9 @@ ${resolveInstructions}`
                           <SelectItem value="opencode">OpenCode</SelectItem>
                         )}
                         {installedBackends.includes('grok') && (
-                          <SelectItem value="grok">Grok (Beta)</SelectItem>
+                          <SelectItem value="grok">
+                            <BackendLabel backend="grok" />
+                          </SelectItem>
                         )}
                       </SelectContent>
                     </Select>

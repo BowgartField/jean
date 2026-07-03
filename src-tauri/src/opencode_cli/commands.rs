@@ -53,6 +53,13 @@ struct GitHubRelease {
     tag_name: String,
     published_at: Option<String>,
     prerelease: bool,
+    #[serde(default)]
+    assets: Vec<GitHubAsset>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubAsset {
+    name: String,
 }
 
 /// Platform-specific asset info for download.
@@ -530,6 +537,46 @@ pub async fn get_available_opencode_versions(
             Ok(load_opencode_versions_cache(&app).unwrap_or_else(fallback_opencode_versions))
         }
     }
+}
+
+#[tauri::command]
+pub async fn check_opencode_cli_version_exists(version: String) -> Result<bool, String> {
+    let version = version.trim().trim_start_matches('v');
+    if version.is_empty() {
+        return Ok(false);
+    }
+
+    let platform_asset = if crate::platform::get_wsl_config().enabled {
+        let wsl = crate::platform::get_wsl_config();
+        wsl_opencode_platform_asset(&wsl.distro)?
+    } else {
+        get_platform_asset()?
+    };
+
+    let client = reqwest::Client::new();
+    let response = client
+        .get(format!(
+            "https://api.github.com/repos/{GITHUB_REPO}/releases/tags/v{version}"
+        ))
+        .header("User-Agent", "jean-desktop")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to check OpenCode version: {e}"))?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(false);
+    }
+    if !response.status().is_success() {
+        return Err(format!("GitHub API returned status: {}", response.status()));
+    }
+
+    let release: GitHubRelease = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse OpenCode release: {e}"))?;
+    Ok(release
+        .assets
+        .iter()
+        .any(|asset| asset.name == platform_asset.asset_name))
 }
 
 /// Fetch OpenCode versions directly from the GitHub API (no fallback).

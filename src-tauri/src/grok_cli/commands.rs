@@ -570,6 +570,35 @@ pub async fn get_available_grok_versions(_app: AppHandle) -> Result<Vec<GrokRele
 }
 
 #[tauri::command]
+pub async fn check_grok_cli_version_exists(
+    _app: AppHandle,
+    version: String,
+) -> Result<bool, String> {
+    let version = version.trim().trim_start_matches('v');
+    if version.is_empty() {
+        return Ok(false);
+    }
+
+    let url = "https://registry.npmjs.org/%40xai-official%2Fgrok";
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("Failed to build Grok HTTP client: {e}"))?;
+    let value: serde_json::Value = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch Grok versions: {e}"))?
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse Grok version response: {e}"))?;
+    Ok(value
+        .get("versions")
+        .and_then(|v| v.as_object())
+        .is_some_and(|versions| versions.contains_key(version)))
+}
+
+#[tauri::command]
 pub async fn get_grok_install_command(app: AppHandle) -> Result<GrokInstallCommand, String> {
     let cli_dir = get_cli_dir(&app)?;
     Ok(GrokInstallCommand {

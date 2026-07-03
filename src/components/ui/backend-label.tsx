@@ -45,7 +45,7 @@ export function getBackendLabel(backend: CliBackend): string {
     case 'cursor':
       return 'Cursor'
     case 'pi':
-      return 'Pi'
+      return 'PI'
     case 'commandcode':
       return 'Command Code'
     case 'grok':

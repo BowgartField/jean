@@ -89,7 +89,7 @@ export function buildBackendModelSections({
     } else if (backend === 'grok') {
       sections.push({
         backend,
-        label: 'Grok (Beta)',
+        label: 'Grok',
         options: grokModelOptions ?? GROK_MODEL_OPTIONS,
       })
     }
@@ -213,7 +213,6 @@ export function useToolbarDerivedState({
       resolvedPiModelOptions,
     ]
   )
-
 
   const filteredModelOptions = useMemo(() => {
     if (isCodex) return codexModelOptions

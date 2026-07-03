@@ -183,6 +183,41 @@ pub async fn get_available_coderabbit_versions(
 }
 
 #[tauri::command]
+pub async fn check_coderabbit_cli_version_exists(
+    _app: AppHandle,
+    version: String,
+) -> Result<bool, String> {
+    let version = version.trim().trim_start_matches('v');
+    if version.is_empty() {
+        return Ok(false);
+    }
+
+    let client = reqwest::Client::builder()
+        .user_agent("Jean-App/1.0")
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
+    let response = client
+        .get(format!("{CODERABBIT_RELEASES_BASE_URL}/{version}/VERSION"))
+        .send()
+        .await
+        .map_err(|e| format!("Failed to check CodeRabbit version: {e}"))?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(false);
+    }
+    if !response.status().is_success() {
+        return Err(format!(
+            "CodeRabbit version endpoint returned status: {}",
+            response.status()
+        ));
+    }
+    let raw = response
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read CodeRabbit version: {e}"))?;
+    Ok(sanitize_latest_version(&raw).is_some_and(|found| found == version))
+}
+
+#[tauri::command]
 pub async fn check_coderabbit_cli_installed(app: AppHandle) -> Result<CodeRabbitCliStatus, String> {
     let binary_path = resolve_coderabbit_binary(&app);
     if !binary_path.exists() {

@@ -2229,6 +2229,11 @@ pub async fn dispatch_command(
             let result = crate::claude_cli::get_available_cli_versions().await?;
             to_value(result)
         }
+        "check_claude_cli_version_exists" => {
+            let version: String = from_field(&args, "version")?;
+            let result = crate::claude_cli::check_claude_cli_version_exists(version).await?;
+            to_value(result)
+        }
         "install_claude_cli" => {
             let version: Option<String> = from_field_opt(&args, "version")?;
             crate::claude_cli::install_claude_cli(app.clone(), version).await?;
@@ -2259,6 +2264,13 @@ pub async fn dispatch_command(
         "get_available_commandcode_versions" => {
             let result =
                 crate::commandcode_cli::get_available_commandcode_versions(app.clone()).await?;
+            to_value(result)
+        }
+        "check_commandcode_cli_version_exists" => {
+            let version: String = from_field(&args, "version")?;
+            let result =
+                crate::commandcode_cli::check_commandcode_cli_version_exists(app.clone(), version)
+                    .await?;
             to_value(result)
         }
         "get_commandcode_install_command" => {
@@ -2319,6 +2331,12 @@ pub async fn dispatch_command(
             let result = crate::grok_cli::get_available_grok_versions(app.clone()).await?;
             to_value(result)
         }
+        "check_grok_cli_version_exists" => {
+            let version: String = from_field(&args, "version")?;
+            let result =
+                crate::grok_cli::check_grok_cli_version_exists(app.clone(), version).await?;
+            to_value(result)
+        }
         "get_grok_install_command" => {
             let result = crate::grok_cli::get_grok_install_command(app.clone()).await?;
             to_value(result)
@@ -2360,6 +2378,11 @@ pub async fn dispatch_command(
             let result = crate::pi_cli::get_available_pi_versions(app.clone()).await?;
             to_value(result)
         }
+        "check_pi_cli_version_exists" => {
+            let version: String = from_field(&args, "version")?;
+            let result = crate::pi_cli::check_pi_cli_version_exists(app.clone(), version).await?;
+            to_value(result)
+        }
         "install_pi_cli" => {
             let version: Option<String> = from_field_opt(&args, "version")?;
             crate::pi_cli::install_pi_cli(app.clone(), version).await?;
@@ -2383,6 +2406,11 @@ pub async fn dispatch_command(
         }
         "get_available_opencode_versions" => {
             let result = crate::opencode_cli::get_available_opencode_versions(app.clone()).await?;
+            to_value(result)
+        }
+        "check_opencode_cli_version_exists" => {
+            let version: String = from_field(&args, "version")?;
+            let result = crate::opencode_cli::check_opencode_cli_version_exists(version).await?;
             to_value(result)
         }
         "install_opencode_cli" => {
@@ -2414,6 +2442,11 @@ pub async fn dispatch_command(
             let result = crate::gh_cli::get_available_gh_versions(app.clone()).await?;
             to_value(result)
         }
+        "check_gh_cli_version_exists" => {
+            let version: String = from_field(&args, "version")?;
+            let result = crate::gh_cli::check_gh_cli_version_exists(app.clone(), version).await?;
+            to_value(result)
+        }
         "install_gh_cli" => {
             let version: Option<String> = from_field_opt(&args, "version")?;
             crate::gh_cli::install_gh_cli(app.clone(), version).await?;
@@ -2439,6 +2472,13 @@ pub async fn dispatch_command(
         "get_available_coderabbit_versions" => {
             let result =
                 crate::coderabbit_cli::get_available_coderabbit_versions(app.clone()).await?;
+            to_value(result)
+        }
+        "check_coderabbit_cli_version_exists" => {
+            let version: String = from_field(&args, "version")?;
+            let result =
+                crate::coderabbit_cli::check_coderabbit_cli_version_exists(app.clone(), version)
+                    .await?;
             to_value(result)
         }
         "install_coderabbit_cli" => {
@@ -2520,6 +2560,12 @@ pub async fn dispatch_command(
         }
         "get_available_codex_versions" => {
             let result = crate::codex_cli::get_available_codex_versions(app.clone()).await?;
+            to_value(result)
+        }
+        "check_codex_cli_version_exists" => {
+            let version: String = from_field(&args, "version")?;
+            let result =
+                crate::codex_cli::check_codex_cli_version_exists(app.clone(), version).await?;
             to_value(result)
         }
         "get_codex_usage" => {

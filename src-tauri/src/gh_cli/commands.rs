@@ -223,6 +223,44 @@ async fn fetch_gh_versions_from_api(app: &AppHandle) -> Result<Vec<GhReleaseInfo
     Ok(versions)
 }
 
+#[tauri::command]
+pub async fn check_gh_cli_version_exists(app: AppHandle, version: String) -> Result<bool, String> {
+    let version = version.trim().trim_start_matches('v');
+    if version.is_empty() {
+        return Ok(false);
+    }
+
+    let client = reqwest::Client::builder()
+        .user_agent("Jean-App/1.0")
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
+    let token = resolve_github_api_token(&app);
+    let mut request = client
+        .get(format!("{GITHUB_RELEASES_API}/tags/v{version}"))
+        .header("Accept", GITHUB_API_ACCEPT)
+        .header("X-GitHub-Api-Version", GITHUB_API_VERSION);
+    if let Some(ref token) = token {
+        request = request.bearer_auth(token);
+    }
+
+    let response = request
+        .send()
+        .await
+        .map_err(|e| format!("Failed to check GitHub CLI version: {e}"))?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(false);
+    }
+    if !response.status().is_success() {
+        return Err(format!("GitHub API returned status: {}", response.status()));
+    }
+
+    let release: GitHubRelease = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse GitHub release: {e}"))?;
+    Ok(!release.assets.is_empty())
+}
+
 /// Resolve a GitHub API token from environment or gh auth.
 ///
 /// Priority:

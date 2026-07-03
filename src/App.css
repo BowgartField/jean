@@ -56,6 +56,7 @@
   --ui-line-height: 1.6;
   --chat-font-size: 16px;
   --chat-line-height: 1.5;
+  --app-zoom: 1;
   /* Chat font family (can be monospace or sans-serif) */
   --font-family-chat:
     'JetBrains Mono', ui-monospace, 'SF Mono', 'Menlo', monospace;

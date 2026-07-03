@@ -23,10 +23,13 @@ function findNearestTickIndex(zoom: number): number {
 
 async function applyZoom(scaleFactor: number) {
   if (!isNativeApp()) {
-    const style = document.documentElement.style as CSSStyleDeclaration & {
+    const root = document.documentElement
+    const style = root.style as CSSStyleDeclaration & {
       zoom: string
     }
-    style.zoom = String(scaleFactor)
+    style.zoom = ''
+    root.style.setProperty('--app-zoom', String(scaleFactor))
+    root.style.fontSize = `${16 * scaleFactor}px`
     return
   }
 

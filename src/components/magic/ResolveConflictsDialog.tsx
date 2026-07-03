@@ -37,6 +37,7 @@ import {
   GROK_MODEL_OPTIONS,
 } from '@/components/chat/toolbar/toolbar-options'
 import { formatOpencodeModelLabel } from '@/components/chat/toolbar/toolbar-utils'
+import { BackendLabel } from '@/components/ui/backend-label'
 
 const RESOLVE_CONFLICTS_MODEL_KEY = 'resolve_conflicts_model'
 const RESOLVE_CONFLICTS_PROVIDER_KEY = 'resolve_conflicts_provider'
@@ -237,7 +238,7 @@ export function ResolveConflictsDialog({
       case 'cursor':
         return 'Cursor'
       case 'grok':
-        return 'Grok (Beta)'
+        return 'Grok'
       default:
         return 'Claude'
     }
@@ -439,7 +440,9 @@ export function ResolveConflictsDialog({
                         <SelectItem value="opencode">OpenCode</SelectItem>
                       )}
                       {installedBackends.includes('grok') && (
-                        <SelectItem value="grok">Grok (Beta)</SelectItem>
+                        <SelectItem value="grok">
+                          <BackendLabel backend="grok" />
+                        </SelectItem>
                       )}
                     </SelectContent>
                   </Select>

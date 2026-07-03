@@ -386,6 +386,20 @@ async fn fetch_manifest(version: &str) -> Result<Manifest, String> {
         .map_err(|e| format!("Failed to parse manifest: {e}"))
 }
 
+#[tauri::command]
+pub async fn check_claude_cli_version_exists(version: String) -> Result<bool, String> {
+    let version = version.trim().trim_start_matches('v');
+    if version.is_empty() {
+        return Ok(false);
+    }
+
+    match fetch_manifest(version).await {
+        Ok(_) => Ok(true),
+        Err(error) if error.contains("HTTP 404") => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
 /// Verify SHA256 checksum of downloaded data
 fn verify_checksum(data: &[u8], expected: &str) -> Result<(), String> {
     let mut hasher = Sha256::new();

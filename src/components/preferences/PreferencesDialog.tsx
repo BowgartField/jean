@@ -58,7 +58,7 @@ import { CursorIcon } from '@/components/icons/CursorIcon'
 import { PiIcon } from '@/components/icons/PiIcon'
 import { CommandCodeIcon } from '@/components/icons/CommandCodeIcon'
 import { GrokIcon } from '@/components/icons/GrokIcon'
-import type { MagicPrompts } from '@/types/preferences'
+import type { CliBackend, MagicPrompts } from '@/types/preferences'
 import { GeneralPane } from './panes/GeneralPane'
 import { ClaudePane } from './panes/ClaudePane'
 import { CodexPane } from './panes/CodexPane'
@@ -85,12 +85,14 @@ import {
   type PreferenceSearchEntry,
 } from './preferences-search'
 import { PreferencesSearchBar } from './PreferencesSearchBar'
+import { BackendLabel } from '@/components/ui/backend-label'
 
 interface NavigationItem {
   type: 'item'
   id: PreferencePane
   name: string
   icon: LucideIcon
+  backend?: CliBackend
   desktopOnly?: boolean
 }
 
@@ -149,18 +151,21 @@ const navigationEntries: (NavigationItem | NavigationSeparator)[] = [
     id: 'pi',
     name: 'PI',
     icon: PiIcon,
+    backend: 'pi',
   },
   {
     type: 'item',
     id: 'commandcode',
     name: 'Command Code',
     icon: CommandCodeIcon,
+    backend: 'commandcode',
   },
   {
     type: 'item',
     id: 'grok',
-    name: 'Grok (Beta)',
+    name: 'Grok',
     icon: GrokIcon,
+    backend: 'grok',
   },
   {
     type: 'item',
@@ -703,7 +708,11 @@ export function PreferencesDialog() {
                               className="w-full"
                             >
                               <entry.icon />
-                              <span>{entry.name}</span>
+                              {entry.backend ? (
+                                <BackendLabel backend={entry.backend} />
+                              ) : (
+                                <span>{entry.name}</span>
+                              )}
                             </button>
                           </SidebarMenuButton>
                         </SidebarMenuItem>
