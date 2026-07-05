@@ -1,5 +1,5 @@
 import { createElement, type ReactNode } from 'react'
-import { renderHook, waitFor } from '@testing-library/react'
+import { act, renderHook, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -21,6 +21,7 @@ vi.mock('@/lib/transport', () => ({
 }))
 
 vi.mock('@/services/remote-servers', () => ({
+  remoteServersQueryKeys: { all: ['remote-servers'] },
   useRemoteServers: () => ({ data: mocks.servers }),
 }))
 
@@ -107,5 +108,22 @@ describe('useAutoConnectRemoteServers', () => {
     expect(mocks.invoke).toHaveBeenCalledWith('connect_remote_server', {
       serverId: 'server-test',
     })
+  })
+
+  it('checks server health periodically', async () => {
+    vi.useFakeTimers()
+    const queryClient = new QueryClient()
+    renderHook(() => useAutoConnectRemoteServers(), {
+      wrapper: createWrapper(queryClient),
+    })
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000)
+    })
+
+    expect(mocks.invoke).toHaveBeenCalledWith('check_remote_server_health', {
+      serverId: 'server-test',
+    })
+    vi.useRealTimers()
   })
 })

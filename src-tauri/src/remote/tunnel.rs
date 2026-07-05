@@ -168,6 +168,56 @@ async fn wait_for_health(server_id: &str, local_port: u16, token: &str) -> Resul
     Err(format!("Tunnel health check timed out: {last_error}"))
 }
 
+pub async fn check_health(server: &RemoteServerConfig) {
+    let Some(token) = server
+        .http_token
+        .as_deref()
+        .filter(|token| !token.is_empty())
+    else {
+        return;
+    };
+    let Some(connection) = active_connection(server, token) else {
+        set_runtime_status(
+            &server.id,
+            RemoteServerStatus::Error,
+            Some("Remote backend tunnel is not connected".to_string()),
+        );
+        return;
+    };
+
+    let result = async {
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(3))
+            .build()
+            .map_err(|e| format!("Failed to create remote health client: {e}"))?;
+        let response = client
+            .get(format!("{}/api/auth", connection.url))
+            .query(&[("token", token)])
+            .send()
+            .await
+            .map_err(|e| format!("Remote Jean health check failed: {e}"))?;
+        if !response.status().is_success() {
+            return Err(format!("Remote Jean returned HTTP {}", response.status()));
+        }
+        let auth = response
+            .json::<AuthResponse>()
+            .await
+            .map_err(|e| format!("Invalid remote Jean health response: {e}"))?;
+        if !auth.ok {
+            return Err("Remote Jean rejected its provisioned token".to_string());
+        }
+        Ok(())
+    }
+    .await;
+
+    match result {
+        Ok(()) => set_runtime_status(&server.id, RemoteServerStatus::Connected, None),
+        Err(error) => {
+            set_runtime_status(&server.id, RemoteServerStatus::Error, Some(error));
+        }
+    }
+}
+
 pub async fn connect(
     app: &AppHandle,
     server: &RemoteServerConfig,
@@ -179,8 +229,17 @@ pub async fn connect(
         .ok_or_else(|| "Remote server must be provisioned before connecting".to_string())?;
 
     if let Some(connection) = active_connection(server, token) {
-        set_runtime_status(&server.id, RemoteServerStatus::Connected, None);
-        return Ok(connection);
+        set_runtime_status(&server.id, RemoteServerStatus::Connecting, None);
+        match wait_for_health(&server.id, connection.local_port, token).await {
+            Ok(()) => {
+                set_runtime_status(&server.id, RemoteServerStatus::Connected, None);
+                return Ok(connection);
+            }
+            Err(error) => {
+                set_runtime_status(&server.id, RemoteServerStatus::Error, Some(error.clone()));
+                return Err(error);
+            }
+        }
     }
 
     set_runtime_status(&server.id, RemoteServerStatus::Connecting, None);

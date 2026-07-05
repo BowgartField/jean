@@ -56,7 +56,9 @@ artifact from the release manifest for the selected Jean version, verifies its
 updater minisign signature with the same public key as the desktop updater,
 uploads the extracted AppImage with `scp`, and installs `jean-remote.service`.
 The Preferences UI uses a dedicated provisioning modal with a version picker,
-step status at the top, and a live log pane at the bottom.
+a vertical step timeline on the left, and live logs on the right. The active
+step uses a spinning marker; completed and active steps share the same accent
+color so progress reads as one continuous path.
 
 `provision_remote_server` takes an optional `version`; when omitted it falls
 back to the desktop's own `CARGO_PKG_VERSION`. `list_remote_jean_versions`
@@ -93,10 +95,21 @@ ssh -N -L 127.0.0.1:LOCAL:127.0.0.1:REMOTE user@server
 
 ## Connection health
 
-After starting a tunnel, Jean polls `/api/auth?token=...`. A connection is
-accepted only when token validation succeeds and the remote Jean version matches
-the desktop backend version. Tunnel status is runtime-only; persisted server
-records are normalized to disconnected when loaded.
+Adding a server immediately verifies SSH and reports `connecting`, `connected`,
+or `error` without requiring a separate Test SSH click. A successful SSH test
+also remains `connected`; it no longer resets the card to `disconnected`.
+Every 30 seconds the app checks SSH reachability for unprovisioned servers and
+the authenticated API for provisioned servers.
+
+When SSH points to an already-provisioned Jean host, the add flow reads the
+installed version and service token from the root-owned installation metadata.
+The frontend then opens the authenticated tunnel and discovers the projects
+registered on that backend.
+
+After starting a tunnel, Jean polls `/api/auth?token=...`. A backend connection
+is accepted only when token validation succeeds and the remote Jean version
+matches the desktop backend version. Tunnel status is runtime-only; persisted
+server records are normalized to disconnected when loaded.
 
 ## Client transport routing
 
@@ -108,7 +121,9 @@ Remote event payloads include their backend origin. Project and chat services
 use that origin, persisted project clone metadata, and worktree-to-server
 mappings to prevent remote updates from being applied to local cache entries.
 Transport registration completes only after the WebSocket opens; callers do
-not rely on fixed startup delays.
+not rely on fixed startup delays. Once registered, the project query combines
+local projects with the connected backend's registered projects and tags remote
+entries with their server ID for subsequent command routing.
 
 ## Project and session lifecycle
 
@@ -122,9 +137,14 @@ worktrees retain their server ownership in query caches and persisted UI state.
 Session reads and mutations derive the backend from that ownership, including
 message send, close, archive, cancel, and resume operations.
 
-Claude CLI installation and authentication are queried independently on each
-server. The login terminal is created on the selected remote backend. Other
-backend-specific authentication flows still require explicit validation.
+AI CLI installation, authentication, and available versions are queried
+independently on each connected server. The server card shows installed CLIs as
+a horizontal shelf of square cards, with a separate picker for installing
+additional backends. Outdated cards open the shared CLI update modal with the
+remote backend handle, so the selected installer runs on that server rather
+than locally. Cursor keeps its native terminal-based install/update flow, also
+routed through the remote backend. Login terminals are created on the selected
+server for every supported AI CLI.
 
 ## Startup and recovery
 
@@ -166,6 +186,7 @@ present; otherwise it creates an ephemeral VM and deletes it afterward.
 - `connect_remote_server`
 - `disconnect_remote_server`
 - `get_remote_server_status`
+- `check_remote_server_health`
 
 Mutating WebSocket dispatch arms emit cache invalidations for
 `remote-servers` and, when persisted data changes, `preferences`.

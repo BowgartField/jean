@@ -156,7 +156,10 @@ function ProvisionLogPanel({
           </p>
         ) : (
           logs.map((log, index) => (
-            <div key={`${index}-${log.stream}-${log.line}`} className="flex gap-2">
+            <div
+              key={`${index}-${log.stream}-${log.line}`}
+              className="flex gap-2"
+            >
               <span className="shrink-0 text-muted-foreground">
                 {log.stream === 'stderr'
                   ? '[err]'
@@ -164,7 +167,12 @@ function ProvisionLogPanel({
                     ? '[sys]'
                     : '[out]'}
               </span>
-              <span className={cn('whitespace-pre-wrap break-words', logClassName(log.stream))}>
+              <span
+                className={cn(
+                  'whitespace-pre-wrap break-words',
+                  logClassName(log.stream)
+                )}
+              >
                 {log.line}
               </span>
             </div>
@@ -188,7 +196,7 @@ function StepRail({
 }) {
   const activeIndex = stageIndex(steps, progress?.stage)
   return (
-    <div className="grid gap-3 sm:grid-cols-2">
+    <div className="space-y-0">
       {steps.map((step, index) => {
         const completed = activeIndex > index || progress?.stage === 'complete'
         const errored = isError && activeIndex === index
@@ -197,56 +205,71 @@ function StepRail({
           <div
             key={step.stage}
             className={cn(
-              'rounded-xl border p-3 transition-colors',
-              completed && 'border-emerald-500/25 bg-emerald-500/5',
-              active && 'border-sky-500/25 bg-sky-500/5',
-              errored && 'border-destructive/25 bg-destructive/5'
+              'relative flex gap-3 rounded-xl px-2 py-2.5 transition-all',
+              active && 'bg-sky-500/10 py-3.5',
+              errored && 'bg-destructive/5 py-3.5'
             )}
           >
-            <div className="flex items-start gap-3">
-              <div
+            {index < steps.length - 1 && (
+              <span
                 className={cn(
-                  'mt-0.5 grid size-6 shrink-0 place-items-center rounded-full border',
-                  completed &&
-                    'border-emerald-500/30 bg-emerald-500/10 text-emerald-500',
-                  active &&
-                    'border-sky-500/30 bg-sky-500/10 text-sky-500',
-                  errored &&
-                    'border-destructive/30 bg-destructive/10 text-destructive',
-                  !completed &&
-                    !active &&
-                    !errored &&
-                    'border-border bg-background text-muted-foreground'
+                  'absolute left-[19px] top-8 h-[calc(100%-20px)] w-px bg-border',
+                  completed && 'bg-sky-500/50'
                 )}
-              >
-                {errored ? (
-                  <CircleAlert className="size-3.5" />
-                ) : completed ? (
-                  <CheckCircle2 className="size-3.5" />
-                ) : active ? (
-                  <Loader2 className="size-3.5 animate-spin" />
-                ) : (
-                  <CircleDot className="size-3.5" />
+              />
+            )}
+            <div
+              className={cn(
+                'relative z-10 grid size-6 shrink-0 place-items-center rounded-full border bg-background',
+                (completed || active) &&
+                  'border-sky-500/40 bg-sky-500/10 text-sky-500',
+                errored &&
+                  'border-destructive/40 bg-destructive/10 text-destructive',
+                !completed && !active && !errored && 'text-muted-foreground'
+              )}
+            >
+              {errored ? (
+                <CircleAlert className="size-3.5" />
+              ) : active ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : completed ? (
+                <CheckCircle2 className="size-3.5" />
+              ) : (
+                <CircleDot className="size-3.5" />
+              )}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <p
+                  className={cn(
+                    'text-sm font-medium',
+                    !completed && !active && !errored && 'text-muted-foreground'
+                  )}
+                >
+                  {step.label}
+                </p>
+                {active && (
+                  <Badge
+                    variant="outline"
+                    className="h-5 border-sky-500/25 px-1.5 text-[10px] text-sky-600 dark:text-sky-400"
+                  >
+                    Running
+                  </Badge>
+                )}
+                {errored && (
+                  <Badge
+                    variant="outline"
+                    className="h-5 border-destructive/25 px-1.5 text-[10px] text-destructive"
+                  >
+                    Failed
+                  </Badge>
                 )}
               </div>
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <p className="text-sm font-medium">{step.label}</p>
-                  {active && (
-                    <Badge variant="outline" className="h-5 border-sky-500/25 px-1.5 text-[10px] text-sky-600 dark:text-sky-400">
-                      Running
-                    </Badge>
-                  )}
-                  {errored && (
-                    <Badge variant="outline" className="h-5 border-destructive/25 px-1.5 text-[10px] text-destructive">
-                      Failed
-                    </Badge>
-                  )}
-                </div>
-                <p className="mt-1 text-xs text-muted-foreground">
+              {(active || errored) && (
+                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
                   {step.description}
                 </p>
-              </div>
+              )}
             </div>
           </div>
         )
@@ -268,7 +291,10 @@ export function RemoteServerProvisionModal({
   const [error, setError] = useState<string | null>(null)
   const [completedVersion, setCompletedVersion] = useState<string | null>(null)
   const [running, setRunning] = useState(false)
-  const [tools, setTools] = useState<ToolsToInstall>({ claudeCli: false, ghCli: false })
+  const [tools, setTools] = useState<ToolsToInstall>({
+    claudeCli: false,
+    ghCli: false,
+  })
   const [selectedVersion, setSelectedVersion] = useState(FALLBACK_APP_VERSION)
   const initializedRef = useRef(false)
   const versionTouchedRef = useRef(false)
@@ -317,7 +343,9 @@ export function RemoteServerProvisionModal({
       .then(status => {
         setTools({ claudeCli: status.claude_cli, ghCli: status.gh_cli })
       })
-      .catch(() => {/* ignore — defaults stay false */})
+      .catch(() => {
+        /* ignore — defaults stay false */
+      })
   }, [open])
 
   useEffect(() => {
@@ -335,13 +363,13 @@ export function RemoteServerProvisionModal({
     let unlistenLog: (() => void) | null = null
     let cancelled = false
 
-    listen<RemoteProvisionProgress>('remote-server:provision-progress', event => {
-      if (event.payload.server_id !== serverId) return
-      setProgress(event.payload)
-      if (event.payload.stage === 'complete') {
-        setRunning(false)
+    listen<RemoteProvisionProgress>(
+      'remote-server:provision-progress',
+      event => {
+        if (event.payload.server_id !== serverId) return
+        setProgress(event.payload)
       }
-    })
+    )
       .then(unlisten => {
         if (cancelled) {
           unlisten()
@@ -388,81 +416,86 @@ export function RemoteServerProvisionModal({
     return provisionSteps.find(step => step.stage === progress?.stage) ?? null
   }, [progress?.stage, provisionSteps])
 
-  const startProvisioning = useCallback(async () => {
-    if (!server || running || initializedRef.current) return
-    initializedRef.current = true
-    setRunning(true)
-    setError(null)
-    setLogs([])
-    setCompletedVersion(null)
+  const startProvisioning = useCallback(
+    async (retry = false) => {
+      if (!server || (!retry && (running || initializedRef.current))) return
+      initializedRef.current = true
+      setRunning(true)
+      setError(null)
+      setLogs([])
+      setCompletedVersion(null)
 
-    try {
-      const result = await provisionServer.mutateAsync({
-        serverId: server.id,
-        version: selectedVersion,
-      })
+      try {
+        const result = await provisionServer.mutateAsync({
+          serverId: server.id,
+          version: selectedVersion,
+        })
 
-      // Open the SSH tunnel and register the remote WebSocket transport so
-      // subsequent _backendHandle calls (CLI installs, session creation)
-      // have somewhere to route to. Provisioning alone does not connect.
-      setProgress({
-        server_id: server.id,
-        stage: 'connecting',
-        message: 'Connecting to remote backend…',
-        percent: 88,
-      })
-      await connectServer.mutateAsync(server.id)
-
-      // Install selected CLIs after jean-server is running
-      const installErrors: string[] = []
-
-      if (tools.claudeCli) {
+        // Open the SSH tunnel and register the remote WebSocket transport so
+        // subsequent _backendHandle calls (CLI installs, session creation)
+        // have somewhere to route to. Provisioning alone does not connect.
         setProgress({
           server_id: server.id,
-          stage: 'installing_claude_cli',
-          message: 'Installing Claude CLI…',
-          percent: 90,
+          stage: 'connecting',
+          message: 'Connecting to remote backend…',
+          percent: 88,
         })
-        try {
-          await invoke('install_claude_cli', { _backendHandle: server.id })
-        } catch (e) {
-          installErrors.push(`Claude CLI: ${String(e)}`)
-        }
-      }
+        await connectServer.mutateAsync(server.id)
 
-      if (tools.ghCli) {
+        // Install selected CLIs after jean-server is running
+        const installErrors: string[] = []
+
+        if (tools.claudeCli) {
+          setProgress({
+            server_id: server.id,
+            stage: 'installing_claude_cli',
+            message: 'Installing Claude CLI…',
+            percent: 90,
+          })
+          try {
+            await invoke('install_claude_cli', { _backendHandle: server.id })
+          } catch (e) {
+            installErrors.push(`Claude CLI: ${String(e)}`)
+          }
+        }
+
+        if (tools.ghCli) {
+          setProgress({
+            server_id: server.id,
+            stage: 'installing_gh_cli',
+            message: 'Installing GitHub CLI…',
+            percent: tools.claudeCli ? 95 : 90,
+          })
+          try {
+            await invoke('install_gh_on_remote', { serverId: server.id })
+          } catch (e) {
+            installErrors.push(`GitHub CLI: ${String(e)}`)
+          }
+        }
+
+        setCompletedVersion(result.version)
         setProgress({
           server_id: server.id,
-          stage: 'installing_gh_cli',
-          message: 'Installing GitHub CLI…',
-          percent: tools.claudeCli ? 95 : 90,
+          stage: 'complete',
+          message: `Jean ${result.version} is running`,
+          percent: 100,
         })
-        try {
-          await invoke('install_gh_on_remote', { serverId: server.id })
-        } catch (e) {
-          installErrors.push(`GitHub CLI: ${String(e)}`)
+        setRunning(false)
+
+        if (installErrors.length > 0) {
+          toast.warning(
+            `Provisioned, but some CLIs failed to install:\n${installErrors.join('\n')}`
+          )
         }
+      } catch (cause) {
+        const message = cause instanceof Error ? cause.message : String(cause)
+        setError(message)
+        setRunning(false)
+        toast.error(`Provisioning failed: ${message}`)
       }
-
-      setCompletedVersion(result.version)
-      setProgress({
-        server_id: server.id,
-        stage: 'complete',
-        message: `Jean ${result.version} is running`,
-        percent: 100,
-      })
-      setRunning(false)
-
-      if (installErrors.length > 0) {
-        toast.warning(`Provisioned, but some CLIs failed to install:\n${installErrors.join('\n')}`)
-      }
-    } catch (cause) {
-      const message = cause instanceof Error ? cause.message : String(cause)
-      setError(message)
-      setRunning(false)
-      toast.error(`Provisioning failed: ${message}`)
-    }
-  }, [connectServer, provisionServer, running, selectedVersion, server, tools])
+    },
+    [connectServer, provisionServer, running, selectedVersion, server, tools]
+  )
 
   const isComplete = progress?.stage === 'complete' && !running && !error
   const isError = error != null
@@ -589,9 +622,9 @@ export function RemoteServerProvisionModal({
                   </Select>
                   {selectedVersion !== FALLBACK_APP_VERSION && (
                     <p className="text-xs text-muted-foreground">
-                      Packaged release builds require this to match the
-                      desktop version ({FALLBACK_APP_VERSION}) to connect; dev
-                      builds skip that check.
+                      Packaged release builds require this to match the desktop
+                      version ({FALLBACK_APP_VERSION}) to connect; dev builds
+                      skip that check.
                     </p>
                   )}
                   {selectedVersion === FALLBACK_APP_VERSION &&
@@ -613,29 +646,50 @@ export function RemoteServerProvisionModal({
                   <label className="flex cursor-pointer items-center gap-2">
                     <Checkbox
                       checked={tools.claudeCli}
-                      onCheckedChange={v => setTools(t => ({ ...t, claudeCli: !!v }))}
+                      onCheckedChange={v =>
+                        setTools(t => ({ ...t, claudeCli: !!v }))
+                      }
                     />
                     <span className="text-sm">Claude CLI</span>
                   </label>
                   <label className="flex cursor-pointer items-center gap-2">
                     <Checkbox
                       checked={tools.ghCli}
-                      onCheckedChange={v => setTools(t => ({ ...t, ghCli: !!v }))}
+                      onCheckedChange={v =>
+                        setTools(t => ({ ...t, ghCli: !!v }))
+                      }
                     />
                     <span className="text-sm">GitHub CLI</span>
                   </label>
                 </div>
               )}
 
-              <StepRail
-                progress={progress}
-                steps={provisionSteps}
-                running={running}
-                isError={isError}
-              />
-
-              <div className="min-h-0 flex-1 flex flex-col">
-                <ProvisionLogPanel logs={logs} viewportRef={logsViewportRef} />
+              <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
+                <aside className="min-h-0 overflow-y-auto rounded-xl border bg-muted/5 p-2">
+                  <p className="px-2 pb-2 pt-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Provisioning timeline
+                  </p>
+                  <StepRail
+                    progress={progress}
+                    steps={provisionSteps}
+                    running={running}
+                    isError={isError}
+                  />
+                </aside>
+                <section className="flex min-h-48 flex-col gap-2 lg:min-h-0">
+                  <div className="flex items-center justify-between px-1">
+                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      Live logs
+                    </p>
+                    <span className="font-mono text-[10px] text-muted-foreground">
+                      {logs.length} lines
+                    </span>
+                  </div>
+                  <ProvisionLogPanel
+                    logs={logs}
+                    viewportRef={logsViewportRef}
+                  />
+                </section>
               </div>
 
               {isError && (
@@ -667,7 +721,10 @@ export function RemoteServerProvisionModal({
               Close
             </Button>
           ) : isComplete ? (
-            <Button onClick={() => onOpenChange(false)} className="w-full sm:w-auto">
+            <Button
+              onClick={() => onOpenChange(false)}
+              className="w-full sm:w-auto"
+            >
               Done
             </Button>
           ) : isError ? (
@@ -675,8 +732,7 @@ export function RemoteServerProvisionModal({
               <Button
                 variant="outline"
                 onClick={() => {
-                  resetState()
-                  void startProvisioning()
+                  void startProvisioning(true)
                 }}
               >
                 Retry
@@ -690,7 +746,10 @@ export function RemoteServerProvisionModal({
               <Button variant="outline" onClick={() => onOpenChange(false)}>
                 Cancel
               </Button>
-              <Button onClick={startProvisioning} disabled={running}>
+              <Button
+                onClick={() => void startProvisioning()}
+                disabled={running}
+              >
                 {running && <Loader2 className="size-4 animate-spin" />}
                 Provision server
               </Button>

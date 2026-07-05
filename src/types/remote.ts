@@ -4,6 +4,7 @@ export type RemoteServerAuth =
 
 export type RemoteServerStatus =
   | 'disconnected'
+  | 'reachable'
   | 'connecting'
   | 'connected'
   | 'provisioning'

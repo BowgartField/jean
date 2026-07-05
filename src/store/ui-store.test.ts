@@ -6,14 +6,16 @@ describe('Command Code CLI update modal', () => {
     useUIStore.setState({
       cliUpdateModalOpen: false,
       cliUpdateModalType: null,
+      cliUpdateModalBackendHandle: null,
     })
   })
 
   it('accepts commandcode as a CLI update modal type', () => {
-    useUIStore.getState().openCliUpdateModal('commandcode')
+    useUIStore.getState().openCliUpdateModal('commandcode', 'server-1')
 
     expect(useUIStore.getState().cliUpdateModalOpen).toBe(true)
     expect(useUIStore.getState().cliUpdateModalType).toBe('commandcode')
+    expect(useUIStore.getState().cliUpdateModalBackendHandle).toBe('server-1')
   })
 })
 

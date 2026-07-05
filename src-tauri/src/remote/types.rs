@@ -25,6 +25,8 @@ pub enum RemoteServerAuth {
 #[serde(rename_all = "snake_case")]
 pub enum RemoteServerStatus {
     Disconnected,
+    /// SSH reachable (one-off command succeeded) but no live tunnel is open.
+    Reachable,
     Connecting,
     Connected,
     Provisioning,

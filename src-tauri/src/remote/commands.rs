@@ -83,6 +83,68 @@ async fn load_server(app: &AppHandle, server_id: &str) -> Result<RemoteServerCon
     find_server(&preferences.remote_servers, server_id)
 }
 
+fn parse_remote_installation(output: &str) -> Option<(String, String)> {
+    let mut version = None;
+    let mut token = None;
+
+    for line in output.lines() {
+        if let Some(value) = line.strip_prefix("JEAN_VERSION=") {
+            version = Some(value.trim().to_string());
+        } else if let Some(value) = line.strip_prefix("JEAN_TOKEN=") {
+            token = Some(value.trim().to_string());
+        }
+    }
+
+    match (version, token) {
+        (Some(version), Some(token)) if !version.is_empty() && !token.is_empty() => {
+            Some((version, token))
+        }
+        _ => None,
+    }
+}
+
+fn inspect_remote_installation(
+    app: &AppHandle,
+    server: &RemoteServerConfig,
+) -> Result<Option<(String, String)>, String> {
+    let output = ssh::exec_checked(
+        app,
+        server,
+        r#"if [ -r /opt/jean-remote/VERSION ] && [ -r /etc/systemd/system/jean-remote.service ]; then
+  version=$(cat /opt/jean-remote/VERSION)
+  token=$(sed -n 's/.*--token \([^[:space:]]*\).*/\1/p' /etc/systemd/system/jean-remote.service | tail -n 1)
+  printf 'JEAN_VERSION=%s\nJEAN_TOKEN=%s\n' "$version" "$token"
+fi"#,
+    )?;
+    Ok(parse_remote_installation(&output))
+}
+
+async fn verify_server_ssh(
+    app: &AppHandle,
+    server: &RemoteServerConfig,
+) -> Result<RemoteConnectionTest, String> {
+    tunnel::set_runtime_status(&server.id, RemoteServerStatus::Connecting, None);
+    let app_for_test = app.clone();
+    let server_for_test = server.clone();
+    let result =
+        tokio::task::spawn_blocking(move || ssh::test_connection(&app_for_test, &server_for_test))
+            .await
+            .map_err(|e| format!("SSH connection test task failed: {e}"))??;
+
+    if result.success {
+        // An SSH test is a one-off command, not a live tunnel. Only mark the
+        // server reachable — Connected is reserved for an open tunnel.
+        tunnel::set_runtime_status(&server.id, RemoteServerStatus::Reachable, None);
+    } else {
+        tunnel::set_runtime_status(
+            &server.id,
+            RemoteServerStatus::Error,
+            Some(result.message.clone()),
+        );
+    }
+    Ok(result)
+}
+
 #[tauri::command]
 pub async fn add_remote_server(
     app: AppHandle,
@@ -105,11 +167,46 @@ pub async fn add_remote_server(
         }
     }
     preferences.remote_servers.push(server.clone());
-    if let Err(error) = crate::save_preferences(app, preferences).await {
+    if let Err(error) = crate::save_preferences(app.clone(), preferences).await {
         if passphrase.is_some() {
             let _ = keychain::delete_passphrase(&server_id);
         }
         return Err(error);
+    }
+
+    match verify_server_ssh(&app, &server).await {
+        Ok(result) if result.success => {
+            let app_for_inspection = app.clone();
+            let server_for_inspection = server.clone();
+            if let Ok(Some((version, token))) = tokio::task::spawn_blocking(move || {
+                inspect_remote_installation(&app_for_inspection, &server_for_inspection)
+            })
+            .await
+            .map_err(|e| format!("Remote installation inspection task failed: {e}"))
+            .and_then(|result| result)
+            {
+                let mut preferences = crate::load_preferences(app.clone()).await?;
+                if let Some(stored) = preferences
+                    .remote_servers
+                    .iter_mut()
+                    .find(|candidate| candidate.id == server_id)
+                {
+                    stored.installed_version = Some(version.clone());
+                    stored.http_token = Some(token.clone());
+                }
+                crate::save_preferences(app, preferences).await?;
+                server.installed_version = Some(version);
+                server.http_token = Some(token);
+            }
+            server.status = RemoteServerStatus::Reachable;
+        }
+        Ok(_) => {
+            server.status = RemoteServerStatus::Error;
+        }
+        Err(error) => {
+            tunnel::set_runtime_status(&server_id, RemoteServerStatus::Error, Some(error));
+            server.status = RemoteServerStatus::Error;
+        }
     }
     Ok(server)
 }
@@ -214,32 +311,9 @@ pub async fn test_remote_server(
     server_id: String,
 ) -> Result<RemoteConnectionTest, String> {
     let server = load_server(&app, &server_id).await?;
-    tunnel::set_runtime_status(&server_id, RemoteServerStatus::Connecting, None);
-    let app_for_test = app.clone();
-    let server_for_test = server.clone();
-    let task_result =
-        tokio::task::spawn_blocking(move || ssh::test_connection(&app_for_test, &server_for_test))
-            .await
-            .map_err(|e| format!("SSH connection test task failed: {e}"))
-            .and_then(|result| result);
-    let result = match task_result {
-        Ok(result) => result,
-        Err(error) => {
-            tunnel::set_runtime_status(&server_id, RemoteServerStatus::Error, Some(error.clone()));
-            return Err(error);
-        }
-    };
-
-    if result.success {
-        tunnel::set_runtime_status(&server_id, RemoteServerStatus::Disconnected, None);
-    } else {
-        tunnel::set_runtime_status(
-            &server_id,
-            RemoteServerStatus::Error,
-            Some(result.message.clone()),
-        );
-    }
-    Ok(result)
+    verify_server_ssh(&app, &server).await.inspect_err(|error| {
+        tunnel::set_runtime_status(&server_id, RemoteServerStatus::Error, Some(error.clone()));
+    })
 }
 
 #[tauri::command]
@@ -289,13 +363,72 @@ pub async fn provision_remote_server(
     Ok(result)
 }
 
+/// Re-read the token the remote service is actually launched with and, if it
+/// differs from the one stored locally, persist the corrected value. Returns the
+/// updated server when a divergence was repaired. This recovers from a stale
+/// local token after the server was re-provisioned (or provisioned by an older
+/// Jean that left a different token running).
+async fn resync_remote_token(
+    app: &AppHandle,
+    server: &RemoteServerConfig,
+) -> Result<Option<RemoteServerConfig>, String> {
+    let app_for_inspect = app.clone();
+    let server_for_inspect = server.clone();
+    let inspected = tokio::task::spawn_blocking(move || {
+        inspect_remote_installation(&app_for_inspect, &server_for_inspect)
+    })
+    .await
+    .map_err(|e| format!("Remote token inspection task failed: {e}"))??;
+
+    let Some((version, token)) = inspected else {
+        return Ok(None);
+    };
+    if server.http_token.as_deref() == Some(token.as_str()) {
+        // Token already matches — the 401 is not caused by a stale local token.
+        return Ok(None);
+    }
+
+    let mut preferences = crate::load_preferences(app.clone()).await?;
+    let Some(stored) = preferences
+        .remote_servers
+        .iter_mut()
+        .find(|candidate| candidate.id == server.id)
+    else {
+        return Ok(None);
+    };
+    stored.http_token = Some(token.clone());
+    stored.installed_version = Some(version.clone());
+    crate::save_preferences(app.clone(), preferences).await?;
+
+    let mut updated = server.clone();
+    updated.http_token = Some(token);
+    updated.installed_version = Some(version);
+    Ok(Some(updated))
+}
+
 #[tauri::command]
 pub async fn connect_remote_server(
     app: AppHandle,
     server_id: String,
 ) -> Result<RemoteConnection, String> {
     let server = load_server(&app, &server_id).await?;
-    tunnel::connect(&app, &server).await
+    // The remote service file is the source of truth for the token. Re-sync it
+    // before connecting so a re-provisioned/rotated token (or a server that was
+    // provisioned outside this install) can't leave us with a stale one.
+    let server = resync_remote_token(&app, &server)
+        .await?
+        .unwrap_or(server);
+    tunnel::connect(&app, &server).await.map_err(|error| {
+        if error.contains("401") {
+            format!(
+                "Remote Jean rejected the connection token (401). The running service \
+                 is using a different token than its config file — re-provision the \
+                 server to reset it. ({error})"
+            )
+        } else {
+            error
+        }
+    })
 }
 
 #[tauri::command]
@@ -309,6 +442,20 @@ pub async fn get_remote_server_status(
     server_id: String,
 ) -> Result<RemoteServerStatusInfo, String> {
     let server = load_server(&app, &server_id).await?;
+    Ok(tunnel::status(&server))
+}
+
+#[tauri::command]
+pub async fn check_remote_server_health(
+    app: AppHandle,
+    server_id: String,
+) -> Result<RemoteServerStatusInfo, String> {
+    let server = load_server(&app, &server_id).await?;
+    if server.http_token.is_some() {
+        tunnel::check_health(&server).await;
+    } else if let Err(error) = verify_server_ssh(&app, &server).await {
+        tunnel::set_runtime_status(&server_id, RemoteServerStatus::Error, Some(error));
+    }
     Ok(tunnel::status(&server))
 }
 
@@ -326,10 +473,7 @@ pub async fn get_local_tool_status(app: AppHandle) -> LocalToolStatus {
 }
 
 #[tauri::command]
-pub async fn install_gh_on_remote(
-    app: AppHandle,
-    server_id: String,
-) -> Result<(), String> {
+pub async fn install_gh_on_remote(app: AppHandle, server_id: String) -> Result<(), String> {
     let server = load_server(&app, &server_id).await?;
     let script = r#"set -eu
 if command -v gh >/dev/null 2>&1; then
@@ -364,11 +508,9 @@ chmod +x /usr/local/bin/gh
 rm -rf /tmp/gh.tar.gz "/tmp/gh_${GH_VERSION}_linux_${GH_ARCH}"
 echo "GitHub CLI installed: $(gh --version | head -1)"
 "#;
-    let output = tokio::task::spawn_blocking(move || {
-        ssh::exec(&app, &server, script)
-    })
-    .await
-    .map_err(|e| format!("SSH task failed: {e}"))??;
+    let output = tokio::task::spawn_blocking(move || ssh::exec(&app, &server, script))
+        .await
+        .map_err(|e| format!("SSH task failed: {e}"))??;
 
     if output.status.success() {
         Ok(())
@@ -388,8 +530,10 @@ pub async fn clone_project_to_remote(
     project_id: String,
     server_id: String,
     remote_path: Option<String>,
+    copy_env_file: Option<bool>,
 ) -> Result<crate::projects::types::RemoteClone, String> {
-    super::clone::clone_project_to_remote(app, project_id, server_id, remote_path).await
+    super::clone::clone_project_to_remote(app, project_id, server_id, remote_path, copy_env_file)
+        .await
 }
 
 #[cfg(test)]
@@ -430,5 +574,14 @@ mod tests {
         normalize_default(&mut servers, None);
         assert!(servers[0].default);
         assert!(!servers[1].default);
+    }
+
+    #[test]
+    fn parses_existing_remote_installation() {
+        assert_eq!(
+            parse_remote_installation("JEAN_VERSION=0.1.60\nJEAN_TOKEN=existing-token\n"),
+            Some(("0.1.60".to_string(), "existing-token".to_string()))
+        );
+        assert_eq!(parse_remote_installation("JEAN_VERSION=0.1.60\n"), None);
     }
 }

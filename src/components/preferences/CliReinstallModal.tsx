@@ -29,7 +29,9 @@ import { usePiCliSetup } from '@/services/pi-cli'
 import { useCodeRabbitCliSetup } from '@/services/coderabbit-cli'
 import { useCommandCodeCliSetup } from '@/services/commandcode-cli'
 import { useGrokCliSetup } from '@/services/grok-cli'
+import { useRemoteCliSetup } from '@/services/remote-cli-tools'
 import { logger } from '@/lib/logger'
+import type { CliBackend } from '@/types/preferences'
 import {
   SetupState,
   InstallingState,
@@ -243,6 +245,48 @@ function CommandCodeCliReinstallModalContent({
   )
 }
 
+type RemoteCliUpdateType = Exclude<CliBackend, 'cursor'>
+
+export function RemoteCliReinstallModal({
+  open,
+  onOpenChange,
+  cliType,
+  backendHandle,
+}: ModalProps & {
+  cliType: RemoteCliUpdateType
+  backendHandle: string
+}) {
+  if (!open) return null
+  return (
+    <RemoteCliReinstallModalContent
+      open={open}
+      onOpenChange={onOpenChange}
+      cliType={cliType}
+      backendHandle={backendHandle}
+    />
+  )
+}
+
+function RemoteCliReinstallModalContent({
+  open,
+  onOpenChange,
+  cliType,
+  backendHandle,
+}: ModalProps & {
+  cliType: RemoteCliUpdateType
+  backendHandle: string
+}) {
+  const setup = useRemoteCliSetup(backendHandle, cliType)
+  return (
+    <CliReinstallModalUI
+      setup={setup}
+      cliType={cliType}
+      open={open}
+      onOpenChange={onOpenChange}
+    />
+  )
+}
+
 /**
  * Shared UI component - receives setup as prop, no hooks here
  */
@@ -401,13 +445,15 @@ function CliReinstallModalUI({
                         ? 'Codex AI sessions'
                         : cliType === 'opencode'
                           ? 'OpenCode AI sessions'
-                          : cliType === 'coderabbit'
-                            ? 'secondary CodeRabbit code reviews'
-                            : cliType === 'commandcode'
-                              ? 'Command Code AI sessions'
-                              : cliType === 'grok'
-                                ? 'Grok AI sessions'
-                                : 'GitHub integration'
+                          : cliType === 'pi'
+                            ? 'PI AI sessions'
+                            : cliType === 'coderabbit'
+                              ? 'secondary CodeRabbit code reviews'
+                              : cliType === 'commandcode'
+                                ? 'Command Code AI sessions'
+                                : cliType === 'grok'
+                                  ? 'Grok AI sessions'
+                                  : 'GitHub integration'
                   }.`}
           </DialogDescription>
         </DialogHeader>

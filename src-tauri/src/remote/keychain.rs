@@ -38,8 +38,9 @@ pub fn load_passphrase(server_id: &str) -> Result<Option<String>, String> {
 
     match security_framework::passwords::get_generic_password(SERVICE, server_id) {
         Ok(passphrase) => {
-            let passphrase = String::from_utf8(passphrase)
-                .map_err(|_| "The SSH key passphrase in macOS Keychain is not valid UTF-8".to_string())?;
+            let passphrase = String::from_utf8(passphrase).map_err(|_| {
+                "The SSH key passphrase in macOS Keychain is not valid UTF-8".to_string()
+            })?;
             if let Ok(mut cache) = PASSPHRASE_CACHE.lock() {
                 cache.insert(server_id.to_string(), passphrase.clone());
             }

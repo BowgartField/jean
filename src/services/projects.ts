@@ -60,6 +60,12 @@ export const projectsQueryKeys = {
  * Hook to list all projects
  */
 export function useProjects() {
+  const { data: remoteServers = [] } = useRemoteServers()
+  const connectedRemoteServerIds = remoteServers
+    .filter(server => server.status === 'connected' && server.http_token)
+    .map(server => server.id)
+    .sort()
+
   return useQuery({
     queryKey: projectsQueryKeys.list(),
     queryFn: async (): Promise<Project[]> => {
@@ -71,8 +77,24 @@ export function useProjects() {
       try {
         logger.debug('Loading projects from backend')
         const projects = await invoke<Project[]>('list_projects')
-        logger.info('Projects loaded successfully', { count: projects.length })
-        return projects
+        const remoteResults = await Promise.allSettled(
+          connectedRemoteServerIds.map(async serverId => {
+            const remoteProjects = await invoke<Project[]>('list_projects', {
+              _backendHandle: serverId,
+            })
+            return remoteProjects.map(project => ({
+              ...project,
+              server_id: serverId,
+            }))
+          })
+        )
+        const remoteProjects = remoteResults.flatMap(result =>
+          result.status === 'fulfilled' ? result.value : []
+        )
+        logger.info('Projects loaded successfully', {
+          count: projects.length + remoteProjects.length,
+        })
+        return [...projects, ...remoteProjects]
       } catch (error) {
         logger.error('Failed to load projects', { error })
         return fallbackUnlessWsDisconnected(error, [])
@@ -105,7 +127,10 @@ export function useWorktrees(projectId: string | null) {
   })()
 
   return useQuery({
-    queryKey: [...projectsQueryKeys.worktrees(projectId ?? ''), remoteClones.map(c => c.server_id)],
+    queryKey: [
+      ...projectsQueryKeys.worktrees(projectId ?? ''),
+      remoteClones.map(c => c.server_id),
+    ],
     queryFn: async (): Promise<Worktree[]> => {
       if (!isTauri() || !projectId) return []
 
@@ -116,7 +141,9 @@ export function useWorktrees(projectId: string | null) {
           projectId,
           ...(backendHandle ? { _backendHandle: backendHandle } : {}),
         })
-        logger.info('Worktrees loaded successfully', { count: localWorktrees.length })
+        logger.info('Worktrees loaded successfully', {
+          count: localWorktrees.length,
+        })
 
         // Fetch remote worktrees for each clone and append with _server_id
         const remoteWorktreeArrays = await Promise.allSettled(
@@ -126,7 +153,9 @@ export function useWorktrees(projectId: string | null) {
               { _backendHandle: clone.server_id }
             )
             const localProject = allProjects?.find(p => p.id === projectId)
-            const remoteProject = remoteProjects.find(p => p.name === localProject?.name)
+            const remoteProject = remoteProjects.find(
+              p => p.name === localProject?.name
+            )
             if (!remoteProject) return []
             const worktrees = await invoke<Worktree[]>('list_worktrees', {
               projectId: remoteProject.id,
@@ -210,11 +239,13 @@ export function useWorktree(worktreeId: string | null) {
  */
 export async function cloneProjectToServer(
   projectId: string,
-  serverId: string
+  serverId: string,
+  copyEnvFile = false
 ): Promise<RemoteClone> {
   const clone = await invoke<RemoteClone>('clone_project_to_remote', {
     projectId,
     serverId,
+    copyEnvFile,
   })
   try {
     await invoke('add_project', {
@@ -621,17 +652,23 @@ export function useCreateWorktree() {
       let resolvedProjectId = projectId
       const backendHandle = serverId ?? undefined
       if (serverId) {
-        const { data: allProjects } = queryClient.getQueryState<{ id: string; name: string }[]>(
-          ['projects']
-        ) ?? {}
+        const { data: allProjects } =
+          queryClient.getQueryState<{ id: string; name: string }[]>([
+            'projects',
+          ]) ?? {}
         const remoteProjects = await invoke<{ id: string; name: string }[]>(
           'list_projects',
           { _backendHandle: serverId }
         )
         // Find local project name to match on remote
-        const localProjectName = allProjects?.find(p => p.id === projectId)?.name
-        const remoteProject = remoteProjects.find(p => p.name === localProjectName)
-        if (!remoteProject) throw new Error(`Project not found on remote server`)
+        const localProjectName = allProjects?.find(
+          p => p.id === projectId
+        )?.name
+        const remoteProject = remoteProjects.find(
+          p => p.name === localProjectName
+        )
+        if (!remoteProject)
+          throw new Error(`Project not found on remote server`)
         resolvedProjectId = remoteProject.id
       }
 
@@ -663,7 +700,9 @@ export function useCreateWorktree() {
       const shouldAutoOpen = !isBackground
       // Pin server routing immediately so navigation is correct
       if (worktree._server_id) {
-        useChatStore.getState().setWorktreeRemoteServer(worktree.id, worktree._server_id)
+        useChatStore
+          .getState()
+          .setWorktreeRemoteServer(worktree.id, worktree._server_id)
       }
       // Check if this worktree was already resolved by an event handler
       // (e.g. unarchive_worktree emits worktree:unarchived which sets status: 'ready')
@@ -1875,11 +1914,17 @@ export function useCreateBaseSession() {
           'list_projects',
           { _backendHandle: serverId }
         )
-        const remoteProject = remoteProjects.find(p => p.name === localProject?.name)
+        const remoteProject = remoteProjects.find(
+          p => p.name === localProject?.name
+        )
         if (!remoteProject) {
-          throw new Error(`Project "${localProject?.name}" not found on remote server`)
+          throw new Error(
+            `Project "${localProject?.name}" not found on remote server`
+          )
         }
-        logger.debug('Creating base session on remote', { remoteProjectId: remoteProject.id })
+        logger.debug('Creating base session on remote', {
+          remoteProjectId: remoteProject.id,
+        })
         const session = await invoke<Worktree>('create_base_session', {
           projectId: remoteProject.id,
           _backendHandle: serverId,
@@ -1889,7 +1934,9 @@ export function useCreateBaseSession() {
       }
 
       logger.debug('Creating base session', { projectId })
-      const session = await invoke<Worktree>('create_base_session', { projectId })
+      const session = await invoke<Worktree>('create_base_session', {
+        projectId,
+      })
       logger.info('Base session created/reopened', { session })
       return session
     },

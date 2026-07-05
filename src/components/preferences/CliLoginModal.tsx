@@ -21,6 +21,7 @@ import { commandcodeCliQueryKeys } from '@/services/commandcode-cli'
 import { grokCliQueryKeys } from '@/services/grok-cli'
 import { coderabbitCliQueryKeys } from '@/services/coderabbit-cli'
 import { githubQueryKeys } from '@/services/github'
+import { remoteCliToolsQueryKeys } from '@/services/remote-cli-tools'
 import {
   Dialog,
   DialogContent,
@@ -283,6 +284,11 @@ function CliLoginModalContent({
         } else if (cliType === 'coderabbit') {
           queryClient.invalidateQueries({
             queryKey: coderabbitCliQueryKeys.all,
+          })
+        }
+        if (backendHandle) {
+          queryClient.invalidateQueries({
+            queryKey: remoteCliToolsQueryKeys.all(backendHandle),
           })
         }
 

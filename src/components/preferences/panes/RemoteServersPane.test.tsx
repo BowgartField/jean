@@ -17,23 +17,54 @@ const mocks = vi.hoisted(() => ({
   refetch: vi.fn(),
   claudeInstalled: true,
   claudeAuthenticated: false,
+  claudeOutdated: false,
   invoke: vi.fn(),
 }))
 
-vi.mock('@/services/claude-cli', () => ({
-  useClaudeCliStatus: () => ({
-    data: {
-      installed: mocks.claudeInstalled,
-      version: '2.1.196',
-      path: '/opt/jean/bin/claude',
-      supports_auth_command: true,
+vi.mock('@/services/remote-cli-tools', () => ({
+  remoteCliToolsQueryKeys: {
+    all: (serverId: string) => ['remote-cli-tools', serverId],
+  },
+  getRemoteCursorInstallCommand: vi.fn(),
+  useRemoteCliTools: () => [
+    {
+      definition: {
+        backend: 'claude',
+        statusCommand: 'check_claude_cli_installed',
+        authCommand: 'check_claude_cli_auth',
+        versionsCommand: 'get_available_cli_versions',
+        installCommand: 'install_claude_cli',
+      },
+      status: {
+        installed: mocks.claudeInstalled,
+        version: '2.1.196',
+        path: '/opt/jean/bin/claude',
+        supports_auth_command: true,
+      },
+      auth: { authenticated: mocks.claudeAuthenticated, error: null },
+      isLoading: false,
+      isError: false,
+      isAuthLoading: false,
+      latestVersion: mocks.claudeOutdated ? '2.2.0' : '2.1.196',
+      isOutdated: mocks.claudeOutdated,
     },
-    isLoading: false,
-  }),
-  useClaudeCliAuth: () => ({
-    data: { authenticated: mocks.claudeAuthenticated, error: null },
-    isLoading: false,
-  }),
+    {
+      definition: {
+        backend: 'codex',
+        statusCommand: 'check_codex_cli_installed',
+        authCommand: 'check_codex_cli_auth',
+        versionsCommand: 'get_available_codex_versions',
+        installCommand: 'install_codex_cli',
+      },
+      status: { installed: false, version: null, path: null },
+      auth: undefined,
+      isLoading: false,
+      isError: false,
+      isAuthLoading: false,
+      latestVersion: null,
+      isOutdated: false,
+    },
+  ],
 }))
 
 vi.mock('@/services/remote-servers', () => ({
@@ -104,11 +135,13 @@ describe('RemoteServersPane', () => {
         value.mockReset()
       }
     })
-    mocks.add.mockResolvedValue(server)
+    mocks.add.mockResolvedValue({ ...server, status: 'connected' })
     mocks.claudeInstalled = true
     mocks.claudeAuthenticated = false
+    mocks.claudeOutdated = false
     mocks.invoke.mockResolvedValue({ claude_cli: false, gh_cli: false })
     useUIStore.getState().closeCliLoginModal()
+    useUIStore.getState().closeCliUpdateModal()
     mocks.test.mockResolvedValue({
       success: true,
       message: 'SSH connection successful',
@@ -122,6 +155,9 @@ describe('RemoteServersPane', () => {
     const user = userEvent.setup()
     render(<RemoteServersPane />)
 
+    expect(
+      screen.queryByRole('button', { name: 'Add server' })
+    ).not.toBeInTheDocument()
     await user.click(
       screen.getByRole('button', { name: 'Add your first server' })
     )
@@ -166,8 +202,39 @@ describe('RemoteServersPane', () => {
     })
   })
 
+  it('shows connecting while an SSH test is running', async () => {
+    mocks.servers = [server]
+    mocks.test.mockReturnValue(new Promise(() => undefined))
+    const user = userEvent.setup()
+    render(<RemoteServersPane />)
+
+    await user.click(screen.getByRole('button', { name: 'Test SSH' }))
+
+    expect(screen.getByText('Connecting')).toBeInTheDocument()
+  })
+
+  it('uses an add-server card when servers already exist', () => {
+    mocks.servers = [server]
+
+    render(<RemoteServersPane />)
+
+    expect(
+      screen.getByRole('button', { name: 'Add new server' })
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Add server' })
+    ).not.toBeInTheDocument()
+  })
+
   it('opens the provisioning modal and starts provisioning', async () => {
-    mocks.servers = [{ ...server, http_token: null, installed_version: null }]
+    mocks.servers = [
+      {
+        ...server,
+        status: 'connected',
+        http_token: null,
+        installed_version: null,
+      },
+    ]
     mocks.provision.mockResolvedValue({
       success: true,
       version: '0.1.60',
@@ -183,6 +250,8 @@ describe('RemoteServersPane', () => {
         name: 'Provision Test server',
       })
     ).toBeInTheDocument()
+    expect(screen.getByText('Provisioning timeline')).toBeInTheDocument()
+    expect(screen.getByText('Live logs')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Provision server' }))
 
@@ -198,7 +267,6 @@ describe('RemoteServersPane', () => {
     const user = userEvent.setup()
     render(<RemoteServersPane />)
 
-    expect(screen.getByText('Login required')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Login' }))
 
     expect(useUIStore.getState()).toMatchObject({
@@ -210,13 +278,43 @@ describe('RemoteServersPane', () => {
     })
   })
 
-  it('shows when Claude is authenticated on the remote backend', () => {
+  it('shows installed CLIs as square cards and opens the installer picker', async () => {
     mocks.servers = [{ ...server, status: 'connected' }]
     mocks.claudeAuthenticated = true
+    const user = userEvent.setup()
 
     render(<RemoteServersPane />)
 
-    expect(screen.getByText('Logged in')).toBeInTheDocument()
+    expect(screen.getByText('Claude')).toBeInTheDocument()
+    expect(screen.getByText('v2.1.196')).toBeInTheDocument()
+    expect(screen.getByTitle('Authenticated')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Login' })).toBeNull()
+
+    await user.click(screen.getByRole('button', { name: 'Install more' }))
+    expect(
+      screen.getByRole('heading', { name: 'Install an AI CLI' })
+    ).toBeInTheDocument()
+    await user.click(screen.getByText('Codex'))
+    expect(useUIStore.getState()).toMatchObject({
+      cliUpdateModalOpen: true,
+      cliUpdateModalType: 'codex',
+      cliUpdateModalBackendHandle: 'server-1',
+    })
+  })
+
+  it('opens a remote update modal for an outdated CLI', async () => {
+    mocks.servers = [{ ...server, status: 'connected' }]
+    mocks.claudeAuthenticated = true
+    mocks.claudeOutdated = true
+    const user = userEvent.setup()
+
+    render(<RemoteServersPane />)
+    await user.click(screen.getByRole('button', { name: 'Outdated' }))
+
+    expect(useUIStore.getState()).toMatchObject({
+      cliUpdateModalOpen: true,
+      cliUpdateModalType: 'claude',
+      cliUpdateModalBackendHandle: 'server-1',
+    })
   })
 })

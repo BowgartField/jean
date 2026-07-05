@@ -61,10 +61,6 @@ import { isMacOS } from '@/lib/platform'
 import { resolveDefaultProvisionVersion } from '@/lib/remote-versions'
 import { cn } from '@/lib/utils'
 import {
-  useClaudeCliAuth,
-  useClaudeCliStatus,
-} from '@/services/claude-cli'
-import {
   useAddRemoteServer,
   useConnectRemoteServer,
   useDisconnectRemoteServer,
@@ -74,13 +70,13 @@ import {
   useTestRemoteServer,
   useUpdateRemoteServer,
 } from '@/services/remote-servers'
-import { useUIStore } from '@/store/ui-store'
 import type {
   RemoteServerConfig,
   RemoteServerInput,
   RemoteServerStatus,
 } from '@/types/remote'
 import { SettingsSection } from '../SettingsSection'
+import { RemoteServerCliShelf } from './RemoteServerCliShelf'
 import { RemoteServerProvisionModal } from './RemoteServerProvisionModal'
 
 type BusyAction = 'test' | 'connect' | 'disconnect' | 'delete'
@@ -109,62 +105,6 @@ const EMPTY_FORM: ServerFormState = {
   password: '',
   remotePort: '3456',
   isDefault: false,
-}
-
-function RemoteClaudeAuthStatus({
-  server,
-  connected,
-}: {
-  server: RemoteServerConfig
-  connected: boolean
-}) {
-  const openCliLoginModal = useUIStore(state => state.openCliLoginModal)
-  const cliStatus = useClaudeCliStatus({
-    enabled: connected,
-    serverId: server.id,
-  })
-  const cliAuth = useClaudeCliAuth({
-    enabled: connected && cliStatus.data?.installed === true,
-    serverId: server.id,
-  })
-
-  const handleLogin = () => {
-    const status = cliStatus.data
-    if (!status?.path) return
-    const args = status.supports_auth_command ? ['auth', 'login'] : ['login']
-    openCliLoginModal('claude', status.path, args, 'login', server.id)
-  }
-
-  let statusLabel = 'Connect to check'
-  if (connected && cliStatus.isLoading) {
-    statusLabel = 'Checking installation…'
-  } else if (connected && !cliStatus.data?.installed) {
-    statusLabel = 'Not installed'
-  } else if (connected && cliAuth.isLoading) {
-    statusLabel = 'Checking login…'
-  } else if (connected && cliAuth.data?.authenticated) {
-    statusLabel = 'Logged in'
-  } else if (connected && cliStatus.data?.installed) {
-    statusLabel = 'Login required'
-  }
-
-  return (
-    <div className="flex items-center gap-3 rounded-lg border bg-muted/15 px-3 py-2.5">
-      <KeyRound className="size-4 shrink-0 text-muted-foreground" />
-      <div className="min-w-0 flex-1">
-        <p className="text-xs font-medium">Claude CLI</p>
-        <p className="text-xs text-muted-foreground">{statusLabel}</p>
-      </div>
-      {connected &&
-        cliStatus.data?.installed &&
-        !cliAuth.isLoading &&
-        !cliAuth.data?.authenticated && (
-          <Button variant="outline" size="sm" onClick={handleLogin}>
-            Login
-          </Button>
-        )}
-    </div>
-  )
 }
 
 function formFromServer(server: RemoteServerConfig): ServerFormState {
@@ -244,6 +184,12 @@ const STATUS_META: Record<
     label: 'Disconnected',
     dot: 'bg-muted-foreground/50',
     badge: 'border-border bg-muted/40 text-muted-foreground',
+  },
+  reachable: {
+    label: 'Reachable',
+    dot: 'bg-teal-500',
+    badge:
+      'border-teal-500/25 bg-teal-500/10 text-teal-600 dark:text-teal-400',
   },
   connecting: {
     label: 'Connecting',
@@ -583,8 +529,12 @@ export function RemoteServersPane() {
       })
       toast.success('Remote server updated')
     } else {
-      await addServer.mutateAsync(config)
-      toast.success('Remote server added')
+      const server = await addServer.mutateAsync(config)
+      if (server.status === 'reachable' || server.status === 'connected') {
+        toast.success('Remote server added — SSH reachable')
+      } else {
+        toast.error('Remote server saved, but SSH connection failed')
+      }
     }
     setFormOpen(false)
   }
@@ -610,8 +560,8 @@ export function RemoteServersPane() {
         if (!result.success) throw new Error(result.message)
         toast.success(
           result.hostname
-            ? `Connected to ${result.hostname}`
-            : 'SSH connection successful',
+            ? `SSH reachable — ${result.hostname}`
+            : 'SSH reachable',
           { id: toastId }
         )
       } catch (error) {
@@ -672,7 +622,7 @@ export function RemoteServersPane() {
         }
         description="Provision and connect to headless Jean backends over encrypted SSH tunnels."
         actions={
-          <>
+          servers.length > 0 ? (
             <Button
               variant="outline"
               size="sm"
@@ -685,11 +635,7 @@ export function RemoteServersPane() {
               />
               Refresh
             </Button>
-            <Button size="sm" onClick={openAdd}>
-              <Plus />
-              Add server
-            </Button>
-          </>
+          ) : null
         }
         anchorId="pref-remote-servers-section-list"
       >
@@ -744,8 +690,12 @@ export function RemoteServersPane() {
         ) : (
           <div className="grid gap-3 lg:grid-cols-2">
             {servers.map(server => {
-              const status = server.status ?? 'disconnected'
+              const status =
+                isBusy(server, 'test') || isBusy(server, 'connect')
+                  ? 'connecting'
+                  : (server.status ?? 'disconnected')
               const connected = status === 'connected'
+              const backendConnected = connected && !!server.http_token
               const globallyBusy = isBusy(server)
               const versionMismatch =
                 !!server.installed_version &&
@@ -798,7 +748,8 @@ export function RemoteServersPane() {
                         <p
                           className={cn(
                             'mt-1 font-mono text-xs',
-                            versionMismatch && 'text-amber-600 dark:text-amber-400'
+                            versionMismatch &&
+                              'text-amber-600 dark:text-amber-400'
                           )}
                         >
                           {server.installed_version ?? 'Not provisioned'}
@@ -806,18 +757,18 @@ export function RemoteServersPane() {
                       </div>
                     </div>
 
-                    <RemoteClaudeAuthStatus
+                    <RemoteServerCliShelf
                       server={server}
-                      connected={connected}
+                      connected={backendConnected}
                     />
 
                     {versionMismatch ? (
                       <div className="flex items-start gap-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
                         <CircleAlert className="mt-0.5 size-3.5 shrink-0" />
                         <span>
-                          Remote Jean {server.installed_version} does not
-                          match this app ({FALLBACK_APP_VERSION}). Update the
-                          remote to connect.
+                          Remote Jean {server.installed_version} does not match
+                          this app ({FALLBACK_APP_VERSION}). Update the remote
+                          to connect.
                           {!desktopVersionPublished && (
                             <>
                               {' '}
@@ -858,7 +809,9 @@ export function RemoteServersPane() {
                         variant={versionMismatch ? 'default' : 'outline'}
                         size="sm"
                         onClick={() => setProvisionTarget(server)}
-                        disabled={globallyBusy || connected}
+                        disabled={
+                          globallyBusy || !connected || backendConnected
+                        }
                       >
                         <ShieldCheck />
                         {versionMismatch
@@ -867,7 +820,7 @@ export function RemoteServersPane() {
                             ? 'Reprovision'
                             : 'Provision'}
                       </Button>
-                      {connected ? (
+                      {backendConnected ? (
                         <Button
                           variant="outline"
                           size="sm"
@@ -905,7 +858,7 @@ export function RemoteServersPane() {
                           variant="ghost"
                           size="icon-sm"
                           onClick={() => openEdit(server)}
-                          disabled={globallyBusy || connected}
+                          disabled={globallyBusy || backendConnected}
                           aria-label={`Edit ${server.name}`}
                         >
                           <Pencil />
@@ -926,18 +879,21 @@ export function RemoteServersPane() {
                 </Card>
               )
             })}
+            <button
+              type="button"
+              onClick={openAdd}
+              className="group flex min-h-56 items-center justify-center rounded-xl border border-dashed bg-muted/5 p-6 text-muted-foreground transition-colors hover:border-sky-500/40 hover:bg-sky-500/5 hover:text-foreground"
+            >
+              <span className="flex flex-col items-center gap-3">
+                <span className="grid size-10 place-items-center rounded-full border border-dashed bg-background transition-colors group-hover:border-sky-500/40 group-hover:text-sky-500">
+                  <Plus className="size-5" />
+                </span>
+                <span className="text-sm font-medium">Add new server</span>
+              </span>
+            </button>
           </div>
         )}
       </SettingsSection>
-
-      <Alert className="bg-muted/15">
-        <CloudCog />
-        <AlertTitle>Project routing comes next</AlertTitle>
-        <AlertDescription>
-          Connecting opens and verifies the SSH tunnel. Assigning projects and
-          sessions to that backend is part of the transport-routing phase.
-        </AlertDescription>
-      </Alert>
 
       {formOpen && (
         <RemoteServerFormDialog

@@ -12,21 +12,15 @@ import {
   Trash2,
 } from 'lucide-react'
 import { useState } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
-import { toast } from 'sonner'
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
-  ContextMenuSub,
-  ContextMenuSubContent,
-  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
 import { isBaseSession, type Project } from '@/types/projects'
 import {
-  cloneProjectToServer,
   useCreateBaseSession,
   useMoveItem,
   useOpenProjectOnGitHub,
@@ -37,7 +31,6 @@ import {
   useRemoveProject,
   useWorktrees,
 } from '@/services/projects'
-import { projectsQueryKeys } from '@/services/projects'
 import { usePreferences } from '@/services/preferences'
 import { useProjectsStore } from '@/store/projects-store'
 import { useUIStore } from '@/store/ui-store'
@@ -46,6 +39,7 @@ import { getFileManagerName } from '@/lib/platform'
 import { isNativeApp } from '@/lib/environment'
 import { useRemoteServers } from '@/services/remote-servers'
 import { RunWhereModal } from '@/components/remote/RunWhereModal'
+import { CloneToRemoteModal } from '@/components/remote/CloneToRemoteModal'
 
 interface ProjectContextMenuProps {
   project: Project
@@ -57,6 +51,7 @@ export function ProjectContextMenu({
   children,
 }: ProjectContextMenuProps) {
   const [runWhereOpen, setRunWhereOpen] = useState(false)
+  const [cloneToRemoteOpen, setCloneToRemoteOpen] = useState(false)
   const createBaseSession = useCreateBaseSession()
   const moveItem = useMoveItem()
   const removeProject = useRemoveProject()
@@ -71,7 +66,6 @@ export function ProjectContextMenu({
   const setNewWorktreeModalOpen = useUIStore(
     state => state.setNewWorktreeModalOpen
   )
-  const queryClient = useQueryClient()
   const { data: remoteServers = [] } = useRemoteServers()
 
   // Only connected + provisioned servers can receive clones
@@ -125,7 +119,10 @@ export function ProjectContextMenu({
   }
 
   const handleRunWhereSelect = (serverId: string | null) => {
-    createBaseSession.mutate({ projectId: project.id, serverId: serverId ?? undefined })
+    createBaseSession.mutate({
+      projectId: project.id,
+      serverId: serverId ?? undefined,
+    })
   }
 
   const handleRemoveProject = () => {
@@ -144,133 +141,115 @@ export function ProjectContextMenu({
     openProjectSettings(project.id)
   }
 
-  const handleCloneToServer = (serverId: string, serverName: string) => {
-    const toastId = toast.loading(`Cloning to ${serverName}...`)
-    cloneProjectToServer(project.id, serverId)
-      .then(() => {
-        queryClient.invalidateQueries({ queryKey: projectsQueryKeys.list() })
-        toast.success(`Cloned to ${serverName}`, { id: toastId })
-      })
-      .catch((error: unknown) => {
-        toast.error(`Clone failed: ${error}`, { id: toastId })
-      })
-  }
-
   return (
     <>
-    <ContextMenu>
-      <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
-      <ContextMenuContent className="w-64">
-        <ContextMenuItem onClick={handleOpenSettings}>
-          <Settings className="mr-2 h-4 w-4" />
-          Project Settings
-        </ContextMenuItem>
-
-        {isNested && (
-          <ContextMenuItem onClick={handleMoveToRoot}>
-            <ArrowUpToLine className="mr-2 h-4 w-4" />
-            Move to Root
+      <ContextMenu>
+        <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
+        <ContextMenuContent className="w-64">
+          <ContextMenuItem onClick={handleOpenSettings}>
+            <Settings className="mr-2 h-4 w-4" />
+            Project Settings
           </ContextMenuItem>
-        )}
 
-        <ContextMenuSeparator />
+          {isNested && (
+            <ContextMenuItem onClick={handleMoveToRoot}>
+              <ArrowUpToLine className="mr-2 h-4 w-4" />
+              Move to Root
+            </ContextMenuItem>
+          )}
 
-        <ContextMenuItem onClick={handleNewBaseSession}>
-          <Home className="mr-2 h-4 w-4" />
-          {existingBaseSession ? 'Open Base Session' : 'New Base Session'}
-        </ContextMenuItem>
+          <ContextMenuSeparator />
 
-        <ContextMenuItem onClick={handleNewWorktree}>
-          <Plus className="mr-2 h-4 w-4" />
-          New Worktree
-        </ContextMenuItem>
-
-        <ContextMenuSeparator />
-
-        <ContextMenuItem onClick={handleOpenInEditor}>
-          <Code className="mr-2 h-4 w-4" />
-          Open in {getEditorLabel(preferences?.editor)}
-        </ContextMenuItem>
-
-        {isNativeApp() && (
-          <ContextMenuItem onClick={handleOpenInFinder}>
-            <FolderOpen className="mr-2 h-4 w-4" />
-            Open in {getFileManagerName()}
+          <ContextMenuItem onClick={handleNewBaseSession}>
+            <Home className="mr-2 h-4 w-4" />
+            {existingBaseSession ? 'Open Base Session' : 'New Base Session'}
           </ContextMenuItem>
-        )}
 
-        <ContextMenuItem onClick={handleOpenInTerminal}>
-          <Terminal className="mr-2 h-4 w-4" />
-          Open in {getTerminalLabel(preferences?.terminal)}
-        </ContextMenuItem>
+          <ContextMenuItem onClick={handleNewWorktree}>
+            <Plus className="mr-2 h-4 w-4" />
+            New Worktree
+          </ContextMenuItem>
 
-        <ContextMenuSeparator />
+          <ContextMenuSeparator />
 
-        <ContextMenuItem onClick={handleOpenWorktreesFolder}>
-          <Folder className="mr-2 h-4 w-4" />
-          Open Worktrees Folder
-        </ContextMenuItem>
+          <ContextMenuItem onClick={handleOpenInEditor}>
+            <Code className="mr-2 h-4 w-4" />
+            Open in {getEditorLabel(preferences?.editor)}
+          </ContextMenuItem>
 
-        <ContextMenuItem onClick={handleOpenOnGitHub}>
-          <ExternalLink className="mr-2 h-4 w-4" />
-          Open on GitHub
-        </ContextMenuItem>
+          {isNativeApp() && (
+            <ContextMenuItem onClick={handleOpenInFinder}>
+              <FolderOpen className="mr-2 h-4 w-4" />
+              Open in {getFileManagerName()}
+            </ContextMenuItem>
+          )}
 
-        {cloneableServers.length > 0 && (
-          <>
-            <ContextMenuSeparator />
-            <ContextMenuSub>
-              <ContextMenuSubTrigger>
+          <ContextMenuItem onClick={handleOpenInTerminal}>
+            <Terminal className="mr-2 h-4 w-4" />
+            Open in {getTerminalLabel(preferences?.terminal)}
+          </ContextMenuItem>
+
+          <ContextMenuSeparator />
+
+          <ContextMenuItem onClick={handleOpenWorktreesFolder}>
+            <Folder className="mr-2 h-4 w-4" />
+            Open Worktrees Folder
+          </ContextMenuItem>
+
+          <ContextMenuItem onClick={handleOpenOnGitHub}>
+            <ExternalLink className="mr-2 h-4 w-4" />
+            Open on GitHub
+          </ContextMenuItem>
+
+          {cloneableServers.length > 0 && (
+            <>
+              <ContextMenuSeparator />
+              <ContextMenuItem onClick={() => setCloneToRemoteOpen(true)}>
                 <Server className="mr-2 h-4 w-4" />
                 Clone to remote
-              </ContextMenuSubTrigger>
-              <ContextMenuSubContent className="w-48">
-                {cloneableServers.map(server => (
-                  <ContextMenuItem
-                    key={server.id}
-                    onClick={() => handleCloneToServer(server.id, server.name)}
-                  >
-                    <Server className="mr-2 h-3.5 w-3.5 text-muted-foreground" />
-                    {server.name}
-                  </ContextMenuItem>
-                ))}
-              </ContextMenuSubContent>
-            </ContextMenuSub>
-          </>
-        )}
-
-        <ContextMenuSeparator />
-
-        <ContextMenuItem
-          variant="destructive"
-          onClick={handleRemoveProject}
-          disabled={worktrees.length > 0}
-          className="whitespace-nowrap"
-        >
-          <Trash2 className="mr-2 h-4 w-4 shrink-0" />
-          Remove Project
-          {worktrees.length > 0 && (
-            <span className="ml-auto text-xs opacity-60 shrink-0">
-              ({worktrees.length} worktrees)
-            </span>
+              </ContextMenuItem>
+            </>
           )}
-        </ContextMenuItem>
-      </ContextMenuContent>
-    </ContextMenu>
-    <RunWhereModal
-      open={runWhereOpen}
-      onOpenChange={setRunWhereOpen}
-      onSelect={handleRunWhereSelect}
-      projectName={project.name}
-      clonedServerIds={(project.remote_clones ?? []).map(c => c.server_id)}
-    />
-    <RunWhereModal
-      open={newWorktreeWhereOpen}
-      onOpenChange={setNewWorktreeWhereOpen}
-      onSelect={serverId => setNewWorktreeModalOpen(true, serverId)}
-      projectName={project.name}
-      clonedServerIds={(project.remote_clones ?? []).map(c => c.server_id)}
-    />
+
+          <ContextMenuSeparator />
+
+          <ContextMenuItem
+            variant="destructive"
+            onClick={handleRemoveProject}
+            disabled={worktrees.length > 0}
+            className="whitespace-nowrap"
+          >
+            <Trash2 className="mr-2 h-4 w-4 shrink-0" />
+            Remove Project
+            {worktrees.length > 0 && (
+              <span className="ml-auto text-xs opacity-60 shrink-0">
+                ({worktrees.length} worktrees)
+              </span>
+            )}
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
+      <RunWhereModal
+        open={runWhereOpen}
+        onOpenChange={setRunWhereOpen}
+        onSelect={handleRunWhereSelect}
+        projectName={project.name}
+        clonedServerIds={(project.remote_clones ?? []).map(c => c.server_id)}
+      />
+      <RunWhereModal
+        open={newWorktreeWhereOpen}
+        onOpenChange={setNewWorktreeWhereOpen}
+        onSelect={serverId => setNewWorktreeModalOpen(true, serverId)}
+        projectName={project.name}
+        clonedServerIds={(project.remote_clones ?? []).map(c => c.server_id)}
+      />
+      <CloneToRemoteModal
+        open={cloneToRemoteOpen}
+        onOpenChange={setCloneToRemoteOpen}
+        projectId={project.id}
+        projectName={project.name}
+        clonedServerIds={(project.remote_clones ?? []).map(c => c.server_id)}
+      />
     </>
   )
 }

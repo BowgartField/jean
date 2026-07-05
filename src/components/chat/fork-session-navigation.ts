@@ -5,6 +5,7 @@ interface ForkedWorktree {
   path: Worktree['path']
   project_id: Worktree['project_id']
 }
+
 interface ForkedSession {
   id: string
 }

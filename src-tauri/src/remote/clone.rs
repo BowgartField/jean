@@ -1,10 +1,11 @@
+use std::path::Path;
 use tauri::AppHandle;
 
 use crate::platform::silent_command;
 use crate::projects::storage::{load_projects_data, save_projects_data};
 use crate::projects::types::RemoteClone;
 
-use super::ssh;
+use super::{ssh, types::RemoteServerConfig};
 
 fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
@@ -38,18 +39,34 @@ fn resolve_ssh_url_aliases(url: &str) -> ResolvedSshUrl {
     // Only handle SSH-style git URLs: git@<host>:<path>
     let rest = match url.strip_prefix("git@") {
         Some(rest) => rest,
-        None => return ResolvedSshUrl { url: url.to_string(), identity_file: None },
+        None => {
+            return ResolvedSshUrl {
+                url: url.to_string(),
+                identity_file: None,
+            }
+        }
     };
     let Some(colon_pos) = rest.find(':') else {
-        return ResolvedSshUrl { url: url.to_string(), identity_file: None };
+        return ResolvedSshUrl {
+            url: url.to_string(),
+            identity_file: None,
+        };
     };
     let host = &rest[..colon_pos];
     let path = &rest[colon_pos + 1..];
 
     // Ask ssh for the effective config (resolves Host → Hostname)
-    let output = match std::process::Command::new("ssh").args(["-G", host]).output() {
+    let output = match std::process::Command::new("ssh")
+        .args(["-G", host])
+        .output()
+    {
         Ok(o) if o.status.success() => o,
-        _ => return ResolvedSshUrl { url: url.to_string(), identity_file: None },
+        _ => {
+            return ResolvedSshUrl {
+                url: url.to_string(),
+                identity_file: None,
+            }
+        }
     };
 
     let config = String::from_utf8_lossy(&output.stdout);
@@ -86,7 +103,10 @@ fn resolve_ssh_url_aliases(url: &str) -> ResolvedSshUrl {
         url.to_string()
     };
 
-    ResolvedSshUrl { url: resolved_url, identity_file }
+    ResolvedSshUrl {
+        url: resolved_url,
+        identity_file,
+    }
 }
 
 /// Ensure an SSH identity file is loaded into the local ssh-agent so it can
@@ -148,11 +168,27 @@ fn get_git_remote_url(project_path: &str) -> Result<String, String> {
     Err("Project has no git remote 'origin' configured".to_string())
 }
 
+fn copy_env_file_to_remote(
+    app: &AppHandle,
+    project_path: &str,
+    server: &RemoteServerConfig,
+    remote_path: &str,
+) -> Result<(), String> {
+    let local_env_path = Path::new(project_path).join(".env");
+    if !local_env_path.is_file() {
+        return Ok(());
+    }
+
+    let remote_env_path = format!("{remote_path}/.env");
+    ssh::scp_to(app, server, &local_env_path, &remote_env_path)
+}
+
 pub async fn clone_project_to_remote(
     app: AppHandle,
     project_id: String,
     server_id: String,
     remote_path: Option<String>,
+    copy_env_file: Option<bool>,
 ) -> Result<RemoteClone, String> {
     // 1. Find project by id
     let data = load_projects_data(&app)?;
@@ -214,8 +250,9 @@ pub async fn clone_project_to_remote(
     );
 
     let app_for_ssh = app.clone();
+    let server_for_ssh = server.clone();
     let output = tokio::task::spawn_blocking(move || {
-        ssh::exec(&app_for_ssh, &server, &clone_command)
+        ssh::exec(&app_for_ssh, &server_for_ssh, &clone_command)
     })
     .await
     .map_err(|e| format!("SSH clone task failed: {e}"))??;
@@ -238,6 +275,14 @@ pub async fn clone_project_to_remote(
         .map(|p| p.trim().to_string())
         .filter(|p| !p.is_empty())
         .unwrap_or(resolved_remote_path);
+
+    if copy_env_file.unwrap_or(false) {
+        if let Err(err) =
+            copy_env_file_to_remote(&app, &project.path, &server, &absolute_remote_path)
+        {
+            log::warn!("Failed to copy .env to remote clone: {err}");
+        }
+    }
 
     // 8. Save RemoteClone to project
     let clone = RemoteClone {

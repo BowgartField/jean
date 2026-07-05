@@ -6,10 +6,7 @@ import {
   CloudUpload,
   MoreHorizontal,
   Plus,
-  Server,
 } from 'lucide-react'
-import { useQueryClient } from '@tanstack/react-query'
-import { toast } from 'sonner'
 import { convertFileSrc, convertProjectFileSrc } from '@/lib/transport'
 import { cn } from '@/lib/utils'
 import { dismissibleToast } from '@/lib/dismissible-toast'
@@ -20,20 +17,8 @@ import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { useRemotePicker } from '@/hooks/useRemotePicker'
-import {
-  cloneProjectToServer,
-  useWorktrees,
-  useAppDataDir,
-  projectsQueryKeys,
-} from '@/services/projects'
+import { useWorktrees, useAppDataDir } from '@/services/projects'
 import { useRemoteServers } from '@/services/remote-servers'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
 import {
   useFetchWorktreesStatus,
   useGitStatus,
@@ -53,6 +38,7 @@ import {
 import { WorktreeList } from './WorktreeList'
 import { ProjectContextMenu } from './ProjectContextMenu'
 import { RunWhereModal } from '@/components/remote/RunWhereModal'
+import { CloneToRemoteModal } from '@/components/remote/CloneToRemoteModal'
 
 interface ProjectTreeItemProps {
   project: Project
@@ -70,26 +56,13 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
   const { data: worktrees = [] } = useWorktrees(project.id)
   const { data: appDataDir = '' } = useAppDataDir()
   const { data: remoteServers = [] } = useRemoteServers()
-  const queryClient = useQueryClient()
+  const [cloneToRemoteOpen, setCloneToRemoteOpen] = useState(false)
 
   // Provisioned servers available for cloning
   const cloneableServers = remoteServers.filter(s => s.http_token)
   // Servers this project is already cloned onto
-  const clonedServerIds = new Set((project.remote_clones ?? []).map(c => c.server_id))
-
-  const handleCloneToServer = useCallback(
-    (serverId: string, serverName: string) => {
-      const toastId = toast.loading(`Cloning to ${serverName}...`)
-      cloneProjectToServer(project.id, serverId)
-        .then(() => {
-          queryClient.invalidateQueries({ queryKey: projectsQueryKeys.list() })
-          toast.success(`Cloned to ${serverName}`, { id: toastId })
-        })
-        .catch((err: unknown) => {
-          toast.error(`Clone failed: ${err}`, { id: toastId })
-        })
-    },
-    [project.id, queryClient]
+  const clonedServerIds = new Set(
+    (project.remote_clones ?? []).map(c => c.server_id)
   )
   const hasWorktrees = worktrees.length > 0
   const isExpanded = hasWorktrees && expandedProjectIds.has(project.id)
@@ -209,221 +182,192 @@ export function ProjectTreeItem({ project }: ProjectTreeItemProps) {
 
   return (
     <>
-    <ProjectContextMenu project={project}>
-      <div>
-        {/* Project Row */}
-        <div
-          className={cn(
-            'group relative flex cursor-pointer items-center gap-1.5 px-2 py-1.5 overflow-hidden transition-colors duration-150',
-            isSelected
-              ? 'bg-primary/10 text-foreground before:absolute before:left-0 before:top-0 before:h-full before:w-[3px] before:bg-primary'
-              : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
-          )}
-          onClick={handleClick}
-        >
-          {/* Avatar */}
-          {avatarUrl ? (
-            <img
-              src={avatarUrl}
-              alt={project.name}
-              className="size-4 shrink-0 rounded object-cover"
-              onError={() => setImgErrorKey(avatarKey)}
-            />
-          ) : (
-            <div className="flex size-4 shrink-0 items-center justify-center rounded bg-muted-foreground/20">
-              <span className="text-[10px] font-medium uppercase">
-                {project.name[0]}
-              </span>
-            </div>
-          )}
-
-          {/* Name + Chevron */}
-          <span className="flex flex-1 items-center gap-0.5 truncate text-sm">
-            <span className="truncate">{project.name}</span>
-            {hasWorktrees && (
-              <button
-                className={cn(
-                  'flex size-4 shrink-0 items-center justify-center rounded transition-opacity hover:bg-accent-foreground/10',
-                  isMobile
-                    ? 'opacity-70'
-                    : 'opacity-0 group-hover:opacity-50 hover:!opacity-100'
-                )}
-                onClick={handleChevronClick}
-              >
-                <ChevronDown
-                  className={cn(
-                    'size-3 transition-transform',
-                    isExpanded && 'rotate-180'
-                  )}
-                />
-              </button>
+      <ProjectContextMenu project={project}>
+        <div>
+          {/* Project Row */}
+          <div
+            className={cn(
+              'group relative flex cursor-pointer items-center gap-1.5 px-2 py-1.5 overflow-hidden transition-colors duration-150',
+              isSelected
+                ? 'bg-primary/10 text-foreground before:absolute before:left-0 before:top-0 before:h-full before:w-[3px] before:bg-primary'
+                : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
             )}
-          </span>
-
-          {/* Base branch pull/push indicators (when no base session) */}
-          {baseBranchBehindCount > 0 && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  onClick={handleBasePull}
-                  className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary transition-colors hover:bg-primary/20"
-                >
-                  <span className="flex items-center gap-0.5">
-                    <ArrowDown className="h-3 w-3" />
-                    {baseBranchBehindCount}
-                  </span>
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>{`Pull ${baseBranchBehindCount} commit${baseBranchBehindCount > 1 ? 's' : ''} on ${project.default_branch}`}</TooltipContent>
-            </Tooltip>
-          )}
-          {baseBranchAheadCount > 0 && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  onClick={handleBasePush}
-                  className="shrink-0 rounded bg-orange-500/10 px-1.5 py-0.5 text-[11px] font-medium text-orange-500 transition-colors hover:bg-orange-500/20"
-                >
-                  <span className="flex items-center gap-0.5">
-                    <ArrowUp className="h-3 w-3" />
-                    {baseBranchAheadCount}
-                  </span>
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>{`Push ${baseBranchAheadCount} commit${baseBranchAheadCount > 1 ? 's' : ''} on ${project.default_branch}`}</TooltipContent>
-            </Tooltip>
-          )}
-
-          {showStatusBadges && (
-            <div className="hidden items-center gap-1 sm:flex">
-              <NewIssuesBadge
-                projectPath={project.path}
-                projectId={project.id}
+            onClick={handleClick}
+          >
+            {/* Avatar */}
+            {avatarUrl ? (
+              <img
+                src={avatarUrl}
+                alt={project.name}
+                className="size-4 shrink-0 rounded object-cover"
+                onError={() => setImgErrorKey(avatarKey)}
               />
-              <OpenPRsBadge projectPath={project.path} projectId={project.id} />
-              <SecurityAlertsBadge
-                projectPath={project.path}
-                projectId={project.id}
-              />
-              <FailedRunsBadge projectPath={project.path} />
-            </div>
-          )}
+            ) : (
+              <div className="flex size-4 shrink-0 items-center justify-center rounded bg-muted-foreground/20">
+                <span className="text-[10px] font-medium uppercase">
+                  {project.name[0]}
+                </span>
+              </div>
+            )}
 
-          {/* Clone to remote server */}
-          {cloneableServers.length > 0 && (() => {
-            const singleServer = cloneableServers[0]
-            if (cloneableServers.length === 1 && singleServer && !clonedServerIds.has(singleServer.id)) {
-              return (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      onClick={e => {
-                        e.stopPropagation()
-                        handleCloneToServer(singleServer.id, singleServer.name)
-                      }}
-                      className="flex size-4 shrink-0 items-center justify-center rounded opacity-0 group-hover:opacity-50 hover:!opacity-100 hover:bg-accent-foreground/10"
-                    >
-                      <CloudUpload className="size-3.5" />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent>Clone to {singleServer.name}</TooltipContent>
-                </Tooltip>
-              )
-            }
-            return (
-              <DropdownMenu>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <DropdownMenuTrigger asChild>
+            {/* Name + Chevron */}
+            <span className="flex flex-1 items-center gap-0.5 truncate text-sm">
+              <span className="truncate">{project.name}</span>
+              {hasWorktrees && (
+                <button
+                  className={cn(
+                    'flex size-4 shrink-0 items-center justify-center rounded transition-opacity hover:bg-accent-foreground/10',
+                    isMobile
+                      ? 'opacity-70'
+                      : 'opacity-0 group-hover:opacity-50 hover:!opacity-100'
+                  )}
+                  onClick={handleChevronClick}
+                >
+                  <ChevronDown
+                    className={cn(
+                      'size-3 transition-transform',
+                      isExpanded && 'rotate-180'
+                    )}
+                  />
+                </button>
+              )}
+            </span>
+
+            {/* Base branch pull/push indicators (when no base session) */}
+            {baseBranchBehindCount > 0 && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={handleBasePull}
+                    className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary transition-colors hover:bg-primary/20"
+                  >
+                    <span className="flex items-center gap-0.5">
+                      <ArrowDown className="h-3 w-3" />
+                      {baseBranchBehindCount}
+                    </span>
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>{`Pull ${baseBranchBehindCount} commit${baseBranchBehindCount > 1 ? 's' : ''} on ${project.default_branch}`}</TooltipContent>
+              </Tooltip>
+            )}
+            {baseBranchAheadCount > 0 && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={handleBasePush}
+                    className="shrink-0 rounded bg-orange-500/10 px-1.5 py-0.5 text-[11px] font-medium text-orange-500 transition-colors hover:bg-orange-500/20"
+                  >
+                    <span className="flex items-center gap-0.5">
+                      <ArrowUp className="h-3 w-3" />
+                      {baseBranchAheadCount}
+                    </span>
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>{`Push ${baseBranchAheadCount} commit${baseBranchAheadCount > 1 ? 's' : ''} on ${project.default_branch}`}</TooltipContent>
+              </Tooltip>
+            )}
+
+            {showStatusBadges && (
+              <div className="hidden items-center gap-1 sm:flex">
+                <NewIssuesBadge
+                  projectPath={project.path}
+                  projectId={project.id}
+                />
+                <OpenPRsBadge
+                  projectPath={project.path}
+                  projectId={project.id}
+                />
+                <SecurityAlertsBadge
+                  projectPath={project.path}
+                  projectId={project.id}
+                />
+                <FailedRunsBadge projectPath={project.path} />
+              </div>
+            )}
+
+            {/* Clone to remote server */}
+            {cloneableServers.length > 0 &&
+              (() => {
+                return (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
                       <button
-                        onClick={e => e.stopPropagation()}
+                        onClick={e => {
+                          e.stopPropagation()
+                          setCloneToRemoteOpen(true)
+                        }}
                         className="flex size-4 shrink-0 items-center justify-center rounded opacity-0 group-hover:opacity-50 hover:!opacity-100 hover:bg-accent-foreground/10"
                       >
                         <CloudUpload className="size-3.5" />
                       </button>
-                    </DropdownMenuTrigger>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    {clonedServerIds.size > 0
-                      ? `Cloned to: ${cloneableServers.filter(s => clonedServerIds.has(s.id)).map(s => s.name).join(', ')}`
-                      : 'Clone to remote server'}
-                  </TooltipContent>
-                </Tooltip>
-                <DropdownMenuContent align="end" onClick={e => e.stopPropagation()}>
-                  {cloneableServers.map(server => (
-                    <DropdownMenuItem
-                      key={server.id}
-                      disabled={clonedServerIds.has(server.id)}
-                      onClick={() => handleCloneToServer(server.id, server.name)}
-                    >
-                      <Server className="mr-2 size-3.5" />
-                      {server.name}
-                      {clonedServerIds.has(server.id) && (
-                        <span className="ml-auto text-xs text-muted-foreground">cloned</span>
-                      )}
-                    </DropdownMenuItem>
-                  ))}
-                  {cloneableServers.every(s => clonedServerIds.has(s.id)) && (
-                    <>
-                      <DropdownMenuSeparator />
-                      <div className="px-2 py-1.5 text-xs text-muted-foreground">
-                        Already cloned to all servers
-                      </div>
-                    </>
-                  )}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )
-          })()}
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      {clonedServerIds.size > 0
+                        ? `Cloned to: ${cloneableServers
+                            .filter(s => clonedServerIds.has(s.id))
+                            .map(s => s.name)
+                            .join(', ')}`
+                        : 'Clone to remote server'}
+                    </TooltipContent>
+                  </Tooltip>
+                )
+              })()}
 
-          {/* Settings */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={e => {
-                  e.stopPropagation()
-                  openProjectSettings(project.id)
-                }}
-                className="flex size-4 shrink-0 items-center justify-center rounded opacity-50 hover:bg-accent-foreground/10 hover:opacity-100"
-              >
-                <MoreHorizontal className="size-3.5" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>Project settings</TooltipContent>
-          </Tooltip>
+            {/* Settings */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={e => {
+                    e.stopPropagation()
+                    openProjectSettings(project.id)
+                  }}
+                  className="flex size-4 shrink-0 items-center justify-center rounded opacity-50 hover:bg-accent-foreground/10 hover:opacity-100"
+                >
+                  <MoreHorizontal className="size-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Project settings</TooltipContent>
+            </Tooltip>
 
-          {/* Add Worktree */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={handleAddWorktree}
-                className="flex size-4 shrink-0 items-center justify-center rounded opacity-50 hover:bg-accent-foreground/10 hover:opacity-100"
-              >
-                <Plus className="size-3.5" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>New worktree</TooltipContent>
-          </Tooltip>
+            {/* Add Worktree */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={handleAddWorktree}
+                  className="flex size-4 shrink-0 items-center justify-center rounded opacity-50 hover:bg-accent-foreground/10 hover:opacity-100"
+                >
+                  <Plus className="size-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>New worktree</TooltipContent>
+            </Tooltip>
+          </div>
+
+          {/* Worktrees */}
+          {isExpanded && (
+            <WorktreeList
+              projectId={project.id}
+              projectPath={project.path}
+              worktrees={worktrees}
+              defaultBranch={project.default_branch}
+            />
+          )}
         </div>
-
-        {/* Worktrees */}
-        {isExpanded && (
-          <WorktreeList
-            projectId={project.id}
-            projectPath={project.path}
-            worktrees={worktrees}
-            defaultBranch={project.default_branch}
-          />
-        )}
-      </div>
-    </ProjectContextMenu>
-    <RunWhereModal
-      open={newWorktreeWhereOpen}
-      onOpenChange={setNewWorktreeWhereOpen}
-      onSelect={serverId => setNewWorktreeModalOpen(true, serverId)}
-      projectName={project.name}
-      clonedServerIds={(project.remote_clones ?? []).map(c => c.server_id)}
-    />
+      </ProjectContextMenu>
+      <RunWhereModal
+        open={newWorktreeWhereOpen}
+        onOpenChange={setNewWorktreeWhereOpen}
+        onSelect={serverId => setNewWorktreeModalOpen(true, serverId)}
+        projectName={project.name}
+        clonedServerIds={(project.remote_clones ?? []).map(c => c.server_id)}
+      />
+      <CloneToRemoteModal
+        open={cloneToRemoteOpen}
+        onOpenChange={setCloneToRemoteOpen}
+        projectId={project.id}
+        projectName={project.name}
+        clonedServerIds={(project.remote_clones ?? []).map(c => c.server_id)}
+      />
     </>
   )
 }

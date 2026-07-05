@@ -12,6 +12,7 @@ import type {
   RemoteJeanVersionInfo,
   RemoteServerConfig,
   RemoteServerInput,
+  RemoteServerStatus,
 } from '@/types/remote'
 import { preferencesQueryKeys } from './preferences'
 
@@ -32,6 +33,56 @@ export function useRemoteServers() {
     refetchInterval: 3000,
     refetchIntervalInBackground: false,
   })
+}
+
+function setRemoteServerStatus(
+  queryClient: ReturnType<typeof useQueryClient>,
+  serverId: string,
+  status: RemoteServerStatus
+) {
+  queryClient.setQueriesData<RemoteServerConfig[]>(
+    { queryKey: remoteServersQueryKeys.all },
+    servers =>
+      servers?.map(server =>
+        server.id === serverId ? { ...server, status } : server
+      )
+  )
+}
+
+async function connectAndRegister(
+  serverId: string,
+  queryClient: ReturnType<typeof useQueryClient>
+): Promise<RemoteConnection> {
+  const connection = await invoke<RemoteConnection>('connect_remote_server', {
+    serverId,
+  })
+  try {
+    await registerRemoteTransport(
+      connection.server_id,
+      connection.local_port,
+      connection.token
+    )
+  } catch (error) {
+    await invoke('disconnect_remote_server', { serverId }).catch(
+      () => undefined
+    )
+    throw error
+  }
+  queryClient.setQueriesData<RemoteServerConfig[]>(
+    { queryKey: remoteServersQueryKeys.all },
+    servers =>
+      servers?.map(server =>
+        server.id === serverId
+          ? {
+              ...server,
+              status: 'connected',
+              http_token: connection.token,
+            }
+          : server
+      )
+  )
+  await queryClient.invalidateQueries({ queryKey: ['projects'] })
+  return connection
 }
 
 export function useRemoteJeanVersions(enabled: boolean) {
@@ -69,8 +120,24 @@ function useRemoteServerMutation<TVariables, TResult>(
 }
 
 export function useAddRemoteServer() {
+  const queryClient = useQueryClient()
   return useRemoteServerMutation<RemoteServerInput, RemoteServerConfig>(
-    config => invoke('add_remote_server', { config }),
+    async config => {
+      const server = await invoke<RemoteServerConfig>('add_remote_server', {
+        config,
+      })
+      if (
+        server.http_token &&
+        (server.status === 'reachable' || server.status === 'connected')
+      ) {
+        try {
+          await connectAndRegister(server.id, queryClient)
+        } catch {
+          server.status = 'error'
+        }
+      }
+      return server
+    },
     true
   )
 }
@@ -94,9 +161,28 @@ export function useRemoveRemoteServer() {
 }
 
 export function useTestRemoteServer() {
-  return useRemoteServerMutation<string, RemoteConnectionTest>(serverId =>
-    invoke('test_remote_server', { serverId })
-  )
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (serverId: string) => {
+      const result = await invoke<RemoteConnectionTest>('test_remote_server', {
+        serverId,
+      })
+      if (!result.success) throw new Error(result.message)
+      return result
+    },
+    retry: false,
+    onMutate: serverId => {
+      setRemoteServerStatus(queryClient, serverId, 'connecting')
+    },
+    onError: (_error, serverId) => {
+      setRemoteServerStatus(queryClient, serverId, 'error')
+    },
+    onSettled: (_data, error) => {
+      if (!error) {
+        queryClient.invalidateQueries({ queryKey: remoteServersQueryKeys.all })
+      }
+    },
+  })
 }
 
 export function useProvisionRemoteServer() {
@@ -110,26 +196,20 @@ export function useProvisionRemoteServer() {
 
 export function useConnectRemoteServer() {
   const queryClient = useQueryClient()
-  return useRemoteServerMutation<string, RemoteConnection>(async serverId => {
-    const connection = await invoke<RemoteConnection>('connect_remote_server', {
-      serverId,
-    })
-    try {
-      await registerRemoteTransport(
-        connection.server_id,
-        connection.local_port,
-        connection.token
-      )
-    } catch (error) {
-      await invoke('disconnect_remote_server', { serverId }).catch(
-        () => undefined
-      )
-      throw error
-    }
-    await queryClient.invalidateQueries({
-      queryKey: ['projects', 'worktrees'],
-    })
-    return connection
+  return useMutation({
+    mutationFn: (serverId: string) => connectAndRegister(serverId, queryClient),
+    retry: false,
+    onMutate: serverId => {
+      setRemoteServerStatus(queryClient, serverId, 'connecting')
+    },
+    onError: (_error, serverId) => {
+      setRemoteServerStatus(queryClient, serverId, 'error')
+    },
+    onSettled: (_data, error) => {
+      if (!error) {
+        queryClient.invalidateQueries({ queryKey: remoteServersQueryKeys.all })
+      }
+    },
   })
 }
 

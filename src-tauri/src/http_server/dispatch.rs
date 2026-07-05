@@ -165,11 +165,25 @@ pub async fn dispatch_command(
             let result = crate::remote::get_remote_server_status(app.clone(), server_id).await?;
             to_value(result)
         }
+        "check_remote_server_health" => {
+            let server_id: String = field(&args, "serverId", "server_id")?;
+            let result = crate::remote::check_remote_server_health(app.clone(), server_id).await?;
+            emit_cache_invalidation(app, &["remote-servers"]);
+            to_value(result)
+        }
         "clone_project_to_remote" => {
             let project_id: String = from_field(&args, "projectId")?;
             let server_id: String = from_field(&args, "serverId")?;
             let remote_path: Option<String> = from_field_opt(&args, "remotePath")?;
-            let result = crate::remote::clone_project_to_remote(app.clone(), project_id, server_id, remote_path).await?;
+            let copy_env_file: Option<bool> = field_opt(&args, "copyEnvFile", "copy_env_file")?;
+            let result = crate::remote::clone_project_to_remote(
+                app.clone(),
+                project_id,
+                server_id,
+                remote_path,
+                copy_env_file,
+            )
+            .await?;
             to_value(result)
         }
         "get_local_tool_status" => {

@@ -101,6 +101,7 @@ interface UIState {
   workflowRunsModalBranch: string | null
   cliUpdateModalOpen: boolean
   cliUpdateModalType: CliUpdateModalType
+  cliUpdateModalBackendHandle: string | null
   cliLoginModalOpen: boolean
   cliLoginModalType: CliLoginModalType
   cliLoginModalCommand: string | null
@@ -192,7 +193,10 @@ interface UIState {
     projectPath?: string | null,
     branch?: string | null
   ) => void
-  openCliUpdateModal: (type: Exclude<CliUpdateModalType, null>) => void
+  openCliUpdateModal: (
+    type: Exclude<CliUpdateModalType, null>,
+    backendHandle?: string | null
+  ) => void
   closeCliUpdateModal: () => void
   openCliLoginModal: (
     type: Exclude<CliLoginModalType, null>,
@@ -290,6 +294,7 @@ export const useUIStore = create<UIState>()(
       workflowRunsModalBranch: null,
       cliUpdateModalOpen: false,
       cliUpdateModalType: null,
+      cliUpdateModalBackendHandle: null,
       cliLoginModalOpen: false,
       cliLoginModalType: null,
       cliLoginModalCommand: null,
@@ -514,7 +519,12 @@ export const useUIStore = create<UIState>()(
         set(
           {
             newWorktreeModalOpen: open,
-            ...(open ? { newWorktreeServerId: serverId ?? null } : { newWorktreeModalDefaultTab: null, newWorktreeServerId: null }),
+            ...(open
+              ? { newWorktreeServerId: serverId ?? null }
+              : {
+                  newWorktreeModalDefaultTab: null,
+                  newWorktreeServerId: null,
+                }),
           },
           undefined,
           'setNewWorktreeModalOpen'
@@ -564,27 +574,29 @@ export const useUIStore = create<UIState>()(
           'setWorkflowRunsModalOpen'
         ),
 
-      openCliUpdateModal: type =>
+      openCliUpdateModal: (type, backendHandle) =>
         set(
-          { cliUpdateModalOpen: true, cliUpdateModalType: type },
+          {
+            cliUpdateModalOpen: true,
+            cliUpdateModalType: type,
+            cliUpdateModalBackendHandle: backendHandle ?? null,
+          },
           undefined,
           'openCliUpdateModal'
         ),
 
       closeCliUpdateModal: () =>
         set(
-          { cliUpdateModalOpen: false, cliUpdateModalType: null },
+          {
+            cliUpdateModalOpen: false,
+            cliUpdateModalType: null,
+            cliUpdateModalBackendHandle: null,
+          },
           undefined,
           'closeCliUpdateModal'
         ),
 
-      openCliLoginModal: (
-        type,
-        command,
-        commandArgs,
-        action,
-        backendHandle
-      ) =>
+      openCliLoginModal: (type, command, commandArgs, action, backendHandle) =>
         set(
           {
             cliLoginModalOpen: true,

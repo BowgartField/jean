@@ -2,7 +2,12 @@ import { useEffect, useRef } from 'react'
 import { type QueryClient, useQueryClient } from '@tanstack/react-query'
 import { invoke, registerRemoteTransport } from '@/lib/transport'
 import type { RemoteConnection } from '@/types/remote'
-import { useRemoteServers } from '@/services/remote-servers'
+import {
+  remoteServersQueryKeys,
+  useRemoteServers,
+} from '@/services/remote-servers'
+
+const HEALTH_CHECK_INTERVAL_MS = 30_000
 
 async function connectServer(
   serverId: string,
@@ -45,6 +50,7 @@ export function useAutoConnectRemoteServers(): void {
   const hasConnectedRef = useRef(false)
   const connectingServerIdsRef = useRef(new Set<string>())
   const attemptedRecoveriesRef = useRef(new Set<string>())
+  const serverIds = servers?.map(server => server.id).join('|') ?? ''
 
   useEffect(() => {
     // Only run once, and only after servers have loaded
@@ -93,4 +99,22 @@ export function useAutoConnectRemoteServers(): void {
         })
     }
   }, [servers, queryClient])
+
+  useEffect(() => {
+    if (!serverIds) return
+    const ids = serverIds.split('|')
+    const checkHealth = async () => {
+      await Promise.allSettled(
+        ids.map(serverId => invoke('check_remote_server_health', { serverId }))
+      )
+      await queryClient.invalidateQueries({
+        queryKey: remoteServersQueryKeys.all,
+      })
+    }
+    const interval = window.setInterval(
+      () => void checkHealth(),
+      HEALTH_CHECK_INTERVAL_MS
+    )
+    return () => window.clearInterval(interval)
+  }, [queryClient, serverIds])
 }

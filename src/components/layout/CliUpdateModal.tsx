@@ -20,6 +20,8 @@ import { coderabbitCliQueryKeys } from '@/services/coderabbit-cli'
 import { commandcodeCliQueryKeys } from '@/services/commandcode-cli'
 import { grokCliQueryKeys } from '@/services/grok-cli'
 import { githubQueryKeys } from '@/services/github'
+import { remoteCliToolsQueryKeys } from '@/services/remote-cli-tools'
+import type { CliBackend } from '@/types/preferences'
 import {
   ClaudeCliReinstallModal,
   GhCliReinstallModal,
@@ -29,16 +31,23 @@ import {
   CodeRabbitCliReinstallModal,
   CommandCodeCliReinstallModal,
   GrokCliReinstallModal,
+  RemoteCliReinstallModal,
 } from '@/components/preferences/CliReinstallModal'
 
 export function CliUpdateModal() {
   const queryClient = useQueryClient()
   const cliUpdateModalOpen = useUIStore(state => state.cliUpdateModalOpen)
   const cliUpdateModalType = useUIStore(state => state.cliUpdateModalType)
+  const backendHandle = useUIStore(state => state.cliUpdateModalBackendHandle)
   const closeCliUpdateModal = useUIStore(state => state.closeCliUpdateModal)
 
   const handleOpenChange = (open: boolean) => {
     if (!open) {
+      if (backendHandle) {
+        queryClient.invalidateQueries({
+          queryKey: remoteCliToolsQueryKeys.all(backendHandle),
+        })
+      }
       // Invalidate caches so settings page refreshes after install/update
       if (cliUpdateModalType === 'claude') {
         queryClient.invalidateQueries({ queryKey: claudeCliQueryKeys.all })
@@ -64,6 +73,24 @@ export function CliUpdateModal() {
 
       closeCliUpdateModal()
     }
+  }
+
+  const remoteCliType =
+    cliUpdateModalType &&
+    cliUpdateModalType !== 'gh' &&
+    cliUpdateModalType !== 'coderabbit'
+      ? (cliUpdateModalType as Exclude<CliBackend, 'cursor'>)
+      : null
+
+  if (backendHandle && remoteCliType) {
+    return (
+      <RemoteCliReinstallModal
+        open={cliUpdateModalOpen}
+        onOpenChange={handleOpenChange}
+        cliType={remoteCliType}
+        backendHandle={backendHandle}
+      />
+    )
   }
 
   // Render both modals - each has lazy mounting (returns null when closed)

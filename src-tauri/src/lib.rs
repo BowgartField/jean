@@ -4579,6 +4579,7 @@ pub fn run() {
             remote::connect_remote_server,
             remote::disconnect_remote_server,
             remote::get_remote_server_status,
+            remote::check_remote_server_health,
             remote::clone_project_to_remote,
             remote::get_local_tool_status,
             remote::install_gh_on_remote,
