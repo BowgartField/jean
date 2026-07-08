@@ -17,7 +17,6 @@ import type {
   CodexMcpElicitationRequest,
   CodexDynamicToolCallRequest,
   ExecutionMode,
-  PinnedTable,
 } from '@/types/chat'
 
 // Simple debounce implementation with flush support
@@ -83,7 +82,6 @@ interface SessionState {
   enabledMcpServers: string[] | null
   selectedExecutionMode: ExecutionMode | null
   tableCheckedRows: Record<string, number[]>
-  pinnedTables: Record<string, PinnedTable>
 }
 
 /**
@@ -175,7 +173,6 @@ export function useSessionStatePersistence() {
         enabledMcpServers,
         executionModes,
         tableCheckedRows,
-        pinnedTables,
       } = useChatStore.getState()
 
       const ctx = deniedMessageContext[sessionId]
@@ -219,7 +216,6 @@ export function useSessionStatePersistence() {
             ([key, set]) => [key, Array.from(set).sort((a, b) => a - b)]
           )
         ),
-        pinnedTables: pinnedTables[sessionId] ?? {},
       }
     },
     []
@@ -269,7 +265,6 @@ export function useSessionStatePersistence() {
         enabledMcpServers: state.enabledMcpServers,
         selectedExecutionMode: state.selectedExecutionMode,
         tableCheckedRows: state.tableCheckedRows,
-        pinnedTables: state.pinnedTables,
       })
     }, 500)
 
@@ -561,13 +556,6 @@ export function useSessionStatePersistence() {
       }
     }
 
-    if (session.pinned_tables && Object.keys(session.pinned_tables).length > 0) {
-      updates.pinnedTables = {
-        ...currentState.pinnedTables,
-        [activeSessionId]: session.pinned_tables,
-      }
-    }
-
     // NOTE: Do NOT load queued_messages from session data into Zustand here.
     // Queue state is synced in real-time via the queue:updated Tauri event
     // (useMainWindowEventListeners). Loading from TanStack cache is redundant
@@ -629,7 +617,6 @@ export function useSessionStatePersistence() {
     let prevExecutionMode = useChatStore.getState().executionModes[sessionId]
     let prevTableCheckedRows =
       useChatStore.getState().tableCheckedRows[sessionId]
-    let prevPinnedTables = useChatStore.getState().pinnedTables[sessionId]
 
     const unsubscribe = useChatStore.subscribe(state => {
       if (isLoadingRef.current) return
@@ -657,7 +644,6 @@ export function useSessionStatePersistence() {
       const currentEnabledMcpServers = state.enabledMcpServers[sessionId]
       const currentExecutionMode = state.executionModes[sessionId]
       const currentTableCheckedRows = state.tableCheckedRows[sessionId]
-      const currentPinnedTables = state.pinnedTables[sessionId]
 
       const hasChanges =
         currentAnswered !== prevAnsweredQuestions ||
@@ -678,8 +664,7 @@ export function useSessionStatePersistence() {
         currentPendingPlanMessageId !== prevPendingPlanMessageId ||
         currentEnabledMcpServers !== prevEnabledMcpServers ||
         currentExecutionMode !== prevExecutionMode ||
-        currentTableCheckedRows !== prevTableCheckedRows ||
-        currentPinnedTables !== prevPinnedTables
+        currentTableCheckedRows !== prevTableCheckedRows
 
       if (hasChanges) {
         prevAnsweredQuestions = currentAnswered
@@ -701,7 +686,6 @@ export function useSessionStatePersistence() {
         prevEnabledMcpServers = currentEnabledMcpServers
         prevExecutionMode = currentExecutionMode
         prevTableCheckedRows = currentTableCheckedRows
-        prevPinnedTables = currentPinnedTables
 
         const currentState = getCurrentSessionState(sessionId)
         debouncedSaveRef.current?.(currentState)

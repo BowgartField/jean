@@ -728,7 +728,6 @@ async fn approve_plan_and_start_yolo(
         None,
         Some(Some("yolo".to_string())),
         None,
-        None,
     )
     .await?;
     let _ = crate::chat::broadcast_session_setting(

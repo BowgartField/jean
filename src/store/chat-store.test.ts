@@ -34,7 +34,6 @@ describe('ChatStore', () => {
       reviewSidebarVisible: false,
       fixedReviewFindings: {},
       tableCheckedRows: {},
-      pinnedTables: {},
       worktreePaths: {},
       sendingSessionIds: {},
       sendStartedAt: {},
@@ -73,31 +72,6 @@ describe('ChatStore', () => {
       sessionLabels: {},
       savingContext: {},
       skippedQuestionSessions: {},
-    })
-  })
-
-  describe('pinned tables', () => {
-    it('pins and unpins tables per session without touching other sessions', () => {
-      const { pinTable, unpinTable } = useChatStore.getState()
-
-      pinTable('session-1', {
-        key: 'message-1:10',
-        title: 'Priority / Issue',
-        markdown: '| Priority | Issue |\n| --- | --- |\n| P0 | Broken |',
-      })
-      pinTable('session-2', {
-        key: 'message-2:20',
-        title: 'Name / Count',
-        markdown: '| Name | Count |\n| --- | --- |\n| Apples | 3 |',
-      })
-
-      unpinTable('session-1', 'message-1:10')
-
-      const state = useChatStore.getState()
-      expect(state.pinnedTables['session-1']).toBeUndefined()
-      expect(Object.keys(state.pinnedTables['session-2'] ?? {})).toEqual([
-        'message-2:20',
-      ])
     })
   })
 

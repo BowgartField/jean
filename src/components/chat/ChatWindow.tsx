@@ -118,7 +118,6 @@ import { ChatToolbar } from './ChatToolbar'
 import { ReviewResultsPanel } from './ReviewResultsPanel'
 import { ReviewMethodModal } from './ReviewMethodModal'
 import { QueuedPromptsPanel } from './QueuedPromptsPanel'
-import { PinnedTablesPanel } from './PinnedTablesPanel'
 import { useQueuedPromptActions } from './hooks/useQueuedPromptActions'
 import { FloatingButtons } from './FloatingButtons'
 import { PlanDialog } from './PlanDialog'
@@ -162,12 +161,7 @@ import { useClaudeCliStatus } from '@/services/claude-cli'
 import { useAvailablePiModels } from '@/services/pi-cli'
 import { usePrStatus, usePrStatusEvents } from '@/services/pr-status'
 import type { PrDisplayStatus, CheckStatus } from '@/types/pr-status'
-import type {
-  PinnedTable,
-  QueuedMessage,
-  Session,
-  WorktreeSessions,
-} from '@/types/chat'
+import type { QueuedMessage, Session, WorktreeSessions } from '@/types/chat'
 import type { DiffRequest } from '@/types/git-diff'
 import {
   getEffectiveSessionWaiting,
@@ -235,7 +229,6 @@ const EMPTY_PENDING_TEXT_FILES: PendingTextFile[] = []
 const EMPTY_PENDING_FILES: PendingFile[] = []
 const EMPTY_PENDING_SKILLS: PendingSkill[] = []
 const EMPTY_QUEUED_MESSAGES: QueuedMessage[] = []
-const EMPTY_PINNED_TABLES: Record<string, PinnedTable> = {}
 const EMPTY_PERMISSION_DENIALS: PermissionDenial[] = []
 const EMPTY_CODEX_PERMISSION_REQUESTS: CodexPermissionRequest[] = []
 const EMPTY_CODEX_COMMAND_APPROVAL_REQUESTS: CodexCommandApprovalRequest[] = []
@@ -303,11 +296,6 @@ export function ChatWindow({
   // Session label for top-right badge
   const sessionLabel = useChatStore(state =>
     activeSessionId ? (state.sessionLabels[activeSessionId] ?? null) : null
-  )
-  const pinnedTables = useChatStore(state =>
-    activeSessionId
-      ? (state.pinnedTables[activeSessionId] ?? EMPTY_PINNED_TABLES)
-      : EMPTY_PINNED_TABLES
   )
 
   // Function selectors - these return stable function references
@@ -3147,13 +3135,6 @@ export function ChatWindow({
                         onScrollToFindings={scrollToFindings}
                         onScrollToBottom={scrollToBottom}
                       />
-                      {activeSessionId && (
-                        <PinnedTablesPanel
-                          sessionId={activeSessionId}
-                          tables={pinnedTables}
-                          className="absolute right-3 top-14 z-20 w-44 sm:w-56"
-                        />
-                      )}
                     </div>
 
                     {/* Error banner - shows when request fails */}

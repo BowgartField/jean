@@ -24,7 +24,6 @@ import {
   type ExecutionMode,
   type LabelData,
   type ScheduledWakeup,
-  type PinnedTable,
   EXECUTION_MODE_CYCLE,
   isPlanToolCall,
 } from '@/types/chat'
@@ -98,9 +97,6 @@ interface ChatUIState {
   // Per-table checklist state: sessionId → (tableKey → Set of checked row indices)
   // Presence of tableKey = checklist mode enabled for that table
   tableCheckedRows: Record<string, Record<string, Set<number>>>
-
-  // Tables pinned from rendered markdown: sessionId → (tableKey → table)
-  pinnedTables: Record<string, Record<string, PinnedTable>>
 
   // Mapping of worktree IDs to paths (for looking up paths by ID)
   worktreePaths: Record<string, string>
@@ -325,12 +321,6 @@ interface ChatUIState {
     tableKey: string,
     rowIndex: number
   ) => void
-  pinTable: (
-    sessionId: string,
-    table: Omit<PinnedTable, 'pinned_at'> & { pinned_at?: number }
-  ) => void
-  unpinTable: (sessionId: string, tableKey: string) => void
-
   // Actions - ScheduleWakeup indicator state (keyed by tool_call_id)
   setScheduledWakeup: (toolCallId: string, wakeup: ScheduledWakeupState) => void
   markScheduledWakeupStatus: (
@@ -715,7 +705,6 @@ export const useChatStore = create<ChatUIState>()(
       reviewSidebarVisible: false,
       fixedReviewFindings: {},
       tableCheckedRows: {},
-      pinnedTables: {},
       worktreePaths: {},
       sendingSessionIds: {},
       sendStartedAt: {},
@@ -951,58 +940,6 @@ export const useChatStore = create<ChatUIState>()(
           },
           undefined,
           'toggleTableRowChecked'
-        ),
-
-      pinTable: (sessionId, table) =>
-        set(
-          state => {
-            const sessionTables = state.pinnedTables[sessionId] ?? {}
-            const nextTable = {
-              ...table,
-              pinned_at: table.pinned_at ?? Date.now(),
-            }
-            const existing = sessionTables[table.key]
-            if (
-              existing &&
-              existing.title === nextTable.title &&
-              existing.markdown === nextTable.markdown
-            ) {
-              return state
-            }
-            return {
-              pinnedTables: {
-                ...state.pinnedTables,
-                [sessionId]: {
-                  ...sessionTables,
-                  [table.key]: nextTable,
-                },
-              },
-            }
-          },
-          undefined,
-          'pinTable'
-        ),
-
-      unpinTable: (sessionId, tableKey) =>
-        set(
-          state => {
-            const sessionTables = state.pinnedTables[sessionId]
-            if (!sessionTables || !(tableKey in sessionTables)) return state
-            const { [tableKey]: _removed, ...restTables } = sessionTables
-            if (Object.keys(restTables).length === 0) {
-              const { [sessionId]: _session, ...restSessions } =
-                state.pinnedTables
-              return { pinnedTables: restSessions }
-            }
-            return {
-              pinnedTables: {
-                ...state.pinnedTables,
-                [sessionId]: restTables,
-              },
-            }
-          },
-          undefined,
-          'unpinTable'
         ),
 
       // ScheduleWakeup indicator state
@@ -3248,8 +3185,6 @@ export const useChatStore = create<ChatUIState>()(
               state.streamingReplayContentBlocks
             const { [sessionId]: _checkedRows, ...restTableCheckedRows } =
               state.tableCheckedRows
-            const { [sessionId]: _pinnedTables, ...restPinnedTables } =
-              state.pinnedTables
 
             return {
               approvedTools: restApproved,
@@ -3272,7 +3207,6 @@ export const useChatStore = create<ChatUIState>()(
               completedDurations: restDurations,
               streamingReplayContentBlocks: restReplayContentBlocks,
               tableCheckedRows: restTableCheckedRows,
-              pinnedTables: restPinnedTables,
             }
           },
           undefined,

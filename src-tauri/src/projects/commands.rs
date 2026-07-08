@@ -9295,7 +9295,6 @@ async fn update_review_session_state(
         None,
         None,
         None,
-        None,
     )
     .await
 }

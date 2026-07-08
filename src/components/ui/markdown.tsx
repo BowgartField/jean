@@ -17,7 +17,7 @@ import ReactMarkdown from 'react-markdown'
 import rehypeRaw from 'rehype-raw'
 import remarkGfm from 'remark-gfm'
 import remend from 'remend'
-import { Copy, Check, Table, ListChecks, Pin } from 'lucide-react'
+import { Copy, Check, Table, ListChecks } from 'lucide-react'
 import { toast } from 'sonner'
 import { copyToClipboard } from '@/lib/clipboard'
 import {
@@ -139,12 +139,6 @@ function tableToMarkdown(data: string[][]): string {
   return [headerLine, separator, ...bodyLines].join('\n')
 }
 
-function tableTitle(data: string[][]): string {
-  const headers = data[0]?.filter(Boolean) ?? []
-  if (headers.length === 0) return 'Table'
-  return headers.slice(0, 2).join(' / ')
-}
-
 function markdownImageSrc(src: string | undefined): string | undefined {
   if (!src) return src
   if (/^(https?:|data:|blob:|asset:|\/api\/|#)/i.test(src)) return src
@@ -242,12 +236,8 @@ function TableBlock({ children, tableOffset }: TableBlockProps) {
       ? (state.tableCheckedRows[sessionId]?.[tableKey] ?? null)
       : null
   )
-  const pinnedTable = useChatStore(state =>
-    sessionId && tableKey ? state.pinnedTables[sessionId]?.[tableKey] : null
-  )
   const checklistEnabled = checkedRows !== null
   const canUseChecklist = Boolean(sessionId && tableKey)
-  const canPinTable = Boolean(sessionId && tableKey)
 
   const handleCopy = useCallback((format: 'markdown' | 'tsv') => {
     if (!tableRef.current) return
@@ -270,23 +260,6 @@ function TableBlock({ children, tableOffset }: TableBlockProps) {
     } else {
       store.enableTableChecklist(sessionId, tableKey)
     }
-  }, [sessionId, tableKey])
-
-  const handleTogglePin = useCallback(() => {
-    if (!sessionId || !tableKey || !tableRef.current) return
-    const store = useChatStore.getState()
-    if (store.pinnedTables[sessionId]?.[tableKey]) {
-      store.unpinTable(sessionId, tableKey)
-      toast.success('Table unpinned')
-      return
-    }
-    const data = extractTableData(tableRef.current)
-    store.pinTable(sessionId, {
-      key: tableKey,
-      title: tableTitle(data),
-      markdown: tableToMarkdown(data),
-    })
-    toast.success('Table pinned')
   }, [sessionId, tableKey])
 
   const handleToggleRow = useCallback(
@@ -325,23 +298,6 @@ function TableBlock({ children, tableOffset }: TableBlockProps) {
             </TooltipTrigger>
             <TooltipContent>
               {checklistEnabled ? 'Turn off checklist' : 'Toggle checklist'}
-            </TooltipContent>
-          </Tooltip>
-        )}
-        {canPinTable && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={handleTogglePin}
-                className={pinnedTable ? activeBtnClass : btnClass}
-                aria-label={pinnedTable ? 'Unpin table' : 'Pin table'}
-                aria-pressed={Boolean(pinnedTable)}
-              >
-                <Pin className="size-4" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>
-              {pinnedTable ? 'Unpin table' : 'Pin table'}
             </TooltipContent>
           </Tooltip>
         )}

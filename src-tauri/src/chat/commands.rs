@@ -1403,7 +1403,6 @@ pub async fn update_session_state(
     enabled_mcp_servers: Option<Option<Vec<String>>>,
     selected_execution_mode: Option<Option<String>>,
     table_checked_rows: Option<std::collections::HashMap<String, Vec<u32>>>,
-    pinned_tables: Option<std::collections::HashMap<String, super::types::PinnedTable>>,
 ) -> Result<(), String> {
     log::trace!("Updating session state for: {session_id}");
 
@@ -1474,9 +1473,6 @@ pub async fn update_session_state(
             }
             if let Some(v) = table_checked_rows {
                 session.table_checked_rows = v;
-            }
-            if let Some(v) = pinned_tables {
-                session.pinned_tables = v;
             }
             Ok(())
         } else {
