@@ -66,7 +66,11 @@ import { useLoadedLinearIssueContexts } from '@/services/linear'
 import { useChatStore, DEFAULT_THINKING_LEVEL } from '@/store/chat-store'
 import { usePreferences, usePatchPreferences } from '@/services/preferences'
 import { getLabelTextColor } from '@/lib/label-colors'
-import { PREDEFINED_CLI_PROFILES, type CliBackend } from '@/types/preferences'
+import {
+  PREDEFINED_CLI_PROFILES,
+  resolveMagicPromptBackend,
+  type CliBackend,
+} from '@/types/preferences'
 import type {
   ChatMessage,
   ToolCall,
@@ -107,12 +111,14 @@ import { SkillBadge } from './SkillBadge'
 import { FileContentModal } from './FileContentModal'
 import { FilePreview } from './FilePreview'
 import { ContextPreview } from './ContextPreview'
+import { getLinkedPrContextPreviewExclusion } from './context-preview-utils'
 import { ChatInput } from './ChatInput'
 import { SessionDebugPanel } from './SessionDebugPanel'
 import { ChatToolbar } from './ChatToolbar'
 import { ReviewResultsPanel } from './ReviewResultsPanel'
 import { ReviewMethodModal } from './ReviewMethodModal'
 import { QueuedPromptsPanel } from './QueuedPromptsPanel'
+import { PinnedTablesPanel } from './PinnedTablesPanel'
 import { useQueuedPromptActions } from './hooks/useQueuedPromptActions'
 import { FloatingButtons } from './FloatingButtons'
 import { PlanDialog } from './PlanDialog'
@@ -156,7 +162,12 @@ import { useClaudeCliStatus } from '@/services/claude-cli'
 import { useAvailablePiModels } from '@/services/pi-cli'
 import { usePrStatus, usePrStatusEvents } from '@/services/pr-status'
 import type { PrDisplayStatus, CheckStatus } from '@/types/pr-status'
-import type { QueuedMessage, Session, WorktreeSessions } from '@/types/chat'
+import type {
+  PinnedTable,
+  QueuedMessage,
+  Session,
+  WorktreeSessions,
+} from '@/types/chat'
 import type { DiffRequest } from '@/types/git-diff'
 import {
   getEffectiveSessionWaiting,
@@ -224,6 +235,7 @@ const EMPTY_PENDING_TEXT_FILES: PendingTextFile[] = []
 const EMPTY_PENDING_FILES: PendingFile[] = []
 const EMPTY_PENDING_SKILLS: PendingSkill[] = []
 const EMPTY_QUEUED_MESSAGES: QueuedMessage[] = []
+const EMPTY_PINNED_TABLES: Record<string, PinnedTable> = {}
 const EMPTY_PERMISSION_DENIALS: PermissionDenial[] = []
 const EMPTY_CODEX_PERMISSION_REQUESTS: CodexPermissionRequest[] = []
 const EMPTY_CODEX_COMMAND_APPROVAL_REQUESTS: CodexCommandApprovalRequest[] = []
@@ -291,6 +303,11 @@ export function ChatWindow({
   // Session label for top-right badge
   const sessionLabel = useChatStore(state =>
     activeSessionId ? (state.sessionLabels[activeSessionId] ?? null) : null
+  )
+  const pinnedTables = useChatStore(state =>
+    activeSessionId
+      ? (state.pinnedTables[activeSessionId] ?? EMPTY_PINNED_TABLES)
+      : EMPTY_PINNED_TABLES
   )
 
   // Function selectors - these return stable function references
@@ -1861,20 +1878,24 @@ export function ChatWindow({
       const store = useChatStore.getState()
       store.setSessionReviewing(activeSessionId, false)
 
+      const backend = resolveMagicPromptBackend(
+        preferences?.magic_prompt_backends,
+        'code_review_backend',
+        preferences?.default_backend
+      )
+
       // Create new session
       let newSession: Session
       try {
         newSession = await createSession.mutateAsync({
           worktreeId: activeWorktreeId,
           worktreePath: activeWorktreePath,
+          backend: backend ?? undefined,
         })
       } catch (err) {
         toast.error(`Failed to create session: ${err}`)
         return
       }
-
-      // Switch to new session
-      store.setActiveSession(activeWorktreeId, newSession.id)
 
       const model =
         preferences?.magic_prompt_models?.code_review_model ??
@@ -1884,6 +1905,9 @@ export function ChatWindow({
       store.setError(newSession.id, null)
       store.addSendingSession(newSession.id)
       store.setSelectedModel(newSession.id, model)
+      if (backend) {
+        store.setSelectedBackend(newSession.id, backend)
+      }
       store.setExecutingMode(newSession.id, executionMode)
 
       sendMessage.mutate({
@@ -1892,6 +1916,7 @@ export function ChatWindow({
         worktreePath: activeWorktreePath,
         message,
         model,
+        backend: backend ?? undefined,
         executionMode,
         thinkingLevel: selectedThinkingLevelRef.current,
       })
@@ -3122,6 +3147,13 @@ export function ChatWindow({
                         onScrollToFindings={scrollToFindings}
                         onScrollToBottom={scrollToBottom}
                       />
+                      {activeSessionId && (
+                        <PinnedTablesPanel
+                          sessionId={activeSessionId}
+                          tables={pinnedTables}
+                          className="absolute right-3 top-14 z-20 w-44 sm:w-56"
+                        />
+                      )}
                     </div>
 
                     {/* Error banner - shows when request fails */}
@@ -3179,14 +3211,9 @@ export function ChatWindow({
                               excludeIssueNumber={
                                 worktree?.issue_number ?? null
                               }
-                              excludePrNumber={
-                                worktree?.issue_number ||
-                                worktree?.security_alert_number ||
-                                worktree?.advisory_ghsa_id ||
-                                worktree?.linear_issue_identifier
-                                  ? null
-                                  : (worktree?.pr_number ?? null)
-                              }
+                              excludePrNumber={getLinkedPrContextPreviewExclusion(
+                                worktree
+                              )}
                               excludeSecurityAlertNumber={
                                 worktree?.security_alert_number ?? null
                               }

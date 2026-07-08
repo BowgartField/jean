@@ -119,11 +119,32 @@ describe('model option helpers', () => {
     expect(normalizeClaudeModel('claude-sonnet-4-6')).toBe('claude-sonnet-4-6')
   })
 
+  it('offers GPT 5.6 preview variants in Codex selectors', () => {
+    const values = codexDefaultModelOptions.map(option => option.value)
+    expect(values.slice(0, 4)).toEqual([
+      'gpt-5.6',
+      'gpt-5-6-sol',
+      'gpt-5-6-terra',
+      'gpt-5-6-luna',
+    ])
+    expect(normalizeCodexModel('gpt-5-6-sol')).toBe('gpt-5-6-sol')
+    expect(normalizeCodexModel('gpt-5-6-terra')).toBe('gpt-5-6-terra')
+    expect(normalizeCodexModel('gpt-5-6-luna')).toBe('gpt-5-6-luna')
+  })
+
   it('offers Codex fast modes for default selectors', () => {
     const values = codexDefaultModelOptions.map(option => option.value)
+    expect(values).toContain('gpt-5.6-fast')
+    expect(values).toContain('gpt-5-6-sol-fast')
+    expect(values).toContain('gpt-5-6-terra-fast')
+    expect(values).toContain('gpt-5-6-luna-fast')
     expect(values).toContain('gpt-5.5-fast')
     expect(values).toContain('gpt-5.4-fast')
     expect(values).toContain('gpt-5.4-mini-fast')
+    expect(normalizeCodexModel('gpt-5.6-fast')).toBe('gpt-5.6-fast')
+    expect(normalizeCodexModel('gpt-5-6-sol-fast')).toBe(
+      'gpt-5-6-sol-fast'
+    )
     expect(normalizeCodexModel('gpt-5.5-fast')).toBe('gpt-5.5-fast')
   })
 

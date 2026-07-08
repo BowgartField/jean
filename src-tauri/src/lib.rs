@@ -4579,6 +4579,7 @@ pub fn run() {
             projects::open_worktree_in_editor,
             projects::open_pull_request,
             projects::create_pr_with_ai_content,
+            projects::cancel_create_pr_with_ai_content,
             projects::merge_github_pr,
             projects::create_commit_with_ai,
             projects::revert_last_local_commit,

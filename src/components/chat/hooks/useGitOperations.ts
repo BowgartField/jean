@@ -630,7 +630,20 @@ export function useGitOperations({
     const { setWorktreeLoading, clearWorktreeLoading } = useChatStore.getState()
     setWorktreeLoading(activeWorktreeId, 'pr')
     const branch = worktree?.branch ?? ''
-    const toastId = toast.loading(`Creating PR for ${branch}...`)
+    let cancellationRequested = false
+    let toastId: string | number
+    toastId = toast.loading(`Creating PR for ${branch}...`, {
+      cancel: {
+        label: 'Cancel',
+        onClick: async () => {
+          cancellationRequested = true
+          toast.info('Cancelling PR creation...', { id: toastId })
+          await invoke<boolean>('cancel_create_pr_with_ai_content', {
+            worktreePath: activeWorktreePath,
+          })
+        },
+      },
+    })
 
     try {
       const result = await invoke<CreatePrResponse>(
@@ -676,7 +689,12 @@ export function useGitOperations({
         }
       )
     } catch (error) {
-      toast.error(`Failed to create PR: ${error}`, { id: toastId })
+      const message = String(error)
+      if (cancellationRequested || message.includes('PR creation cancelled')) {
+        toast.info('PR creation cancelled', { id: toastId })
+      } else {
+        toast.error(`Failed to create PR: ${error}`, { id: toastId })
+      }
     } finally {
       clearWorktreeLoading(activeWorktreeId)
     }
@@ -800,6 +818,11 @@ export function useGitOperations({
             worktreeId: activeWorktreeId,
             worktreePath: activeWorktreePath,
             source,
+            backend: resolveMagicPromptBackend(
+              preferences?.magic_prompt_backends,
+              'code_review_backend',
+              preferences?.default_backend
+            ),
             customPrompt: preferences?.magic_prompts?.code_review,
             model: preferences?.magic_prompt_models?.code_review_model,
             customProfileName: resolveMagicPromptProvider(
@@ -929,6 +952,8 @@ export function useGitOperations({
       queryClient,
       preferences?.magic_prompts?.code_review,
       preferences?.magic_prompt_models?.code_review_model,
+      preferences?.magic_prompt_backends,
+      preferences?.default_backend,
       preferences?.magic_prompt_providers,
       preferences?.default_provider,
       preferences?.magic_prompt_efforts?.code_review_effort,

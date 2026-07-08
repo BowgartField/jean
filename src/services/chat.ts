@@ -29,6 +29,7 @@ import type {
   EffortLevel,
   LabelData,
   QueuedMessage,
+  PinnedTable,
 } from '@/types/chat'
 
 import { isTauri, projectsQueryKeys } from '@/services/projects'
@@ -915,6 +916,7 @@ export function useUpdateSessionState() {
       enabledMcpServers,
       selectedExecutionMode,
       tableCheckedRows,
+      pinnedTables,
     }: {
       worktreeId: string
       worktreePath: string
@@ -982,6 +984,7 @@ export function useUpdateSessionState() {
       enabledMcpServers?: string[] | null
       selectedExecutionMode?: ExecutionMode | null
       tableCheckedRows?: Record<string, number[]>
+      pinnedTables?: Record<string, PinnedTable>
     }): Promise<void> => {
       if (!isTauri()) {
         throw new Error('Not in Tauri context')
@@ -1009,6 +1012,7 @@ export function useUpdateSessionState() {
         enabledMcpServers,
         selectedExecutionMode,
         tableCheckedRows,
+        pinnedTables,
       })
       logger.debug('Session state updated')
     },

@@ -186,6 +186,13 @@ export interface DeniedMessageContext {
   thinking_level: string
 }
 
+export interface PinnedTable {
+  key: string
+  title: string
+  markdown: string
+  pinned_at: number
+}
+
 /**
  * A chat session within a worktree (supports multiple sessions per worktree)
  */
@@ -283,6 +290,8 @@ export interface Session {
   enabled_mcp_servers?: string[]
   /** Per-table checklist state: tableKey -> checked row indices */
   table_checked_rows?: Record<string, number[]>
+  /** Tables pinned from markdown messages for quick modal access */
+  pinned_tables?: Record<string, PinnedTable>
   /** Unix timestamp when session was last opened/viewed by the user */
   last_opened_at?: number
   /** Primary surface for this session. Terminal sessions render as full-screen CLI sessions. */

@@ -15,7 +15,10 @@ import {
 } from '@/lib/session-debug'
 import type { CommandContext } from '@/lib/commands/types'
 import type { AppPreferences, ClaudeModel } from '@/types/preferences'
-import { resolveMagicPromptProvider } from '@/types/preferences'
+import {
+  resolveMagicPromptBackend,
+  resolveMagicPromptProvider,
+} from '@/types/preferences'
 import type {
   ThinkingLevel,
   ExecutionMode,
@@ -578,6 +581,11 @@ export function useCommandContext(
       const result = await invoke<ReviewResponse>('run_review_with_ai', {
         worktreePath: activeWorktreePath,
         customPrompt: preferences?.magic_prompts?.code_review,
+        backend: resolveMagicPromptBackend(
+          preferences?.magic_prompt_backends,
+          'code_review_backend',
+          preferences?.default_backend
+        ),
         model: preferences?.magic_prompt_models?.code_review_model,
         customProfileName: resolveMagicPromptProvider(
           preferences?.magic_prompt_providers,

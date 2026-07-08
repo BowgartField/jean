@@ -447,6 +447,11 @@ pub async fn dispatch_command(
             .await?;
             to_value(result)
         }
+        "cancel_create_pr_with_ai_content" => {
+            let worktree_path: String = field(&args, "worktreePath", "worktree_path")?;
+            let result = crate::projects::cancel_create_pr_with_ai_content(worktree_path).await?;
+            to_value(result)
+        }
         "merge_github_pr" => {
             let worktree_path: String = field(&args, "worktreePath", "worktree_path")?;
             let result = crate::projects::merge_github_pr(app.clone(), worktree_path).await?;
@@ -524,6 +529,7 @@ pub async fn dispatch_command(
             let review_run_id: Option<String> = field_opt(&args, "reviewRunId", "review_run_id")?;
             let reasoning_effort: Option<String> =
                 field_opt(&args, "reasoningEffort", "reasoning_effort")?;
+            let backend: Option<String> = from_field_opt(&args, "backend")?;
             let result = crate::projects::run_review_with_ai(
                 app.clone(),
                 worktree_path,
@@ -532,6 +538,7 @@ pub async fn dispatch_command(
                 custom_profile_name,
                 review_run_id,
                 reasoning_effort,
+                backend,
             )
             .await?;
             to_value(result)
@@ -540,6 +547,7 @@ pub async fn dispatch_command(
             let worktree_id: String = field(&args, "worktreeId", "worktree_id")?;
             let worktree_path: String = field(&args, "worktreePath", "worktree_path")?;
             let source: String = from_field(&args, "source")?;
+            let backend: Option<String> = from_field_opt(&args, "backend")?;
             let magic_prompt: Option<String> = field_opt(&args, "customPrompt", "custom_prompt")?;
             let model: Option<String> = from_field_opt(&args, "model")?;
             let custom_profile_name: Option<String> =
@@ -553,6 +561,7 @@ pub async fn dispatch_command(
                 worktree_id,
                 worktree_path,
                 source,
+                backend,
                 magic_prompt,
                 model,
                 custom_profile_name,
@@ -2021,6 +2030,9 @@ pub async fn dispatch_command(
                 field_opt(&args, "selectedExecutionMode", "selected_execution_mode")?;
             let table_checked_rows: Option<std::collections::HashMap<String, Vec<u32>>> =
                 field_opt(&args, "tableCheckedRows", "table_checked_rows")?;
+            let pinned_tables: Option<
+                std::collections::HashMap<String, crate::chat::types::PinnedTable>,
+            > = field_opt(&args, "pinnedTables", "pinned_tables")?;
             crate::chat::update_session_state(
                 app.clone(),
                 worktree_id,
@@ -2047,6 +2059,7 @@ pub async fn dispatch_command(
                 enabled_mcp_servers,
                 selected_execution_mode,
                 table_checked_rows,
+                pinned_tables,
             )
             .await?;
             emit_cache_invalidation(app, &["sessions"]);

@@ -1,8 +1,20 @@
-import { describe, expect, it } from 'vitest'
+import userEvent from '@testing-library/user-event'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { render, screen } from '@/test/test-utils'
 import { Markdown } from './markdown'
+import { useChatStore } from '@/store/chat-store'
+
+const tableMarkdown = '| Name | Count |\n| --- | --- |\n| Apples | 3 |'
 
 describe('Markdown', () => {
+  beforeEach(() => {
+    useChatStore.setState({
+      activeWorktreeId: null,
+      activeSessionIds: {},
+      pinnedTables: {},
+    })
+  })
+
   it('preserves ordered-list start attributes from parsed markdown', () => {
     const { container } = render(
       <Markdown>{'1. First\n\nInterlude\n\n2. Second'}</Markdown>
@@ -89,5 +101,23 @@ describe('Markdown', () => {
     expect(image?.getAttribute('src')).toBe(
       '/api/files/linear-context-images/ENG-123/image.png'
     )
+  })
+
+  it('pins a rendered table for its owning session', async () => {
+    render(
+      <Markdown messageId="message-1" sessionId="session-1">
+        {tableMarkdown}
+      </Markdown>
+    )
+
+    await userEvent.click(screen.getByRole('button', { name: /pin table/i }))
+
+    const pinned = Object.values(
+      useChatStore.getState().pinnedTables['session-1'] ?? {}
+    )
+
+    expect(pinned).toHaveLength(1)
+    expect(pinned[0]?.markdown).toBe(tableMarkdown)
+    expect(pinned[0]?.title).toBe('Name / Count')
   })
 })

@@ -190,6 +190,66 @@ describe('useGitOperations conflict resolution', () => {
     expect(sentArgs?.message).toContain('Resolve and finish.')
   })
 
+  it('shows a cancel button while creating a PR and cancels the backend action', async () => {
+    let resolveCreatePr: (value: unknown) => void = () => {}
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === 'create_pr_with_ai_content') {
+        return new Promise(resolve => {
+          resolveCreatePr = resolve
+        })
+      }
+      if (command === 'cancel_create_pr_with_ai_content') {
+        return Promise.resolve(true)
+      }
+      return Promise.resolve(undefined)
+    })
+
+    const { result } = renderGitOperations()
+
+    await act(async () => {
+      void result.current.handleOpenPr()
+    })
+
+    const loadingOptions = (
+      mocks.toastLoading.mock.calls as unknown as [
+        string,
+        {
+          cancel: { label: string; onClick: () => Promise<void> }
+        },
+      ][]
+    )[0]?.[1]
+    expect(loadingOptions).toBeDefined()
+    expect(loadingOptions).toEqual(
+      expect.objectContaining({
+        cancel: expect.objectContaining({
+          label: 'Cancel',
+          onClick: expect.any(Function),
+        }),
+      })
+    )
+
+    await act(async () => {
+      await loadingOptions!.cancel.onClick()
+    })
+
+    expect(mocks.invoke).toHaveBeenCalledWith(
+      'cancel_create_pr_with_ai_content',
+      { worktreePath: '/repo/worktree' }
+    )
+    expect(mocks.toastInfo).toHaveBeenCalledWith('Cancelling PR creation...', {
+      id: 'toast-1',
+    })
+
+    await act(async () => {
+      resolveCreatePr({
+        pr_number: 32,
+        pr_url: 'https://github.com/o/r/pull/32',
+        title: 'Feature',
+        existing: false,
+      })
+    })
+  })
+
   it('uses the PR conflict flow when no local conflicts exist yet', async () => {
     mocks.invoke.mockImplementation((command: string) => {
       if (command === 'get_merge_conflicts') {
@@ -361,6 +421,53 @@ describe('useGitOperations conflict resolution', () => {
       'Review running for Project/feature...',
       expect.objectContaining({
         cancel: expect.objectContaining({ label: 'Cancel' }),
+      })
+    )
+  })
+
+  it('passes the code review magic prompt backend to review jobs', async () => {
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === 'start_review_job') {
+        return Promise.resolve({
+          job: {
+            id: 'job-1',
+            reviewRunId: 'run-1',
+            worktreeId: 'wt-1',
+            worktreePath: '/repo/worktree',
+            sessionId: 'review-session',
+            source: 'ai',
+            status: 'running',
+            createdAt: 1,
+            updatedAt: 1,
+          },
+        })
+      }
+      if (command === 'get_review_job') {
+        return Promise.resolve({
+          id: 'job-1',
+          reviewRunId: 'run-1',
+          worktreeId: 'wt-1',
+          worktreePath: '/repo/worktree',
+          sessionId: 'review-session',
+          source: 'ai',
+          status: 'running',
+          createdAt: 1,
+          updatedAt: 1,
+        })
+      }
+      return Promise.resolve(undefined)
+    })
+
+    const { result } = renderGitOperations()
+
+    await act(async () => {
+      await result.current.handleReview()
+    })
+
+    expect(mocks.invoke).toHaveBeenCalledWith(
+      'start_review_job',
+      expect.objectContaining({
+        backend: 'claude',
       })
     )
   })

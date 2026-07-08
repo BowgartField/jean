@@ -7,8 +7,9 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager};
@@ -74,6 +75,8 @@ static OBJ_REL_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r#"\brel\s*:\s*["']([^"']+)["']"#).expect("valid object rel regex"));
 static OBJ_HREF_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r#"\bhref\s*:\s*["']([^"'?]+)"#).expect("valid object href regex"));
+static PR_CREATION_CANCELLATIONS: Lazy<Mutex<HashMap<String, Arc<AtomicBool>>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
 
 const MAX_ICON_SOURCE_BYTES: u64 = 1024 * 1024;
 
@@ -6580,6 +6583,64 @@ pub struct CreatePrResponse {
     pub existing: bool,
 }
 
+struct PrCreationGuard {
+    worktree_path: String,
+    cancelled: Arc<AtomicBool>,
+}
+
+impl Drop for PrCreationGuard {
+    fn drop(&mut self) {
+        finish_pr_creation(&self.worktree_path);
+    }
+}
+
+fn begin_pr_creation(worktree_path: &str) -> Result<PrCreationGuard, String> {
+    let mut cancellations = PR_CREATION_CANCELLATIONS
+        .lock()
+        .map_err(|_| "Failed to lock PR creation cancellation registry".to_string())?;
+    if cancellations.contains_key(worktree_path) {
+        return Err("PR creation is already running for this worktree".to_string());
+    }
+    let flag = Arc::new(AtomicBool::new(false));
+    cancellations.insert(worktree_path.to_string(), flag.clone());
+    Ok(PrCreationGuard {
+        worktree_path: worktree_path.to_string(),
+        cancelled: flag,
+    })
+}
+
+fn finish_pr_creation(worktree_path: &str) {
+    match PR_CREATION_CANCELLATIONS.lock() {
+        Ok(mut cancellations) => {
+            cancellations.remove(worktree_path);
+        }
+        Err(_) => log::warn!("Failed to lock PR creation cancellation registry for cleanup"),
+    }
+}
+
+fn check_pr_creation_cancelled(cancelled: &AtomicBool) -> Result<(), String> {
+    if cancelled.load(Ordering::SeqCst) {
+        Err("PR creation cancelled".to_string())
+    } else {
+        Ok(())
+    }
+}
+
+/// Cancel a running PR creation request for a worktree.
+///
+/// The long-running PR command checks this flag between git, AI, and gh steps.
+#[tauri::command]
+pub async fn cancel_create_pr_with_ai_content(worktree_path: String) -> Result<bool, String> {
+    let cancellations = PR_CREATION_CANCELLATIONS
+        .lock()
+        .map_err(|_| "Failed to lock PR creation cancellation registry".to_string())?;
+    let Some(flag) = cancellations.get(&worktree_path) else {
+        return Ok(false);
+    };
+    flag.store(true, Ordering::SeqCst);
+    Ok(true)
+}
+
 /// Extract structured output from Claude CLI stream-json response
 /// Handles the StructuredOutput tool call pattern used with --json-schema
 fn extract_structured_output(output: &str) -> Result<String, String> {
@@ -6974,6 +7035,8 @@ pub async fn create_pr_with_ai_content(
     reasoning_effort: Option<String>,
 ) -> Result<CreatePrResponse, String> {
     log::trace!("Creating PR for: {worktree_path}");
+    let pr_creation = begin_pr_creation(&worktree_path)?;
+    check_pr_creation_cancelled(&pr_creation.cancelled)?;
 
     // Load project data to get target branch
     let data = load_projects_data(&app)?;
@@ -6989,6 +7052,7 @@ pub async fn create_pr_with_ai_content(
 
     let target_branch = &project.default_branch;
     let current_branch = git::get_current_branch(&worktree_path)?;
+    check_pr_creation_cancelled(&pr_creation.cancelled)?;
 
     // Check if we're on the target branch (can't create PR to same branch)
     if current_branch == *target_branch {
@@ -7062,6 +7126,7 @@ pub async fn create_pr_with_ai_content(
                 return Err(format!("Failed to commit: {stderr}"));
             }
         }
+        check_pr_creation_cancelled(&pr_creation.cancelled)?;
     }
 
     // Push the branch
@@ -7077,6 +7142,7 @@ pub async fn create_pr_with_ai_content(
             log::warn!("Push warning: {stderr}");
         }
     }
+    check_pr_creation_cancelled(&pr_creation.cancelled)?;
 
     // Check if a PR already exists for this branch before spending time/tokens on AI generation
     let gh = resolve_gh_binary(&app);
@@ -7172,6 +7238,7 @@ pub async fn create_pr_with_ai_content(
         reasoning_effort.as_deref(),
         "HEAD",
     )?;
+    check_pr_creation_cancelled(&pr_creation.cancelled)?;
 
     // Gather Linear identifiers
     let project_name = &project.name;
@@ -7211,6 +7278,7 @@ pub async fn create_pr_with_ai_content(
     }
 
     log::trace!("Generated PR title: {}", pr_content.title);
+    check_pr_creation_cancelled(&pr_creation.cancelled)?;
 
     // Create the PR using gh CLI
     log::trace!("Creating PR with gh CLI");
@@ -7227,6 +7295,7 @@ pub async fn create_pr_with_ai_content(
         ])
         .output()
         .map_err(|e| format!("Failed to run gh pr create: {e}"))?;
+    check_pr_creation_cancelled(&pr_creation.cancelled)?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -8847,6 +8916,7 @@ pub async fn run_review_with_ai(
     custom_profile_name: Option<String>,
     review_run_id: Option<String>,
     reasoning_effort: Option<String>,
+    magic_backend: Option<String>,
 ) -> Result<ReviewResponse, String> {
     log::trace!("Running AI code review for: {worktree_path}");
 
@@ -8978,11 +9048,13 @@ pub async fn run_review_with_ai(
         .replace("{uncommitted_section}", &uncommitted_section);
 
     // Run review with Claude CLI
-    let review_magic_backend = crate::get_preferences_path(&app)
-        .ok()
-        .and_then(|p| std::fs::read_to_string(p).ok())
-        .and_then(|c| serde_json::from_str::<crate::AppPreferences>(&c).ok())
-        .and_then(|p| p.magic_prompt_backends.code_review_backend);
+    let review_magic_backend = magic_backend.or_else(|| {
+        crate::get_preferences_path(&app)
+            .ok()
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .and_then(|c| serde_json::from_str::<crate::AppPreferences>(&c).ok())
+            .and_then(|p| p.magic_prompt_backends.code_review_backend)
+    });
     let response = generate_review(
         &app,
         &prompt,
@@ -8990,7 +9062,7 @@ pub async fn run_review_with_ai(
         custom_profile_name.as_deref(),
         Some(std::path::Path::new(&worktree_path)),
         review_run_id.as_deref(),
-        None,
+        Some(&worktree.id),
         review_magic_backend.as_deref(),
         reasoning_effort.as_deref(),
     )?;
@@ -9017,6 +9089,7 @@ pub async fn start_review_job(
     worktree_id: String,
     worktree_path: String,
     source: String,
+    backend: Option<String>,
     custom_prompt: Option<String>,
     model: Option<String>,
     custom_profile_name: Option<String>,
@@ -9040,7 +9113,7 @@ pub async fn start_review_job(
         worktree_id.clone(),
         worktree_path.clone(),
         Some("Code Review".to_string()),
-        None,
+        backend.clone(),
         None,
         None,
         None,
@@ -9097,6 +9170,7 @@ pub async fn start_review_job(
                         custom_profile_name,
                         Some(review_run_id_for_task),
                         reasoning_effort,
+                        backend,
                     )
                     .await
                 }
@@ -9218,6 +9292,7 @@ async fn update_review_session_state(
         None,
         None,
         review_results,
+        None,
         None,
         None,
         None,
@@ -12408,6 +12483,22 @@ mod tests {
             extract_json_object_from_text(text).unwrap(),
             r#"{"outer":{"inner":[1,2]}}"#
         );
+    }
+
+    #[test]
+    fn pr_creation_cancellation_flag_is_registered_and_cleaned_up() {
+        let path = format!("/tmp/jean-pr-cancel-test-{}", Uuid::new_v4());
+        {
+            let guard = begin_pr_creation(&path).expect("begin PR creation");
+            assert!(begin_pr_creation(&path).is_err());
+            guard.cancelled.store(true, Ordering::SeqCst);
+            assert_eq!(
+                check_pr_creation_cancelled(&guard.cancelled),
+                Err("PR creation cancelled".to_string())
+            );
+        }
+        assert!(begin_pr_creation(&path).is_ok());
+        finish_pr_creation(&path);
     }
 
     #[test]

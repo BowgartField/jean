@@ -1591,6 +1591,11 @@ ${resolveInstructions}`
                 worktreeId: selectedWorktreeId,
                 worktreePath: worktree.path,
                 source: reviewSource,
+                backend: resolveMagicPromptBackend(
+                  preferences?.magic_prompt_backends,
+                  'code_review_backend',
+                  preferences?.default_backend
+                ),
                 customPrompt: preferences?.magic_prompts?.code_review,
                 model: preferences?.magic_prompt_models?.code_review_model,
                 customProfileName: resolveMagicPromptProvider(
