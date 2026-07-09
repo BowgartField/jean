@@ -557,9 +557,9 @@ describe('BackendModelPickerContent', () => {
     await user.keyboard('{Meta>}f{/Meta}')
 
     expect(patchPreferencesMutate).toHaveBeenCalledWith({
-      fast_mode_models: ['codex:gpt-5-6-sol'],
+      fast_mode_models: ['codex:gpt-5.6-sol'],
     })
-    expect(onModelChange).toHaveBeenCalledWith('gpt-5-6-sol-fast')
+    expect(onModelChange).toHaveBeenCalledWith('gpt-5.6-sol-fast')
     expect(onRequestClose).toHaveBeenCalled()
   })
 

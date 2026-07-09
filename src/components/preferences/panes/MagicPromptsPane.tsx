@@ -521,14 +521,12 @@ export function getMagicPromptItemId(key: keyof MagicPrompts): string {
 }
 
 const CODEX_MODEL_OPTIONS: { value: MagicPromptModel; label: string }[] = [
-  { value: 'gpt-5.6', label: 'GPT 5.6' },
-  { value: 'gpt-5.6-fast', label: 'GPT 5.6 Fast' },
-  { value: 'gpt-5-6-sol', label: 'GPT 5.6 Sol' },
-  { value: 'gpt-5-6-sol-fast', label: 'GPT 5.6 Sol Fast' },
-  { value: 'gpt-5-6-terra', label: 'GPT 5.6 Terra' },
-  { value: 'gpt-5-6-terra-fast', label: 'GPT 5.6 Terra Fast' },
-  { value: 'gpt-5-6-luna', label: 'GPT 5.6 Luna' },
-  { value: 'gpt-5-6-luna-fast', label: 'GPT 5.6 Luna Fast' },
+  { value: 'gpt-5.6-sol', label: 'GPT 5.6 Sol' },
+  { value: 'gpt-5.6-sol-fast', label: 'GPT 5.6 Sol Fast' },
+  { value: 'gpt-5.6-terra', label: 'GPT 5.6 Terra' },
+  { value: 'gpt-5.6-terra-fast', label: 'GPT 5.6 Terra Fast' },
+  { value: 'gpt-5.6-luna', label: 'GPT 5.6 Luna' },
+  { value: 'gpt-5.6-luna-fast', label: 'GPT 5.6 Luna Fast' },
   { value: 'gpt-5.5', label: 'GPT 5.5' },
   { value: 'gpt-5.5-fast', label: 'GPT 5.5 Fast' },
   { value: 'gpt-5.4', label: 'GPT 5.4' },
@@ -539,10 +537,9 @@ const CODEX_MODEL_OPTIONS: { value: MagicPromptModel; label: string }[] = [
     .filter(
       o =>
         ![
-          'gpt-5.6',
-          'gpt-5-6-sol',
-          'gpt-5-6-terra',
-          'gpt-5-6-luna',
+          'gpt-5.6-sol',
+          'gpt-5.6-terra',
+          'gpt-5.6-luna',
           'gpt-5.5',
           'gpt-5.4',
           'gpt-5.4-mini',

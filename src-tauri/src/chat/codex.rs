@@ -410,10 +410,13 @@ fn emit_codex_plan_tool_call(
 /// to end in `-fast` are left unchanged.
 pub(crate) fn split_fast_model(model: &str) -> (&str, bool) {
     match model {
-        "gpt-5.6-fast" => ("gpt-5.6", true),
-        "gpt-5-6-sol-fast" => ("gpt-5-6-sol", true),
-        "gpt-5-6-terra-fast" => ("gpt-5-6-terra", true),
-        "gpt-5-6-luna-fast" => ("gpt-5-6-luna", true),
+        "gpt-5.6" | "gpt-5-6-sol" => ("gpt-5.6-sol", false),
+        "gpt-5-6-terra" => ("gpt-5.6-terra", false),
+        "gpt-5-6-luna" => ("gpt-5.6-luna", false),
+        "gpt-5.6-fast" | "gpt-5-6-sol-fast" => ("gpt-5.6-sol", true),
+        "gpt-5.6-sol-fast" => ("gpt-5.6-sol", true),
+        "gpt-5-6-terra-fast" | "gpt-5.6-terra-fast" => ("gpt-5.6-terra", true),
+        "gpt-5-6-luna-fast" | "gpt-5.6-luna-fast" => ("gpt-5.6-luna", true),
         "gpt-5.5-fast" => ("gpt-5.5", true),
         "gpt-5.4-fast" => ("gpt-5.4", true),
         "gpt-5.4-mini-fast" => ("gpt-5.4-mini", true),
@@ -4702,16 +4705,19 @@ mod tests {
 
     #[test]
     fn split_fast_model_recognises_gpt_5_6_preview_fast_models() {
-        assert_eq!(split_fast_model("gpt-5.6-fast"), ("gpt-5.6", true));
-        assert_eq!(split_fast_model("gpt-5-6-sol-fast"), ("gpt-5-6-sol", true));
+        assert_eq!(split_fast_model("gpt-5.6-sol-fast"), ("gpt-5.6-sol", true));
         assert_eq!(
-            split_fast_model("gpt-5-6-terra-fast"),
-            ("gpt-5-6-terra", true)
+            split_fast_model("gpt-5.6-terra-fast"),
+            ("gpt-5.6-terra", true)
         );
         assert_eq!(
-            split_fast_model("gpt-5-6-luna-fast"),
-            ("gpt-5-6-luna", true)
+            split_fast_model("gpt-5.6-luna-fast"),
+            ("gpt-5.6-luna", true)
         );
+        assert_eq!(split_fast_model("gpt-5.6-fast"), ("gpt-5.6-sol", true));
+        assert_eq!(split_fast_model("gpt-5.6"), ("gpt-5.6-sol", false));
+        assert_eq!(split_fast_model("gpt-5-6-sol"), ("gpt-5.6-sol", false));
+        assert_eq!(split_fast_model("gpt-5-6-sol-fast"), ("gpt-5.6-sol", true));
     }
 
     #[test]

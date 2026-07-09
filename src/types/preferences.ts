@@ -1381,14 +1381,12 @@ export const effortLevelOptions: {
 // Codex Types
 // =============================================================================
 export type CodexModel =
-  | 'gpt-5.6'
-  | 'gpt-5.6-fast'
-  | 'gpt-5-6-sol'
-  | 'gpt-5-6-sol-fast'
-  | 'gpt-5-6-terra'
-  | 'gpt-5-6-terra-fast'
-  | 'gpt-5-6-luna'
-  | 'gpt-5-6-luna-fast'
+  | 'gpt-5.6-sol'
+  | 'gpt-5.6-sol-fast'
+  | 'gpt-5.6-terra'
+  | 'gpt-5.6-terra-fast'
+  | 'gpt-5.6-luna'
+  | 'gpt-5.6-luna-fast'
   | 'gpt-5.5'
   | 'gpt-5.5-fast'
   | 'gpt-5.4'
@@ -1405,10 +1403,9 @@ export type CodexModel =
 // Codex models that support fast service tier. Fast mode is exposed via a
 // separate UI toggle, not as standalone dropdown entries.
 export const CODEX_FAST_MODEL_MAP = {
-  'gpt-5.6': 'gpt-5.6-fast',
-  'gpt-5-6-sol': 'gpt-5-6-sol-fast',
-  'gpt-5-6-terra': 'gpt-5-6-terra-fast',
-  'gpt-5-6-luna': 'gpt-5-6-luna-fast',
+  'gpt-5.6-sol': 'gpt-5.6-sol-fast',
+  'gpt-5.6-terra': 'gpt-5.6-terra-fast',
+  'gpt-5.6-luna': 'gpt-5.6-luna-fast',
   'gpt-5.5': 'gpt-5.5-fast',
   'gpt-5.4': 'gpt-5.4-fast',
   'gpt-5.4-mini': 'gpt-5.4-mini-fast',
@@ -1451,10 +1448,9 @@ export function getCodexFastInfo(model: string): CodexFastInfo {
 }
 
 export const codexModelOptions: { value: CodexModel; label: string }[] = [
-  { value: 'gpt-5.6', label: 'GPT 5.6' },
-  { value: 'gpt-5-6-sol', label: 'GPT 5.6 Sol' },
-  { value: 'gpt-5-6-terra', label: 'GPT 5.6 Terra' },
-  { value: 'gpt-5-6-luna', label: 'GPT 5.6 Luna' },
+  { value: 'gpt-5.6-sol', label: 'GPT 5.6 Sol' },
+  { value: 'gpt-5.6-terra', label: 'GPT 5.6 Terra' },
+  { value: 'gpt-5.6-luna', label: 'GPT 5.6 Luna' },
   { value: 'gpt-5.5', label: 'GPT 5.5' },
   { value: 'gpt-5.4', label: 'GPT 5.4' },
   { value: 'gpt-5.4-mini', label: 'GPT 5.4 Mini' },
@@ -1470,14 +1466,12 @@ export const codexDefaultModelOptions: {
   value: CodexModel
   label: string
 }[] = [
-  { value: 'gpt-5.6', label: 'GPT 5.6' },
-  { value: 'gpt-5-6-sol', label: 'GPT 5.6 Sol' },
-  { value: 'gpt-5-6-terra', label: 'GPT 5.6 Terra' },
-  { value: 'gpt-5-6-luna', label: 'GPT 5.6 Luna' },
-  { value: 'gpt-5.6-fast', label: 'GPT 5.6 Fast' },
-  { value: 'gpt-5-6-sol-fast', label: 'GPT 5.6 Sol Fast' },
-  { value: 'gpt-5-6-terra-fast', label: 'GPT 5.6 Terra Fast' },
-  { value: 'gpt-5-6-luna-fast', label: 'GPT 5.6 Luna Fast' },
+  { value: 'gpt-5.6-sol', label: 'GPT 5.6 Sol' },
+  { value: 'gpt-5.6-terra', label: 'GPT 5.6 Terra' },
+  { value: 'gpt-5.6-luna', label: 'GPT 5.6 Luna' },
+  { value: 'gpt-5.6-sol-fast', label: 'GPT 5.6 Sol Fast' },
+  { value: 'gpt-5.6-terra-fast', label: 'GPT 5.6 Terra Fast' },
+  { value: 'gpt-5.6-luna-fast', label: 'GPT 5.6 Luna Fast' },
   { value: 'gpt-5.5', label: 'GPT 5.5' },
   { value: 'gpt-5.5-fast', label: 'GPT 5.5 Fast' },
   { value: 'gpt-5.4', label: 'GPT 5.4' },
@@ -1488,9 +1482,9 @@ export const codexDefaultModelOptions: {
     option =>
       ![
         'gpt-5.6',
-        'gpt-5-6-sol',
-        'gpt-5-6-terra',
-        'gpt-5-6-luna',
+        'gpt-5.6-sol',
+        'gpt-5.6-terra',
+        'gpt-5.6-luna',
         'gpt-5.5',
         'gpt-5.4',
         'gpt-5.4-mini',
@@ -1499,6 +1493,14 @@ export const codexDefaultModelOptions: {
 ]
 
 const deprecatedCodexFastModelMap = {
+  'gpt-5.6': 'gpt-5.6-sol',
+  'gpt-5.6-fast': 'gpt-5.6-sol-fast',
+  'gpt-5-6-sol': 'gpt-5.6-sol',
+  'gpt-5-6-sol-fast': 'gpt-5.6-sol-fast',
+  'gpt-5-6-terra': 'gpt-5.6-terra',
+  'gpt-5-6-terra-fast': 'gpt-5.6-terra-fast',
+  'gpt-5-6-luna': 'gpt-5.6-luna',
+  'gpt-5-6-luna-fast': 'gpt-5.6-luna-fast',
   'gpt-5.3-fast': 'gpt-5.3',
   'gpt-5.3-codex-fast': 'gpt-5.3-codex',
   'gpt-5.2-codex-fast': 'gpt-5.2-codex',
