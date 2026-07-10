@@ -517,6 +517,8 @@ export interface ReviewJob {
   worktreePath: string
   sessionId?: string
   source: 'ai' | 'coderabbit-cli' | string
+  backend?: string
+  model?: string
   status: ReviewJobStatus
   findingCount?: number
   error?: string

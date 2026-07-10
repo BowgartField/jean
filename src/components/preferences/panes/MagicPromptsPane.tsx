@@ -1,5 +1,12 @@
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react'
-import { Check, ChevronsUpDown, RotateCcw } from 'lucide-react'
+import {
+  Check,
+  ChevronDown,
+  ChevronsUpDown,
+  Plus,
+  RotateCcw,
+  Trash2,
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import {
@@ -22,6 +29,13 @@ import {
   CommandItem,
   CommandList,
 } from '@/components/ui/command'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { usePreferences, usePatchPreferences } from '@/services/preferences'
 import { useInstalledBackends } from '@/hooks/useInstalledBackends'
 import { useAvailableOpencodeModels } from '@/services/opencode-cli'
@@ -75,6 +89,12 @@ import {
   GROK_DEFAULT_MAGIC_PROMPT_BACKENDS,
   CODEX_DEFAULT_MAGIC_PROMPT_MODELS,
   CODEX_FAST_DEFAULT_MAGIC_PROMPT_MODELS,
+  CODEX_56_SOL_DEFAULT_MAGIC_PROMPT_MODELS,
+  CODEX_56_SOL_FAST_DEFAULT_MAGIC_PROMPT_MODELS,
+  CODEX_56_LUNA_DEFAULT_MAGIC_PROMPT_MODELS,
+  CODEX_56_LUNA_FAST_DEFAULT_MAGIC_PROMPT_MODELS,
+  CODEX_56_TERRA_DEFAULT_MAGIC_PROMPT_MODELS,
+  CODEX_56_TERRA_FAST_DEFAULT_MAGIC_PROMPT_MODELS,
   OPENCODE_DEFAULT_MAGIC_PROMPT_MODELS,
   PI_DEFAULT_MAGIC_PROMPT_MODELS,
   COMMANDCODE_DEFAULT_MAGIC_PROMPT_MODELS,
@@ -92,9 +112,14 @@ import {
   type MagicPromptModel,
   type MagicPromptModes,
   type MagicPromptExecutionMode,
+  type MagicCodeReviewConfig,
 } from '@/types/preferences'
 import { cn } from '@/lib/utils'
 import { BackendLabel } from '@/components/ui/backend-label'
+import {
+  codeReviewConfigKey,
+  resolveCodeReviewConfigs,
+} from '@/lib/code-review-configs'
 
 interface VariableInfo {
   name: string
@@ -747,6 +772,107 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
     profiles,
   ])
 
+  const getReviewModelOptions = useCallback(
+    (backend: string) => {
+      if (backend === 'claude') return filteredClaudeOptions
+      if (backend === 'codex') return CODEX_MODEL_OPTIONS
+      if (backend === 'cursor') return cursorModelOptions
+      if (backend === 'commandcode') return commandCodeModelOptions
+      if (backend === 'pi') return piModelOptions
+      if (backend === 'grok') return grokModelOptions
+      return opencodeModelOptions
+    },
+    [
+      commandCodeModelOptions,
+      cursorModelOptions,
+      filteredClaudeOptions,
+      grokModelOptions,
+      opencodeModelOptions,
+      piModelOptions,
+    ]
+  )
+
+  const codeReviewConfigs = useMemo(
+    () =>
+      resolveCodeReviewConfigs({
+        configured: preferences?.magic_code_review_configs,
+        fallbackBackend: effectiveBackend,
+        fallbackModel: currentModels.code_review_model,
+      }),
+    [
+      currentModels.code_review_model,
+      effectiveBackend,
+      preferences?.magic_code_review_configs,
+    ]
+  )
+
+  const saveCodeReviewConfigs = useCallback(
+    (configs: MagicCodeReviewConfig[]) => {
+      if (!preferences || configs.length === 0) return
+      const first = configs[0]
+      if (!first) return
+      patchPreferences.mutate({
+        magic_code_review_configs: configs,
+        magic_prompt_backends: {
+          ...currentBackends,
+          code_review_backend: first.backend,
+        },
+        magic_prompt_models: {
+          ...currentModels,
+          code_review_model: first.model,
+        },
+      })
+    },
+    [preferences, patchPreferences, currentBackends, currentModels]
+  )
+
+  const updateCodeReviewConfig = useCallback(
+    (index: number, config: MagicCodeReviewConfig) => {
+      const duplicate = codeReviewConfigs.some(
+        (item, itemIndex) =>
+          itemIndex !== index &&
+          codeReviewConfigKey(item) === codeReviewConfigKey(config)
+      )
+      if (duplicate) return
+      saveCodeReviewConfigs(
+        codeReviewConfigs.map((item, itemIndex) =>
+          itemIndex === index ? config : item
+        )
+      )
+    },
+    [codeReviewConfigs, saveCodeReviewConfigs]
+  )
+
+  const addCodeReviewConfig = useCallback(() => {
+    if (codeReviewConfigs.length >= 5) return
+    const representedBackends = new Set(
+      codeReviewConfigs.map(config => config.backend)
+    )
+    const orderedBackends = [
+      ...installedBackends.filter(backend => !representedBackends.has(backend)),
+      ...installedBackends.filter(backend => representedBackends.has(backend)),
+    ]
+    for (const backend of orderedBackends) {
+      const model = getReviewModelOptions(backend).find(
+        option =>
+          !codeReviewConfigs.some(
+            config =>
+              codeReviewConfigKey(config) ===
+              codeReviewConfigKey({ backend, model: option.value })
+          )
+      )?.value
+      if (model) {
+        saveCodeReviewConfigs([...codeReviewConfigs, { backend, model }])
+        return
+      }
+    }
+  }, [
+    codeReviewConfigs,
+    getReviewModelOptions,
+    installedBackends,
+    saveCodeReviewConfigs,
+  ])
+
   const isModified = currentPrompts[selectedKey] !== null
 
   // Sync local value when selection changes or external value updates
@@ -963,15 +1089,41 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
     if (!preferences) return
     patchPreferences.mutate({
       magic_prompt_models: DEFAULT_MAGIC_PROMPT_MODELS,
+      magic_code_review_configs: [
+        {
+          backend: 'claude',
+          model: DEFAULT_MAGIC_PROMPT_MODELS.code_review_model,
+        },
+      ],
       magic_prompt_providers: DEFAULT_MAGIC_PROMPT_PROVIDERS,
       magic_prompt_backends: CLAUDE_DEFAULT_MAGIC_PROMPT_BACKENDS,
     })
   }, [preferences, patchPreferences])
 
-  const handleApplyCodexDefaults = useCallback(() => {
+  const handleApplyCodexDefaults = useCallback(
+    (models: MagicPromptModels) => {
+      if (!preferences) return
+      patchPreferences.mutate({
+        magic_prompt_models: models,
+        magic_code_review_configs: [
+          { backend: 'codex', model: models.code_review_model },
+        ],
+        magic_prompt_backends: CODEX_DEFAULT_MAGIC_PROMPT_BACKENDS,
+      })
+    },
+    [preferences, patchPreferences]
+  )
+
+  const handleApplyLegacyCodexDefaults = useCallback(() => {
     if (!preferences) return
     patchPreferences.mutate({
       magic_prompt_models: CODEX_DEFAULT_MAGIC_PROMPT_MODELS,
+      magic_code_review_configs: [
+        {
+          backend: 'codex',
+          model: CODEX_DEFAULT_MAGIC_PROMPT_MODELS.code_review_model,
+        },
+      ],
       magic_prompt_backends: CODEX_DEFAULT_MAGIC_PROMPT_BACKENDS,
     })
   }, [preferences, patchPreferences])
@@ -980,6 +1132,12 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
     if (!preferences) return
     patchPreferences.mutate({
       magic_prompt_models: CODEX_FAST_DEFAULT_MAGIC_PROMPT_MODELS,
+      magic_code_review_configs: [
+        {
+          backend: 'codex',
+          model: CODEX_FAST_DEFAULT_MAGIC_PROMPT_MODELS.code_review_model,
+        },
+      ],
       magic_prompt_backends: CODEX_DEFAULT_MAGIC_PROMPT_BACKENDS,
     })
   }, [preferences, patchPreferences])
@@ -988,6 +1146,12 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
     if (!preferences) return
     patchPreferences.mutate({
       magic_prompt_models: OPENCODE_DEFAULT_MAGIC_PROMPT_MODELS,
+      magic_code_review_configs: [
+        {
+          backend: 'opencode',
+          model: OPENCODE_DEFAULT_MAGIC_PROMPT_MODELS.code_review_model,
+        },
+      ],
       magic_prompt_backends: OPENCODE_DEFAULT_MAGIC_PROMPT_BACKENDS,
     })
   }, [preferences, patchPreferences])
@@ -996,6 +1160,12 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
     if (!preferences) return
     patchPreferences.mutate({
       magic_prompt_models: PI_DEFAULT_MAGIC_PROMPT_MODELS,
+      magic_code_review_configs: [
+        {
+          backend: 'pi',
+          model: PI_DEFAULT_MAGIC_PROMPT_MODELS.code_review_model,
+        },
+      ],
       magic_prompt_backends: PI_DEFAULT_MAGIC_PROMPT_BACKENDS,
     })
   }, [preferences, patchPreferences])
@@ -1004,6 +1174,12 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
     if (!preferences) return
     patchPreferences.mutate({
       magic_prompt_models: COMMANDCODE_DEFAULT_MAGIC_PROMPT_MODELS,
+      magic_code_review_configs: [
+        {
+          backend: 'commandcode',
+          model: COMMANDCODE_DEFAULT_MAGIC_PROMPT_MODELS.code_review_model,
+        },
+      ],
       magic_prompt_backends: COMMANDCODE_DEFAULT_MAGIC_PROMPT_BACKENDS,
     })
   }, [preferences, patchPreferences])
@@ -1012,6 +1188,12 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
     if (!preferences) return
     patchPreferences.mutate({
       magic_prompt_models: GROK_DEFAULT_MAGIC_PROMPT_MODELS,
+      magic_code_review_configs: [
+        {
+          backend: 'grok',
+          model: GROK_DEFAULT_MAGIC_PROMPT_MODELS.code_review_model,
+        },
+      ],
       magic_prompt_backends: GROK_DEFAULT_MAGIC_PROMPT_BACKENDS,
     })
   }, [preferences, patchPreferences])
@@ -1046,72 +1228,123 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
 
   return (
     <div className="flex flex-col min-h-0 flex-1">
-      {/* Preset buttons */}
-      <div className="flex items-center gap-2 mb-3 shrink-0 overflow-x-auto pb-1">
+      {/* Preset menu */}
+      <div className="flex items-center gap-2 mb-3 shrink-0">
         <span className="text-xs text-muted-foreground">Presets:</span>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleApplyClaudeDefaults}
-          disabled={!installedBackends.includes('claude')}
-          className="h-7 text-xs"
-        >
-          Claude Defaults
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleApplyCodexDefaults}
-          disabled={!installedBackends.includes('codex')}
-          className="h-7 text-xs"
-        >
-          Codex Defaults
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleApplyCodexFastDefaults}
-          disabled={!installedBackends.includes('codex')}
-          className="h-7 text-xs"
-        >
-          Codex (Fast) Defaults
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleApplyOpenCodeDefaults}
-          disabled={!installedBackends.includes('opencode')}
-          className="h-7 text-xs"
-        >
-          OpenCode Defaults
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleApplyPiDefaults}
-          disabled={!installedBackends.includes('pi')}
-          className="h-7 text-xs"
-        >
-          Pi Defaults
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleApplyCommandCodeDefaults}
-          disabled={!installedBackends.includes('commandcode')}
-          className="h-7 text-xs"
-        >
-          Command Code Defaults
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleApplyGrokDefaults}
-          disabled={!installedBackends.includes('grok')}
-          className="h-7 text-xs"
-        >
-          Grok Defaults
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm" className="h-7 text-xs">
+              Apply preset
+              <ChevronDown className="size-3.5" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
+            <DropdownMenuItem
+              onSelect={handleApplyClaudeDefaults}
+              disabled={!installedBackends.includes('claude')}
+            >
+              Claude Defaults
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onSelect={() =>
+                handleApplyCodexDefaults(
+                  CODEX_56_SOL_DEFAULT_MAGIC_PROMPT_MODELS
+                )
+              }
+              disabled={!installedBackends.includes('codex')}
+            >
+              GPT 5.6 Sol
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() =>
+                handleApplyCodexDefaults(
+                  CODEX_56_SOL_FAST_DEFAULT_MAGIC_PROMPT_MODELS
+                )
+              }
+              disabled={!installedBackends.includes('codex')}
+            >
+              GPT 5.6 Sol Fast
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() =>
+                handleApplyCodexDefaults(
+                  CODEX_56_LUNA_DEFAULT_MAGIC_PROMPT_MODELS
+                )
+              }
+              disabled={!installedBackends.includes('codex')}
+            >
+              GPT 5.6 Luna
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() =>
+                handleApplyCodexDefaults(
+                  CODEX_56_LUNA_FAST_DEFAULT_MAGIC_PROMPT_MODELS
+                )
+              }
+              disabled={!installedBackends.includes('codex')}
+            >
+              GPT 5.6 Luna Fast
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() =>
+                handleApplyCodexDefaults(
+                  CODEX_56_TERRA_DEFAULT_MAGIC_PROMPT_MODELS
+                )
+              }
+              disabled={!installedBackends.includes('codex')}
+            >
+              GPT 5.6 Terra
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() =>
+                handleApplyCodexDefaults(
+                  CODEX_56_TERRA_FAST_DEFAULT_MAGIC_PROMPT_MODELS
+                )
+              }
+              disabled={!installedBackends.includes('codex')}
+            >
+              GPT 5.6 Terra Fast
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={handleApplyLegacyCodexDefaults}
+              disabled={!installedBackends.includes('codex')}
+            >
+              Codex Defaults
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={handleApplyCodexFastDefaults}
+              disabled={!installedBackends.includes('codex')}
+            >
+              Codex (Fast) Defaults
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onSelect={handleApplyOpenCodeDefaults}
+              disabled={!installedBackends.includes('opencode')}
+            >
+              OpenCode Defaults
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={handleApplyPiDefaults}
+              disabled={!installedBackends.includes('pi')}
+            >
+              Pi Defaults
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={handleApplyCommandCodeDefaults}
+              disabled={!installedBackends.includes('commandcode')}
+            >
+              Command Code Defaults
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={handleApplyGrokDefaults}
+              disabled={!installedBackends.includes('grok')}
+            >
+              Grok Defaults
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       {/* Master-detail layout */}
@@ -1189,7 +1422,121 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
 
           {/* Backend / Model / Provider / Reset row */}
           <div className="flex flex-wrap items-center gap-2 mb-2 shrink-0">
-            {currentBackend !== undefined && (
+            {selectedKey === 'code_review' && (
+              <div className="flex w-full flex-col gap-2">
+                {codeReviewConfigs.map((config, index) => (
+                  <div
+                    key={`${codeReviewConfigKey(config)}-${index}`}
+                    className="flex flex-wrap items-center gap-2"
+                  >
+                    <span className="w-16 text-xs text-muted-foreground">
+                      Review {index + 1}
+                    </span>
+                    <Select
+                      value={config.backend}
+                      onValueChange={backend => {
+                        const model = getReviewModelOptions(backend).find(
+                          option =>
+                            !codeReviewConfigs.some(
+                              (item, itemIndex) =>
+                                itemIndex !== index &&
+                                codeReviewConfigKey(item) ===
+                                  codeReviewConfigKey({
+                                    backend,
+                                    model: option.value,
+                                  })
+                            )
+                        )?.value
+                        if (model) {
+                          updateCodeReviewConfig(index, { backend, model })
+                        }
+                      }}
+                    >
+                      <SelectTrigger
+                        aria-label={`Review ${index + 1} backend`}
+                        size="sm"
+                        className="w-[130px] text-xs"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {installedBackends.map(backend => (
+                          <SelectItem key={backend} value={backend}>
+                            <BackendLabel backend={backend} />
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Select
+                      value={config.model}
+                      onValueChange={model =>
+                        updateCodeReviewConfig(index, {
+                          ...config,
+                          model: model as MagicPromptModel,
+                        })
+                      }
+                    >
+                      <SelectTrigger
+                        aria-label={`Review ${index + 1} model`}
+                        size="sm"
+                        className="min-w-[180px] flex-1 text-xs"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {getReviewModelOptions(config.backend).map(option => {
+                          const duplicate = codeReviewConfigs.some(
+                            (item, itemIndex) =>
+                              itemIndex !== index &&
+                              codeReviewConfigKey(item) ===
+                                codeReviewConfigKey({
+                                  backend: config.backend,
+                                  model: option.value,
+                                })
+                          )
+                          return (
+                            <SelectItem
+                              key={option.value}
+                              value={option.value}
+                              disabled={duplicate}
+                            >
+                              {option.label}
+                            </SelectItem>
+                          )
+                        })}
+                      </SelectContent>
+                    </Select>
+                    {codeReviewConfigs.length > 1 && (
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label={`Remove review ${index + 1}`}
+                        onClick={() =>
+                          saveCodeReviewConfigs(
+                            codeReviewConfigs.filter(
+                              (_, itemIndex) => itemIndex !== index
+                            )
+                          )
+                        }
+                      >
+                        <Trash2 className="size-3.5" />
+                      </Button>
+                    )}
+                  </div>
+                ))}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-fit"
+                  onClick={addCodeReviewConfig}
+                  disabled={codeReviewConfigs.length >= 5}
+                >
+                  <Plus className="size-3.5" />
+                  Add review
+                </Button>
+              </div>
+            )}
+            {selectedKey !== 'code_review' && currentBackend !== undefined && (
               <div
                 data-testid="magic-prompt-backend-control"
                 className="flex items-center gap-2 max-md:w-full md:contents"
@@ -1284,7 +1631,7 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
                   </Select>
                 </div>
               )}
-            {currentModel && (
+            {selectedKey !== 'code_review' && currentModel && (
               <div
                 data-testid="magic-prompt-model-control"
                 className="flex items-center gap-2 max-md:w-full md:contents"

@@ -1700,7 +1700,7 @@ export function GitDiffModal({
             <AlertDialogTitle>Revert file?</AlertDialogTitle>
             <AlertDialogDescription>
               This will discard all changes to{' '}
-              <span className="font-mono font-semibold">
+              <span className="break-all font-mono font-semibold">
                 {revertTarget?.fileName}
               </span>
               . This cannot be undone.

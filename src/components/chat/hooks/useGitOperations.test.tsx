@@ -77,7 +77,7 @@ const project: Project = {
   order: 0,
 }
 
-function renderGitOperations() {
+function renderGitOperations(preferenceOverrides = {}) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
@@ -102,6 +102,7 @@ function renderGitOperations() {
           selected_codex_model: 'gpt-5.5',
           magic_prompts: { resolve_conflicts: 'Resolve and finish.' },
           magic_prompt_backends: { resolve_conflicts_backend: 'codex' },
+          ...preferenceOverrides,
         } as never,
         setSessionModel: { mutate: vi.fn() },
         setSessionBackend: { mutate: vi.fn() },
@@ -430,6 +431,7 @@ describe('useGitOperations conflict resolution', () => {
       'Review running for Project/feature...',
       expect.objectContaining({
         cancel: expect.objectContaining({ label: 'Cancel' }),
+        duration: 5000,
       })
     )
   })
@@ -477,6 +479,53 @@ describe('useGitOperations conflict resolution', () => {
       'start_review_job',
       expect.objectContaining({
         backend: 'claude',
+      })
+    )
+  })
+
+  it('starts one review job for each configured backend and model', async () => {
+    let jobIndex = 0
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === 'start_review_job') {
+        jobIndex += 1
+        return Promise.resolve({
+          job: {
+            id: `job-${jobIndex}`,
+            reviewRunId: `run-${jobIndex}`,
+            worktreeId: 'wt-1',
+            worktreePath: '/repo/worktree',
+            sessionId: `review-session-${jobIndex}`,
+            source: 'ai',
+            status: 'running',
+            createdAt: 1,
+            updatedAt: 1,
+          },
+        })
+      }
+      if (command === 'get_review_job') return Promise.resolve(null)
+      return Promise.resolve(undefined)
+    })
+
+    const { result } = renderGitOperations({
+      magic_code_review_configs: [
+        { backend: 'codex', model: 'gpt-5.6-sol' },
+        { backend: 'claude', model: 'claude-opus-4-8[1m]' },
+      ],
+    })
+
+    await act(async () => {
+      await result.current.handleReview()
+    })
+
+    expect(mocks.invoke).toHaveBeenCalledWith(
+      'start_review_job',
+      expect.objectContaining({ backend: 'codex', model: 'gpt-5.6-sol' })
+    )
+    expect(mocks.invoke).toHaveBeenCalledWith(
+      'start_review_job',
+      expect.objectContaining({
+        backend: 'claude',
+        model: 'claude-opus-4-8[1m]',
       })
     )
   })

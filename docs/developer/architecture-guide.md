@@ -66,9 +66,11 @@ events. On reconnect, the frontend recovers from persisted session/project data
 or job query commands instead of relying on the original WebSocket response.
 
 Current example: review magic uses `start_review_job`, which creates a Code
-Review session with a running indicator, starts the AI/CodeRabbit review in a
-Rust background task, prevents a second concurrent review for the same worktree,
-persists `review_results` into that session, and emits `review-job:updated`.
+Review session with a running indicator and starts the AI/CodeRabbit review in a
+Rust background task. AI review supports up to five distinct backend/model pairs
+per worktree; each pair gets its own named session and duplicate pairs are
+rejected while running. Results persist into each session's `review_results`,
+and job progress emits `review-job:updated`.
 
 ### Command-Centric Design
 
@@ -164,6 +166,7 @@ Additional systems (no dedicated docs yet):
 - **HTTP Server** - Embedded Axum server + WebSocket for headless/web mode (`src-tauri/src/http_server/`)
 - **Diagnostics** - CPU/memory monitoring panel (`src-tauri/src/diagnostics/`)
 - **MCP** - Model Context Protocol server integration with per-project overrides (`src/services/mcp.ts`)
+- **Model Catalog** - CDN-driven model lists and reasoning capabilities with bundled offline fallback ([model-catalog.md](./model-catalog.md))
 - **CLI Management** - Claude CLI, Codex CLI, Cursor CLI, OpenCode, PI, and gh CLI installation/versioning (`src-tauri/src/claude_cli/`, `src-tauri/src/codex_cli/`, `src-tauri/src/cursor_cli/`, `src-tauri/src/opencode_cli/`, `src-tauri/src/pi_cli/`, `src-tauri/src/gh_cli/`)
 
 Cursor-specific notes:

@@ -496,7 +496,7 @@ fn raw_pi_model(model: Option<&str>) -> Option<&str> {
     model.map(|m| m.strip_prefix("pi/").unwrap_or(m))
 }
 
-fn pi_thinking_level(effort: Option<&super::types::EffortLevel>) -> Option<&'static str> {
+fn pi_thinking_level(effort: Option<&super::types::EffortLevel>) -> Option<&str> {
     match effort {
         Some(super::types::EffortLevel::Off) => Some("off"),
         Some(super::types::EffortLevel::Minimal) => Some("minimal"),
@@ -506,6 +506,7 @@ fn pi_thinking_level(effort: Option<&super::types::EffortLevel>) -> Option<&'sta
         Some(super::types::EffortLevel::Xhigh)
         | Some(super::types::EffortLevel::Max)
         | Some(super::types::EffortLevel::Ultracode) => Some("xhigh"),
+        Some(super::types::EffortLevel::Other(value)) => Some(value.as_str()),
         None => None,
     }
 }

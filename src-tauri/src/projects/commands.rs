@@ -326,6 +326,8 @@ pub struct ReviewJob {
     pub worktree_path: String,
     pub session_id: Option<String>,
     pub source: String,
+    pub backend: Option<String>,
+    pub model: Option<String>,
     pub status: ReviewJobStatus,
     pub finding_count: Option<usize>,
     pub error: Option<String>,
@@ -341,6 +343,8 @@ pub struct ReviewJobStart {
     pub worktree_path: String,
     pub session_id: Option<String>,
     pub source: String,
+    pub backend: Option<String>,
+    pub model: Option<String>,
 }
 
 #[derive(Default)]
@@ -362,9 +366,13 @@ impl ReviewJobRegistry {
     pub fn try_insert_running(&self, start: ReviewJobStart) -> Result<ReviewJob, String> {
         let mut jobs = self.jobs.lock().unwrap();
         if jobs.values().any(|job| {
-            job.worktree_id == start.worktree_id && job.status == ReviewJobStatus::Running
+            job.worktree_id == start.worktree_id
+                && job.status == ReviewJobStatus::Running
+                && job.source == start.source
+                && job.backend == start.backend
+                && job.model == start.model
         }) {
-            return Err("A review is already running for this worktree".to_string());
+            return Err("This backend and model are already reviewing the worktree".to_string());
         }
 
         let job = Self::build_running_job(start, now());
@@ -380,6 +388,8 @@ impl ReviewJobRegistry {
             worktree_path: start.worktree_path,
             session_id: start.session_id,
             source: start.source,
+            backend: start.backend,
+            model: start.model,
             status: ReviewJobStatus::Running,
             finding_count: None,
             error: None,
@@ -454,6 +464,28 @@ impl ReviewJobRegistry {
 }
 
 static REVIEW_JOB_REGISTRY: Lazy<ReviewJobRegistry> = Lazy::new(ReviewJobRegistry::default);
+
+fn review_session_name(source: &str, backend: Option<&str>, model: Option<&str>) -> String {
+    if source == "coderabbit-cli" {
+        return "Code Review · CodeRabbit CLI".to_string();
+    }
+
+    let backend_name = match backend.unwrap_or("default") {
+        "claude" => "Claude".to_string(),
+        "codex" => "Codex".to_string(),
+        "opencode" => "OpenCode".to_string(),
+        "commandcode" => "Command Code".to_string(),
+        value => {
+            let mut chars = value.chars();
+            chars
+                .next()
+                .map(|first| first.to_uppercase().collect::<String>() + chars.as_str())
+                .unwrap_or_default()
+        }
+    };
+    let model = model.unwrap_or("default");
+    format!("Code Review · {backend_name} · {model}")
+}
 
 /// List all projects
 /// Check if git global user identity is configured
@@ -9106,13 +9138,17 @@ pub async fn start_review_job(
         worktree_path: worktree_path.clone(),
         session_id: None,
         source: source.clone(),
+        backend: backend.clone(),
+        model: model.clone(),
     })?;
+
+    let session_name = review_session_name(&source, backend.as_deref(), model.as_deref());
 
     let session = crate::chat::create_session(
         app.clone(),
         worktree_id.clone(),
         worktree_path.clone(),
-        Some("Code Review".to_string()),
+        Some(session_name),
         backend.clone(),
         None,
         None,
@@ -12518,6 +12554,8 @@ mod tests {
             worktree_path: "/tmp/wt".to_string(),
             session_id: Some("session-1".to_string()),
             source: "ai".to_string(),
+            backend: Some("claude".to_string()),
+            model: Some("opus".to_string()),
         });
 
         assert_eq!(job.status, ReviewJobStatus::Running);
@@ -12551,6 +12589,8 @@ mod tests {
             worktree_path: "/tmp/wt".to_string(),
             session_id: Some("session-1".to_string()),
             source: "coderabbit-cli".to_string(),
+            backend: None,
+            model: None,
         });
 
         let cancelled = registry.mark_cancelled("job-2").unwrap();
@@ -12569,6 +12609,8 @@ mod tests {
             worktree_path: "/tmp/wt".to_string(),
             session_id: Some("session-1".to_string()),
             source: "ai".to_string(),
+            backend: Some("claude".to_string()),
+            model: Some("opus".to_string()),
         });
 
         assert!(registry.has_running_for_worktree("wt-1"));
@@ -12586,6 +12628,8 @@ mod tests {
                 worktree_path: "/tmp/wt".to_string(),
                 session_id: None,
                 source: "ai".to_string(),
+                backend: Some("claude".to_string()),
+                model: Some("opus".to_string()),
             })
             .unwrap();
 
@@ -12599,8 +12643,46 @@ mod tests {
                 worktree_path: "/tmp/wt".to_string(),
                 session_id: None,
                 source: "ai".to_string(),
+                backend: Some("claude".to_string()),
+                model: Some("opus".to_string()),
             })
             .is_err());
+    }
+
+    #[test]
+    fn review_job_registry_allows_distinct_backend_model_pairs() {
+        let registry = ReviewJobRegistry::default();
+        for (id, backend, model) in [
+            ("job-claude", "claude", "opus"),
+            ("job-codex", "codex", "gpt-5.6-sol"),
+        ] {
+            registry
+                .try_insert_running(ReviewJobStart {
+                    id: id.to_string(),
+                    review_run_id: format!("run-{id}"),
+                    worktree_id: "wt-1".to_string(),
+                    worktree_path: "/tmp/wt".to_string(),
+                    session_id: None,
+                    source: "ai".to_string(),
+                    backend: Some(backend.to_string()),
+                    model: Some(model.to_string()),
+                })
+                .unwrap();
+        }
+
+        assert_eq!(registry.list().len(), 2);
+    }
+
+    #[test]
+    fn review_session_name_identifies_backend_and_model() {
+        assert_eq!(
+            review_session_name("ai", Some("codex"), Some("gpt-5.6-sol")),
+            "Code Review · Codex · gpt-5.6-sol"
+        );
+        assert_eq!(
+            review_session_name("coderabbit-cli", None, None),
+            "Code Review · CodeRabbit CLI"
+        );
     }
 
     #[test]
@@ -12614,6 +12696,8 @@ mod tests {
                 worktree_path: "/tmp/wt".to_string(),
                 session_id: None,
                 source: "ai".to_string(),
+                backend: Some("claude".to_string()),
+                model: Some("opus".to_string()),
             })
             .unwrap();
 

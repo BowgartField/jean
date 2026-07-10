@@ -26,12 +26,14 @@ import type {
   Backend,
   Session,
 } from '@/types/chat'
-import type { Project, ReviewResponse } from '@/types/projects'
+import type { Project, StartReviewJobResponse } from '@/types/projects'
 import { useQueryClient } from '@tanstack/react-query'
 import { useInstalledBackends } from '@/hooks/useInstalledBackends'
 import { chatQueryKeys } from '@/services/chat'
 import { projectsQueryKeys } from '@/services/projects'
 import { triggerImmediateGitPoll, performGitPull } from '@/services/git-status'
+import { resolveCodeReviewConfigs } from '@/lib/code-review-configs'
+import { generateId } from '@/lib/uuid'
 
 /**
  * Command context hook - provides essential actions for commands
@@ -576,51 +578,59 @@ export function useCommandContext(
       return
     }
 
-    const toastId = toast.loading('Running AI code review...')
+    const toastId = toast.loading('Starting AI code review...')
     try {
-      const result = await invoke<ReviewResponse>('run_review_with_ai', {
-        worktreePath: activeWorktreePath,
-        customPrompt: preferences?.magic_prompts?.code_review,
-        backend: resolveMagicPromptBackend(
-          preferences?.magic_prompt_backends,
-          'code_review_backend',
-          preferences?.default_backend
-        ),
-        model: preferences?.magic_prompt_models?.code_review_model,
-        customProfileName: resolveMagicPromptProvider(
-          preferences?.magic_prompt_providers,
-          'code_review_provider',
-          preferences?.default_provider
-        ),
-        reasoningEffort:
-          preferences?.magic_prompt_efforts?.code_review_effort ?? null,
+      const configs = resolveCodeReviewConfigs({
+        configured: preferences?.magic_code_review_configs,
+        fallbackBackend:
+          resolveMagicPromptBackend(
+            preferences?.magic_prompt_backends,
+            'code_review_backend',
+            preferences?.default_backend
+          ) ?? 'claude',
+        fallbackModel:
+          preferences?.magic_prompt_models?.code_review_model ?? 'sonnet',
       })
-
-      // Store review results in Zustand (also activates review tab)
-      const { setReviewResults } = useChatStore.getState()
-      setReviewResults(activeWorktreeId, result)
-
-      const findingCount = result.findings.length
-      const statusEmoji =
-        result.approval_status === 'approved'
-          ? 'Approved'
-          : result.approval_status === 'changes_requested'
-            ? 'Changes requested'
-            : 'Needs discussion'
-
-      toast.success(
-        `Review complete: ${statusEmoji} (${findingCount} findings)`,
-        { id: toastId }
+      await Promise.all(
+        configs.map(config =>
+          invoke<StartReviewJobResponse>('start_review_job', {
+            worktreeId: activeWorktreeId,
+            worktreePath: activeWorktreePath,
+            source: 'ai',
+            backend: config.backend,
+            customPrompt: preferences?.magic_prompts?.code_review,
+            model: config.model,
+            customProfileName: resolveMagicPromptProvider(
+              preferences?.magic_prompt_providers,
+              'code_review_provider',
+              preferences?.default_provider
+            ),
+            reasoningEffort:
+              preferences?.magic_prompt_efforts?.code_review_effort ?? null,
+            reviewRunId: generateId(),
+            reviewType: null,
+          })
+        )
       )
+      queryClient.invalidateQueries({
+        queryKey: chatQueryKeys.sessions(activeWorktreeId),
+      })
+      toast.success(`Started ${configs.length} code review session(s)`, {
+        id: toastId,
+      })
     } catch (error) {
       toast.error(`Failed to review: ${error}`, { id: toastId })
     }
   }, [
     preferences?.magic_prompts?.code_review,
     preferences?.magic_prompt_models?.code_review_model,
+    preferences?.magic_code_review_configs,
+    preferences?.magic_prompt_backends,
+    preferences?.default_backend,
     preferences?.magic_prompt_providers,
     preferences?.default_provider,
     preferences?.magic_prompt_efforts?.code_review_effort,
+    queryClient,
   ])
 
   // Terminal - Open terminal panel

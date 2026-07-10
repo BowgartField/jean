@@ -151,4 +151,68 @@ describe('MagicPromptsPane', () => {
       'max-md:w-full'
     )
   })
+
+  it('shows presets in a dropdown with every GPT 5.6 variant', async () => {
+    const user = userEvent.setup()
+    render(<MagicPromptsPane />)
+
+    expect(screen.queryByRole('button', { name: 'Claude Defaults' })).toBeNull()
+
+    await user.click(screen.getByRole('button', { name: 'Apply preset' }))
+
+    expect(
+      screen.getByRole('menuitem', { name: 'Claude Defaults' })
+    ).toBeVisible()
+    expect(screen.getByRole('menuitem', { name: 'GPT 5.6 Sol' })).toBeVisible()
+    expect(
+      screen.getByRole('menuitem', { name: 'GPT 5.6 Sol Fast' })
+    ).toBeVisible()
+    expect(screen.getByRole('menuitem', { name: 'GPT 5.6 Luna' })).toBeVisible()
+    expect(
+      screen.getByRole('menuitem', { name: 'GPT 5.6 Luna Fast' })
+    ).toBeVisible()
+    expect(
+      screen.getByRole('menuitem', { name: 'GPT 5.6 Terra' })
+    ).toBeVisible()
+    expect(
+      screen.getByRole('menuitem', { name: 'GPT 5.6 Terra Fast' })
+    ).toBeVisible()
+
+    await user.click(
+      screen.getByRole('menuitem', { name: 'GPT 5.6 Luna Fast' })
+    )
+
+    expect(mutateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        magic_prompt_models: expect.objectContaining({
+          investigate_issue_model: 'gpt-5.6-luna-fast',
+          review_comments_model: 'gpt-5.6-luna-fast',
+        }),
+        magic_prompt_backends: expect.objectContaining({
+          investigate_issue_backend: 'codex',
+          review_comments_backend: 'codex',
+        }),
+        magic_code_review_configs: [
+          { backend: 'codex', model: 'gpt-5.6-luna-fast' },
+        ],
+      })
+    )
+  })
+
+  it('adds a second unique backend and model to code review', async () => {
+    const user = userEvent.setup()
+    render(<MagicPromptsPane />)
+
+    await user.click(screen.getByText('Code Review'))
+    await user.click(screen.getByRole('button', { name: 'Add review' }))
+
+    expect(mutateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        magic_code_review_configs: [
+          expect.objectContaining({ backend: 'claude' }),
+          expect.objectContaining({ backend: 'codex' }),
+        ],
+      })
+    )
+  })
 })

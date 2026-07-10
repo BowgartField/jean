@@ -608,8 +608,8 @@ export function SessionChatModal({
       })
   }, [isOpen, worktreeId, worktreePath])
 
-  // Sorted tab order: attention and active sessions first, review next,
-  // idle/new empty sessions last. Within each tier, manual tab order wins.
+  // Keep Code Review first, then attention and active sessions, review,
+  // and idle/new empty sessions. Within each tier, manual tab order wins.
   const sortedCards = useMemo(() => {
     return sortSessionCardsForTabs(cards)
   }, [cards])

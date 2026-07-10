@@ -13,7 +13,12 @@ export type MessageRole = 'user' | 'assistant'
  * - megathink: 10K tokens budget
  * - ultrathink: 32K tokens budget (default)
  */
-export type ThinkingLevel = 'off' | 'think' | 'megathink' | 'ultrathink'
+export type ThinkingLevel =
+  | 'off'
+  | 'think'
+  | 'megathink'
+  | 'ultrathink'
+  | (string & {})
 
 /**
  * Effort level for Opus adaptive thinking
@@ -35,6 +40,7 @@ export type EffortLevel =
   | 'xhigh'
   | 'max'
   | 'ultracode'
+  | (string & {})
 
 /**
  * Backend for a chat session (Claude CLI, Codex CLI, OpenCode, Cursor, PI, or Command Code)
@@ -821,7 +827,6 @@ export function buildCodexUserInputAnswerMap(
     })
   )
 }
-
 
 export function getAskUserQuestions(input: unknown): Question[] | null {
   if (typeof input !== 'object' || input === null || !('questions' in input)) {

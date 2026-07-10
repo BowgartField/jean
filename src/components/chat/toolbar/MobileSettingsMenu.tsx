@@ -83,6 +83,7 @@ import {
 import { useGitHubPRs } from '@/services/github'
 import { chatQueryKeys } from '@/services/chat'
 import { getResumeCommand } from '@/components/chat/session-card-utils'
+import type { ModelReasoningCapability } from '@/services/model-catalog'
 
 interface MobileSettingsMenuProps {
   isDisabled: boolean
@@ -97,6 +98,7 @@ interface MobileSettingsMenuProps {
   hideThinkingLevel?: boolean
   useAdaptiveThinking: boolean
   isCodex: boolean
+  modelReasoning?: ModelReasoningCapability | null
   customCliProfiles: CustomCliProfile[]
 
   onOpenBackendModelPicker: () => void
@@ -145,6 +147,7 @@ export function MobileSettingsMenu({
   hideThinkingLevel,
   useAdaptiveThinking,
   isCodex,
+  modelReasoning,
   customCliProfiles,
   onOpenBackendModelPicker,
   handleProviderChange,
@@ -178,29 +181,53 @@ export function MobileSettingsMenu({
   const isGrok = selectedBackend === 'grok'
   const singleRunScript =
     runScripts.length === 1 ? (runScripts[0] ?? null) : null
-  const usesEffortControl = useAdaptiveThinking || isCodex || isPi || isGrok
-  const effortLevelOptions = isPi
-    ? PI_EFFORT_LEVEL_OPTIONS
-    : isCodex
-      ? CODEX_EFFORT_LEVEL_OPTIONS
-      : isGrok
-        ? GROK_EFFORT_LEVEL_OPTIONS
-        : EFFORT_LEVEL_OPTIONS
+  const usesEffortControl =
+    modelReasoning?.type === 'effort' ||
+    (modelReasoning === undefined &&
+      (useAdaptiveThinking || isCodex || isPi || isGrok))
+  const effortLevelOptions =
+    modelReasoning?.type === 'effort'
+      ? modelReasoning.levels
+      : isPi
+        ? PI_EFFORT_LEVEL_OPTIONS
+        : isCodex
+          ? CODEX_EFFORT_LEVEL_OPTIONS
+          : isGrok
+            ? GROK_EFFORT_LEVEL_OPTIONS
+            : EFFORT_LEVEL_OPTIONS
+  const thinkingLevelOptions =
+    modelReasoning?.type === 'thinking'
+      ? modelReasoning.levels
+      : THINKING_LEVEL_OPTIONS
   const displayedEffortLevel =
-    isCodex || isPi
-      ? selectedEffortLevel === 'max'
-        ? 'high'
-        : selectedEffortLevel === 'ultracode'
-          ? 'xhigh'
+    modelReasoning?.type === 'effort'
+      ? modelReasoning.levels.some(o => o.value === selectedEffortLevel)
+        ? selectedEffortLevel
+        : modelReasoning.default
+      : isCodex || isPi
+        ? selectedEffortLevel === 'max'
+          ? 'high'
+          : selectedEffortLevel === 'ultracode'
+            ? 'xhigh'
+            : selectedEffortLevel
+        : isGrok && selectedEffortLevel === 'ultracode'
+          ? 'max'
           : selectedEffortLevel
-      : isGrok && selectedEffortLevel === 'ultracode'
-        ? 'max'
-        : selectedEffortLevel
   const displayedEffortLabel =
     effortLevelOptions.find(o => o.value === displayedEffortLevel)?.label ??
     displayedEffortLevel
+  const displayedThinkingLevel =
+    modelReasoning?.type === 'thinking' &&
+    !modelReasoning.levels.some(o => o.value === selectedThinkingLevel)
+      ? modelReasoning.default
+      : selectedThinkingLevel
+  const displayedThinkingLabel =
+    thinkingLevelOptions.find(o => o.value === displayedThinkingLevel)?.label ??
+    displayedThinkingLevel
   const hideReasoningControl =
-    hideThinkingLevel || selectedBackend === 'commandcode'
+    hideThinkingLevel ||
+    modelReasoning === null ||
+    selectedBackend === 'commandcode'
 
   const isMobile = useIsMobile()
   const queryClient = useQueryClient()
@@ -448,26 +475,22 @@ export function MobileSettingsMenu({
               <Brain className="mr-2 h-4 w-4 text-muted-foreground" />
               <span>Thinking</span>
               <span className="ml-auto w-16 text-right text-xs text-muted-foreground">
-                {
-                  THINKING_LEVEL_OPTIONS.find(
-                    o => o.value === selectedThinkingLevel
-                  )?.label
-                }
+                {displayedThinkingLabel}
               </span>
             </DropdownMenuSubTrigger>
             <DropdownMenuSubContent>
               <DropdownMenuRadioGroup
-                value={selectedThinkingLevel}
+                value={displayedThinkingLevel}
                 onValueChange={handleThinkingLevelChange}
               >
-                {THINKING_LEVEL_OPTIONS.map(option => (
+                {thinkingLevelOptions.map(option => (
                   <DropdownMenuRadioItem
                     key={option.value}
                     value={option.value}
                   >
                     {option.label}
                     <span className="ml-auto pl-4 text-xs text-muted-foreground">
-                      {option.tokens}
+                      {'tokens' in option ? option.tokens : option.description}
                     </span>
                   </DropdownMenuRadioItem>
                 ))}

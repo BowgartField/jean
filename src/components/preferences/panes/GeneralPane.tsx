@@ -132,6 +132,7 @@ import { usePreferences, usePatchPreferences } from '@/services/preferences'
 import {
   getCatalogDefaultModelOptions,
   getCatalogModelOptions,
+  getCatalogModelReasoning,
   useModelCatalog,
 } from '@/services/model-catalog'
 import type { AppPreferences } from '@/types/preferences'
@@ -234,6 +235,20 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
   const queryClient = useQueryClient()
   const { data: preferences } = usePreferences()
   const { data: modelCatalog } = useModelCatalog()
+  const codexReasoning = getCatalogModelReasoning(
+    modelCatalog,
+    'codex',
+    preferences?.selected_codex_model ?? 'gpt-5.5'
+  )
+  const selectedCodexReasoningOptions =
+    codexReasoning?.type === 'effort'
+      ? codexReasoning.levels
+      : codexReasoningOptions
+  const claudeReasoning = getCatalogModelReasoning(
+    modelCatalog,
+    'claude',
+    preferences?.selected_model ?? 'claude-opus-4-8[1m]'
+  )
   const patchPreferences = usePatchPreferences()
   const isWebAccessView = !isNativeApp()
   const webAccessSoundsEnabled = preferences?.web_access_sounds_enabled ?? true
@@ -2715,47 +2730,57 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
               </Select>
             </InlineField>
 
-            <InlineField
-              label="Thinking"
-              description="Claude Sonnet/traditional thinking level"
-            >
-              <Select
-                value={preferences?.thinking_level ?? 'off'}
-                onValueChange={handleThinkingLevelChange}
+            {claudeReasoning?.type === 'thinking' && (
+              <InlineField
+                label="Thinking"
+                description="Thinking level for the selected Claude model"
               >
-                <SelectTrigger className="w-full sm:w-80">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {thinkingLevelOptions.map(option => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </InlineField>
+                <Select
+                  value={preferences?.thinking_level ?? claudeReasoning.default}
+                  onValueChange={value =>
+                    handleThinkingLevelChange(value as ThinkingLevel)
+                  }
+                >
+                  <SelectTrigger className="w-full sm:w-80">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {claudeReasoning.levels.map(option => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </InlineField>
+            )}
 
-            <InlineField
-              label="Effort"
-              description="Claude Opus adaptive effort (requires CLI 2.1.32+)"
-            >
-              <Select
-                value={preferences?.default_effort_level ?? 'high'}
-                onValueChange={handleEffortLevelChange}
+            {claudeReasoning?.type === 'effort' && (
+              <InlineField
+                label="Effort"
+                description="Effort level for the selected Claude model"
               >
-                <SelectTrigger className="w-full sm:w-80">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {effortLevelOptions.map(option => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </InlineField>
+                <Select
+                  value={
+                    preferences?.default_effort_level ?? claudeReasoning.default
+                  }
+                  onValueChange={value =>
+                    handleEffortLevelChange(value as EffortLevel)
+                  }
+                >
+                  <SelectTrigger className="w-full sm:w-80">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {claudeReasoning.levels.map(option => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </InlineField>
+            )}
 
             <InlineField
               label="Chrome browser integration"
@@ -2815,7 +2840,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {codexReasoningOptions.map(option => (
+                  {selectedCodexReasoningOptions.map(option => (
                     <SelectItem key={option.value} value={option.value}>
                       {option.label}
                     </SelectItem>

@@ -158,6 +158,10 @@ import {
 } from '@/lib/model-utils'
 import { copyToClipboard, copyHtmlToClipboard } from '@/lib/clipboard'
 import { useClaudeCliStatus } from '@/services/claude-cli'
+import {
+  getCatalogModelReasoning,
+  useModelCatalog,
+} from '@/services/model-catalog'
 import { useAvailablePiModels } from '@/services/pi-cli'
 import { usePrStatus, usePrStatusEvents } from '@/services/pr-status'
 import type { PrDisplayStatus, CheckStatus } from '@/types/pr-status'
@@ -795,10 +799,22 @@ export function ChatWindow({
 
   // CLI version for adaptive thinking feature detection
   const { data: cliStatus } = useClaudeCliStatus()
+  const { data: modelCatalog } = useModelCatalog()
+  const selectedModelReasoning = getCatalogModelReasoning(
+    modelCatalog,
+    selectedBackend,
+    selectedModel
+  )
   // Custom providers don't support Opus 4.6 adaptive thinking — use thinking levels instead
   const useAdaptiveThinkingFlag =
     !isCustomProvider &&
-    supportsAdaptiveThinking(selectedModel, cliStatus?.version ?? null)
+    supportsAdaptiveThinking(
+      selectedModel,
+      cliStatus?.version ?? null,
+      selectedModelReasoning === undefined
+        ? undefined
+        : selectedModelReasoning?.type === 'effort'
+    )
 
   // Hide thinking level UI entirely for providers that don't support it
   const customCliProfiles = preferences?.custom_cli_profiles ?? []

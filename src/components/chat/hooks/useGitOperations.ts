@@ -50,8 +50,10 @@ import {
   resolveMagicPromptProvider,
   type CliBackend,
   type AppPreferences,
+  type MagicCodeReviewConfig,
 } from '@/types/preferences'
 import type { InvestigateOverride } from './useMagicCommands'
+import { resolveCodeReviewConfigs } from '@/lib/code-review-configs'
 
 interface SessionMutation<T> {
   mutate: (args: T) => void
@@ -714,7 +716,10 @@ export function useGitOperations({
   // If existingSessionId is provided, stores results on that session (in-place review from ChatWindow)
   // Creates a new session and stores review results in it
   const runReview = useCallback(
-    async (source: 'ai' | 'coderabbit-cli' | 'coderabbit-pr') => {
+    async (
+      source: 'ai' | 'coderabbit-cli' | 'coderabbit-pr',
+      reviewConfig?: MagicCodeReviewConfig
+    ) => {
       if (!activeWorktreeId || !activeWorktreePath) return
 
       const { setWorktreeLoading, clearWorktreeLoading } =
@@ -817,13 +822,17 @@ export function useGitOperations({
             worktreeId: activeWorktreeId,
             worktreePath: activeWorktreePath,
             source,
-            backend: resolveMagicPromptBackend(
-              preferences?.magic_prompt_backends,
-              'code_review_backend',
-              preferences?.default_backend
-            ),
+            backend:
+              reviewConfig?.backend ??
+              resolveMagicPromptBackend(
+                preferences?.magic_prompt_backends,
+                'code_review_backend',
+                preferences?.default_backend
+              ),
             customPrompt: preferences?.magic_prompts?.code_review,
-            model: preferences?.magic_prompt_models?.code_review_model,
+            model:
+              reviewConfig?.model ??
+              preferences?.magic_prompt_models?.code_review_model,
             customProfileName: resolveMagicPromptProvider(
               preferences?.magic_prompt_providers,
               'code_review_provider',
@@ -854,6 +863,7 @@ export function useGitOperations({
           `${reviewLabel} running for ${projectName}/${worktreeName}...`,
           {
             id: toastId,
+            duration: 5000,
             cancel: {
               label: 'Cancel',
               onClick: () => {
@@ -951,6 +961,7 @@ export function useGitOperations({
       queryClient,
       preferences?.magic_prompts?.code_review,
       preferences?.magic_prompt_models?.code_review_model,
+      preferences?.magic_code_review_configs,
       preferences?.magic_prompt_backends,
       preferences?.default_backend,
       preferences?.magic_prompt_providers,
@@ -959,7 +970,20 @@ export function useGitOperations({
     ]
   )
 
-  const handleReview = useCallback(() => runReview('ai'), [runReview])
+  const handleReview = useCallback(async () => {
+    const configs = resolveCodeReviewConfigs({
+      configured: preferences?.magic_code_review_configs,
+      fallbackBackend:
+        resolveMagicPromptBackend(
+          preferences?.magic_prompt_backends,
+          'code_review_backend',
+          preferences?.default_backend
+        ) ?? 'claude',
+      fallbackModel:
+        preferences?.magic_prompt_models?.code_review_model ?? 'sonnet',
+    })
+    await Promise.all(configs.map(config => runReview('ai', config)))
+  }, [preferences, runReview])
 
   const handleCodeRabbitReview = useCallback(
     () => runReview('coderabbit-cli'),

@@ -1242,11 +1242,7 @@ pub async fn dispatch_command(
                     }
                     Some(crate::chat::types::ThinkingLevel::Off)
                 }
-                Some(other) => {
-                    return Err(format!(
-                            "invalid args `thinkingLevel` for command `send_chat_message`: unknown variant `{other}`, expected one of `off`, `think`, `megathink`, `ultrathink`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultracode`"
-                        ));
-                }
+                Some(other) => Some(crate::chat::types::ThinkingLevel::Other(other.to_string())),
             };
             let mcp_config: Option<String> = field_opt(&args, "mcpConfig", "mcp_config")?;
             let chrome_enabled: Option<bool> = field_opt(&args, "chromeEnabled", "chrome_enabled")?;

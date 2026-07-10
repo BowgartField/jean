@@ -209,6 +209,8 @@ pub struct AppPreferences {
     #[serde(default)]
     pub magic_prompt_models: MagicPromptModels, // Per-prompt model overrides
     #[serde(default)]
+    pub magic_code_review_configs: Vec<MagicCodeReviewConfig>, // Up to five unique backend/model review runners
+    #[serde(default)]
     pub magic_prompt_providers: MagicPromptProviders, // Per-prompt provider overrides (None = use default_provider)
     #[serde(default)]
     pub magic_prompt_backends: MagicPromptBackends, // Per-prompt backend overrides (None = use project/global default_backend)
@@ -269,7 +271,11 @@ pub struct AppPreferences {
     #[serde(default = "default_chrome_enabled")]
     pub chrome_enabled: bool, // Enable browser automation via Chrome extension
     #[serde(default = "default_zoom_level")]
-    pub zoom_level: u32, // Zoom level percentage (50-200, default 100)
+    pub zoom_level: u32, // Desktop zoom level percentage (50-200, default 90)
+    #[serde(default = "default_zoom_level")]
+    pub mobile_zoom_level: u32, // Mobile zoom level percentage (50-200, default 90)
+    #[serde(default = "default_sync_zoom_levels")]
+    pub sync_zoom_levels: bool, // Keep desktop and mobile zoom levels in sync
     #[serde(default)]
     pub custom_cli_profiles: Vec<CustomCliProfile>, // Custom CLI settings profiles (e.g., OpenRouter, MiniMax)
     #[serde(default)]
@@ -679,6 +685,10 @@ fn default_zoom_level() -> u32 {
     90 // 90% = slightly smaller default
 }
 
+fn default_sync_zoom_levels() -> bool {
+    true
+}
+
 fn default_allow_web_tools_in_plan_mode() -> bool {
     true // Enabled by default
 }
@@ -954,6 +964,19 @@ mod tests {
         let prefs: AppPreferences = serde_json::from_value(prefs_json).unwrap();
 
         assert!(prefs.web_access_sounds_enabled);
+    }
+
+    #[test]
+    fn app_preferences_sync_zoom_levels_for_existing_prefs() {
+        let mut prefs_json = serde_json::to_value(AppPreferences::default()).unwrap();
+        let object = prefs_json.as_object_mut().unwrap();
+        object.remove("mobile_zoom_level");
+        object.remove("sync_zoom_levels");
+
+        let prefs: AppPreferences = serde_json::from_value(prefs_json).unwrap();
+
+        assert_eq!(prefs.mobile_zoom_level, 90);
+        assert!(prefs.sync_zoom_levels);
     }
 
     #[test]
@@ -1777,6 +1800,12 @@ pub struct MagicPromptModels {
     pub review_comments_model: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MagicCodeReviewConfig {
+    pub backend: String,
+    pub model: String,
+}
+
 fn default_sonnet_model() -> String {
     "sonnet".to_string()
 }
@@ -2107,6 +2136,7 @@ impl Default for AppPreferences {
             auto_recaps_enabled: default_auto_recaps_enabled(),
             magic_prompts: MagicPrompts::default(),
             magic_prompt_models: MagicPromptModels::default(),
+            magic_code_review_configs: Vec::new(),
             magic_prompt_providers: MagicPromptProviders::default(),
             magic_prompt_backends: MagicPromptBackends::default(),
             magic_prompt_efforts: MagicPromptReasoningEfforts::default(),
@@ -2139,6 +2169,8 @@ impl Default for AppPreferences {
             has_seen_jean_mcp_intro: false,
             chrome_enabled: default_chrome_enabled(),
             zoom_level: default_zoom_level(),
+            mobile_zoom_level: default_zoom_level(),
+            sync_zoom_levels: default_sync_zoom_levels(),
             custom_cli_profiles: Vec::new(),
             default_provider: None,
             favorite_models: Vec::new(),
