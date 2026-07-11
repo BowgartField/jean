@@ -300,4 +300,17 @@ describe('transport bootstrap', () => {
 
     expect(MockWebSocket.instances).toHaveLength(1)
   })
+
+  it('notifies established disconnect listeners synchronously', async () => {
+    const transport = await loadTransportModule()
+    const onDisconnect = vi.fn()
+
+    transport.onEstablishedWsDisconnect(onDisconnect)
+    transport.connectTransport()
+    await flushAsync()
+
+    getWs(0).close()
+
+    expect(onDisconnect).toHaveBeenCalledOnce()
+  })
 })

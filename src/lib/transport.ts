@@ -314,6 +314,7 @@ class WsTransport {
   private _connecting = false
   private _authError: string | null = null
   private _subscribers = new Set<() => void>()
+  private _establishedDisconnectListeners = new Set<() => void>()
   private _connectEnabled = false
   /** Track last seen sequence numbers to deduplicate bootstrap replay. */
   private _lastSeqBySession = new Map<string, number>()
@@ -358,6 +359,11 @@ class WsTransport {
   subscribe(callback: () => void): () => void {
     this._subscribers.add(callback)
     return () => this._subscribers.delete(callback)
+  }
+
+  onEstablishedDisconnect(callback: () => void): () => void {
+    this._establishedDisconnectListeners.add(callback)
+    return () => this._establishedDisconnectListeners.delete(callback)
   }
 
   /** Get current connection snapshot for useSyncExternalStore. */
@@ -489,6 +495,20 @@ class WsTransport {
 
     this.ws.onclose = () => {
       const wasConnected = this._connected
+
+      if (wasConnected) {
+        for (const callback of this._establishedDisconnectListeners) {
+          try {
+            callback()
+          } catch (error) {
+            console.error(
+              '[WsTransport] Established disconnect listener failed:',
+              error
+            )
+          }
+        }
+      }
+
       this.clearConnectWatchdog()
       this.stopLivenessTimer()
       this.ws = null
@@ -893,6 +913,11 @@ export function connectTransport(): void {
   if (isNativeApp() || isE2eMocked) return
   setWebAccessEnabled(true)
   wsTransport.enableConnect()
+}
+
+/** Run immediately when an established browser WebSocket disconnects. */
+export function onEstablishedWsDisconnect(callback: () => void): () => void {
+  return wsTransport.onEstablishedDisconnect(callback)
 }
 
 /**

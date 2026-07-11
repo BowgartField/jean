@@ -10,6 +10,7 @@ import {
   setAppDataDir,
   hasPreloadedData,
   listen,
+  onEstablishedWsDisconnect,
   type InitialData,
 } from '@/lib/transport'
 import { isNativeApp } from '@/lib/environment'
@@ -101,7 +102,7 @@ function WsAuthErrorOverlay() {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/90">
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-background/90">
       <WebAccessAuthScreen
         authError={authError}
         onTokenSubmit={handleTokenSubmit}
@@ -672,6 +673,16 @@ function App() {
   // Browser mode: only open WebSocket after preload + listener registration.
   // This lets us replay buffered server events before live events start arriving.
   useEffect(() => {
+    if (isNativeApp()) return
+
+    return onEstablishedWsDisconnect(() => {
+      logger.info('WebSocket disconnected, reloading web app')
+      captureWebReloadState()
+      window.location.reload()
+    })
+  }, [captureWebReloadState])
+
+  useEffect(() => {
     if (isNativeApp() || isPreloading || hasStartedTransportRef.current) return
     hasStartedTransportRef.current = true
     connectTransport()
@@ -696,20 +707,8 @@ function App() {
   // terminals alive, so reloading behaves like reopening Jean without losing
   // backend work.
   const wsConnected = useWsConnectionStatus()
-  const hadWsConnectionRef = useRef(false)
   useEffect(() => {
-    if (isNativeApp()) return
-
-    if (!wsConnected) {
-      if (hadWsConnectionRef.current) {
-        logger.info('WebSocket disconnected, reloading web app')
-        captureWebReloadState()
-        window.location.reload()
-      }
-      return
-    }
-
-    hadWsConnectionRef.current = true
+    if (isNativeApp() || !wsConnected) return
 
     // First connect: invalidate non-preloaded queries. If the HTTP preload
     // failed, invalidate everything so it fetches over the open WebSocket.
@@ -732,7 +731,7 @@ function App() {
       )
       queryClient.invalidateQueries()
     }
-  }, [wsConnected, queryClient, captureWebReloadState])
+  }, [wsConnected, queryClient])
 
   // Add native-app class to body for desktop-only CSS (cursor, user-select, etc.)
   useEffect(() => {
@@ -1226,7 +1225,7 @@ function App() {
         <MainWindow />
         {!isNativeApp() && !wsConnected && (
           <div
-            className="pointer-events-auto fixed inset-0 z-40 flex items-center justify-center bg-background/20 backdrop-blur-md"
+            className="pointer-events-auto fixed inset-0 z-[70] flex items-center justify-center bg-background/20 backdrop-blur-md"
             aria-hidden="true"
           >
             <div className="size-8 animate-spin rounded-full border-2 border-muted border-t-primary" />

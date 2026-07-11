@@ -124,6 +124,11 @@ export function ProjectContextMenu({
           {existingBaseSession ? 'Open Base Session' : 'New Base Session'}
         </ContextMenuItem>
 
+        <ContextMenuItem onClick={handleOpenSettings}>
+          <Settings className="mr-2 h-4 w-4" />
+          Project Settings
+        </ContextMenuItem>
+
         <ContextMenuSeparator />
 
         <ContextMenuItem onClick={handleOpenInEditor}>
@@ -163,11 +168,6 @@ export function ProjectContextMenu({
             Move to Root
           </ContextMenuItem>
         )}
-
-        <ContextMenuItem onClick={handleOpenSettings}>
-          <Settings className="mr-2 h-4 w-4" />
-          Project Settings
-        </ContextMenuItem>
 
         <ContextMenuItem
           variant="destructive"

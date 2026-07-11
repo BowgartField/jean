@@ -8,9 +8,7 @@ describe('web reload recovery UI', () => {
     expect(source).toContain(
       "logger.info('WebSocket disconnected, reloading web app')"
     )
-    expect(source).toMatch(
-      /if \(hadWsConnectionRef\.current\) \{[\s\S]*?window\.location\.reload\(\)/
-    )
+    expect(source).toContain('onEstablishedWsDisconnect(() =>')
     expect(source).toMatch(
       /captureWebReloadState\(\)[\s\S]*?window\.location\.reload\(\)/
     )

@@ -2943,6 +2943,17 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
                         : 'New Base Session'}
                     </DropdownMenuItem>
 
+                    <DropdownMenuItem
+                      onSelect={() =>
+                        useProjectsStore
+                          .getState()
+                          .openProjectSettings(projectId)
+                      }
+                    >
+                      <Settings className="h-4 w-4" />
+                      Project Settings
+                    </DropdownMenuItem>
+
                     {mobileGitHubEnabled && (
                       <>
                         <DropdownMenuSeparator />
@@ -3065,17 +3076,6 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
                     </DropdownMenuItem>
 
                     <DropdownMenuSeparator />
-
-                    <DropdownMenuItem
-                      onSelect={() =>
-                        useProjectsStore
-                          .getState()
-                          .openProjectSettings(projectId)
-                      }
-                    >
-                      <Settings className="h-4 w-4" />
-                      Project Settings
-                    </DropdownMenuItem>
 
                     <DropdownMenuItem
                       variant="destructive"
