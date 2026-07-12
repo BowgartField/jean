@@ -587,6 +587,7 @@ describe('useGitOperations conflict resolution', () => {
         backend: 'claude',
         model: 'claude-opus-4-8[1m]',
         reasoningEffort: 'high',
+        sessionId: 'review-session-1',
       })
     )
   })

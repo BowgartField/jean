@@ -30,7 +30,6 @@ import type {
   LabelData,
   QueuedMessage,
 } from '@/types/chat'
-
 import { isTauri, projectsQueryKeys } from '@/services/projects'
 import { hasBackendTransport } from '@/lib/environment'
 import { preferencesQueryKeys } from '@/services/preferences'
@@ -40,7 +39,10 @@ import { useUIStore } from '@/store/ui-store'
 import { useTerminalStore } from '@/store/terminal-store'
 import { isNativeTerminalBackend } from '@/lib/native-cli-session'
 import { getResumeArgs } from '@/components/chat/session-card-utils'
-import type { ReviewResponse, Worktree } from '@/types/projects'
+import type {
+  StoredReviewResults,
+  Worktree,
+} from '@/types/projects'
 import { preserveQueryCacheOnError } from '@/lib/query-error'
 
 /** Default number of recent runs loaded on initial session fetch. */
@@ -417,7 +419,7 @@ export async function prefetchSessions(
     const executionModeUpdates: Record<string, ExecutionMode> = {}
     const primarySurfaceUpdates: Record<string, 'chat' | 'terminal'> = {}
     const labelUpdates: Record<string, LabelData> = {}
-    const reviewResultsUpdates: Record<string, ReviewResponse> = {}
+    const reviewResultsUpdates: Record<string, StoredReviewResults> = {}
     const answeredQuestionsUpdates: Record<string, Set<string>> = {}
     const submittedAnswersUpdates: Record<
       string,

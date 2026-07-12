@@ -53,7 +53,10 @@ import {
   type MagicCodeReviewConfig,
 } from '@/types/preferences'
 import type { InvestigateOverride } from './useMagicCommands'
-import { resolveCodeReviewConfigs } from '@/lib/code-review-configs'
+import {
+  resolveCodeReviewConfigs,
+  startCodeReviewsSequentially,
+} from '@/lib/code-review-configs'
 
 interface SessionMutation<T> {
   mutate: (args: T) => void
@@ -726,7 +729,8 @@ export function useGitOperations({
   const runReview = useCallback(
     async (
       source: 'ai' | 'coderabbit-cli' | 'coderabbit-pr',
-      reviewConfig?: MagicCodeReviewConfig
+      reviewConfig?: MagicCodeReviewConfig,
+      reviewSessionId?: string
     ) => {
       if (!activeWorktreeId || !activeWorktreePath) return
 
@@ -852,6 +856,7 @@ export function useGitOperations({
               null,
             reviewRunId,
             reviewType: source === 'coderabbit-cli' ? 'all' : null,
+            sessionId: reviewSessionId,
           }
         )
 
@@ -957,6 +962,7 @@ export function useGitOperations({
           }).catch(() => null)
           if (currentJob) handleTerminalReviewJob(currentJob)
         }
+        return job.sessionId
       } catch (error) {
         toast.error(`Failed to start review: ${error}`, { id: toastId })
       } finally {
@@ -992,18 +998,20 @@ export function useGitOperations({
       fallbackModel:
         preferences?.magic_prompt_models?.code_review_model ?? 'sonnet',
     })
-    await Promise.all(configs.map(config => runReview('ai', config)))
+    let reviewSessionId: string | undefined
+    await startCodeReviewsSequentially(configs, async config => {
+      reviewSessionId =
+        (await runReview('ai', config, reviewSessionId)) ?? reviewSessionId
+    })
   }, [preferences, runReview])
 
-  const handleCodeRabbitReview = useCallback(
-    () => runReview('coderabbit-cli'),
-    [runReview]
-  )
+  const handleCodeRabbitReview = useCallback(async () => {
+    await runReview('coderabbit-cli')
+  }, [runReview])
 
-  const handleCodeRabbitPrReview = useCallback(
-    () => runReview('coderabbit-pr'),
-    [runReview]
-  )
+  const handleCodeRabbitPrReview = useCallback(async () => {
+    await runReview('coderabbit-pr')
+  }, [runReview])
 
   // Handle Merge - validates and shows merge options dialog
   const handleMerge = useCallback(async () => {

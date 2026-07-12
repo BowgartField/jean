@@ -524,6 +524,20 @@ export interface ReviewResponse {
   approval_status: 'approved' | 'changes_requested' | 'needs_discussion'
 }
 
+export interface ReviewResultEntry {
+  backend: string
+  model: string
+  status?: ReviewJobStatus
+  result?: ReviewResponse
+  error?: string
+}
+
+export interface GroupedReviewResults {
+  reviews: ReviewResultEntry[]
+}
+
+export type StoredReviewResults = ReviewResponse | GroupedReviewResults
+
 export type ReviewJobStatus = 'running' | 'completed' | 'failed' | 'cancelled'
 
 export interface ReviewJob {

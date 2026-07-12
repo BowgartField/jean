@@ -32,7 +32,10 @@ import { useInstalledBackends } from '@/hooks/useInstalledBackends'
 import { chatQueryKeys } from '@/services/chat'
 import { projectsQueryKeys } from '@/services/projects'
 import { triggerImmediateGitPoll, performGitPull } from '@/services/git-status'
-import { resolveCodeReviewConfigs } from '@/lib/code-review-configs'
+import {
+  resolveCodeReviewConfigs,
+  startCodeReviewsSequentially,
+} from '@/lib/code-review-configs'
 import { generateId } from '@/lib/uuid'
 
 /**
@@ -591,9 +594,11 @@ export function useCommandContext(
         fallbackModel:
           preferences?.magic_prompt_models?.code_review_model ?? 'sonnet',
       })
-      await Promise.all(
-        configs.map(config =>
-          invoke<StartReviewJobResponse>('start_review_job', {
+      let reviewSessionId: string | undefined
+      await startCodeReviewsSequentially(configs, async config => {
+        const { job } = await invoke<StartReviewJobResponse>(
+          'start_review_job',
+          {
             worktreeId: activeWorktreeId,
             worktreePath: activeWorktreePath,
             source: 'ai',
@@ -611,9 +616,11 @@ export function useCommandContext(
               null,
             reviewRunId: generateId(),
             reviewType: null,
-          })
+            sessionId: reviewSessionId,
+          }
         )
-      )
+        reviewSessionId ??= job.sessionId
+      })
       queryClient.invalidateQueries({
         queryKey: chatQueryKeys.sessions(activeWorktreeId),
       })

@@ -410,6 +410,12 @@ impl ReviewJobRegistry {
             .any(|job| job.worktree_id == worktree_id && job.status == ReviewJobStatus::Running)
     }
 
+    pub fn has_running_for_session(&self, session_id: &str) -> bool {
+        self.jobs.lock().unwrap().values().any(|job| {
+            job.session_id.as_deref() == Some(session_id) && job.status == ReviewJobStatus::Running
+        })
+    }
+
     pub fn list(&self) -> Vec<ReviewJob> {
         let mut jobs: Vec<_> = self.jobs.lock().unwrap().values().cloned().collect();
         jobs.sort_by_key(|job| std::cmp::Reverse(job.created_at));
@@ -465,26 +471,63 @@ impl ReviewJobRegistry {
 
 static REVIEW_JOB_REGISTRY: Lazy<ReviewJobRegistry> = Lazy::new(ReviewJobRegistry::default);
 
-fn review_session_name(source: &str, backend: Option<&str>, model: Option<&str>) -> String {
+fn review_session_name(source: &str, _backend: Option<&str>, _model: Option<&str>) -> String {
     if source == "coderabbit-cli" {
         return "Code Review · CodeRabbit CLI".to_string();
     }
 
-    let backend_name = match backend.unwrap_or("default") {
-        "claude" => "Claude".to_string(),
-        "codex" => "Codex".to_string(),
-        "opencode" => "OpenCode".to_string(),
-        "commandcode" => "Command Code".to_string(),
-        value => {
-            let mut chars = value.chars();
-            chars
-                .next()
-                .map(|first| first.to_uppercase().collect::<String>() + chars.as_str())
-                .unwrap_or_default()
-        }
-    };
-    let model = model.unwrap_or("default");
-    format!("Code Review · {backend_name} · {model}")
+    "Code Review".to_string()
+}
+
+fn merge_review_result(
+    existing: Option<serde_json::Value>,
+    backend: &str,
+    model: &str,
+    response: &ReviewResponse,
+) -> Result<serde_json::Value, String> {
+    merge_review_entry(
+        existing,
+        backend,
+        model,
+        ReviewJobStatus::Completed,
+        Some(response),
+        None,
+    )
+}
+
+fn merge_review_entry(
+    existing: Option<serde_json::Value>,
+    backend: &str,
+    model: &str,
+    status: ReviewJobStatus,
+    response: Option<&ReviewResponse>,
+    error: Option<&str>,
+) -> Result<serde_json::Value, String> {
+    let mut reviews = existing
+        .and_then(|value| {
+            value
+                .get("reviews")
+                .and_then(|value| value.as_array())
+                .cloned()
+        })
+        .unwrap_or_default();
+    let mut entry = serde_json::json!({
+        "backend": backend,
+        "model": model,
+        "status": status,
+    });
+    if let Some(response) = response {
+        entry["result"] = serde_json::to_value(response).map_err(|error| error.to_string())?;
+    }
+    if let Some(error) = error {
+        entry["error"] = serde_json::Value::String(error.to_string());
+    }
+    reviews.retain(|entry| {
+        entry.get("backend").and_then(|value| value.as_str()) != Some(backend)
+            || entry.get("model").and_then(|value| value.as_str()) != Some(model)
+    });
+    reviews.push(entry);
+    Ok(serde_json::json!({ "reviews": reviews }))
 }
 
 /// List all projects
@@ -6857,6 +6900,7 @@ fn extract_json_object_from_text(text: &str) -> Result<String, String> {
 }
 
 fn build_claude_structured_output_args(model: &str, tools: &str, schema: &str) -> Vec<String> {
+    let tools = if tools == "none" { "" } else { tools };
     vec![
         "--print".to_string(),
         "--verbose".to_string(),
@@ -6869,8 +6913,6 @@ fn build_claude_structured_output_args(model: &str, tools: &str, schema: &str) -
         "--no-session-persistence".to_string(),
         "--tools".to_string(),
         tools.to_string(),
-        "--tools".to_string(),
-        "default".to_string(),
         "--max-turns".to_string(),
         "3".to_string(),
         "--json-schema".to_string(),
@@ -9303,6 +9345,7 @@ pub async fn start_review_job(
     review_run_id: Option<String>,
     reasoning_effort: Option<String>,
     review_type: Option<String>,
+    session_id: Option<String>,
 ) -> Result<StartReviewJobResponse, String> {
     let review_run_id = review_run_id.unwrap_or_else(|| Uuid::new_v4().to_string());
     let job_id = Uuid::new_v4().to_string();
@@ -9311,48 +9354,64 @@ pub async fn start_review_job(
         review_run_id: review_run_id.clone(),
         worktree_id: worktree_id.clone(),
         worktree_path: worktree_path.clone(),
-        session_id: None,
+        session_id: session_id.clone(),
         source: source.clone(),
         backend: backend.clone(),
         model: model.clone(),
     })?;
 
-    let session_name = review_session_name(&source, backend.as_deref(), model.as_deref());
+    let session_id = if let Some(session_id) = session_id {
+        session_id
+    } else {
+        let session_name = review_session_name(&source, backend.as_deref(), model.as_deref());
+        crate::chat::create_session(
+            app.clone(),
+            worktree_id.clone(),
+            worktree_path.clone(),
+            Some(session_name),
+            backend.clone(),
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .inspect_err(|_| {
+            REVIEW_JOB_REGISTRY.remove(&job_id);
+        })?
+        .id
+    };
 
-    let session = crate::chat::create_session(
-        app.clone(),
-        worktree_id.clone(),
-        worktree_path.clone(),
-        Some(session_name),
-        backend.clone(),
-        None,
-        None,
-        None,
-        None,
-        None,
-    )
-    .await
-    .inspect_err(|_| {
-        REVIEW_JOB_REGISTRY.remove(&job_id);
-    })?;
+    let entry_backend = if source == "coderabbit-cli" {
+        "coderabbit-cli"
+    } else {
+        backend.as_deref().unwrap_or("claude")
+    };
+    let entry_model = if source == "coderabbit-cli" {
+        "all"
+    } else {
+        model.as_deref().unwrap_or("default")
+    };
+    let job = REVIEW_JOB_REGISTRY
+        .attach_session(&job_id, session_id.clone())
+        .ok_or_else(|| "Review job reservation disappeared".to_string())?;
 
-    if let Err(error) = update_review_session_state(
-        app.clone(),
-        worktree_id.clone(),
-        worktree_path.clone(),
-        session.id.clone(),
-        Some(true),
+    if let Err(error) = update_review_session_entry(
+        &app,
+        &worktree_id,
+        &worktree_path,
+        &session_id,
+        entry_backend,
+        entry_model,
+        ReviewJobStatus::Running,
         None,
-    )
-    .await
-    {
+        None,
+    ) {
         REVIEW_JOB_REGISTRY.remove(&job_id);
         return Err(error);
     }
 
-    let job = REVIEW_JOB_REGISTRY
-        .attach_session(&job_id, session.id.clone())
-        .ok_or_else(|| "Review job reservation disappeared".to_string())?;
     emit_review_job_update(&app, &job);
 
     let task_app = app.clone();
@@ -9361,6 +9420,16 @@ pub async fn start_review_job(
         let review_worktree_path = worktree_path.clone();
         let review_source = source.clone();
         let review_run_id_for_task = review_run_id.clone();
+        let result_backend = if source == "coderabbit-cli" {
+            "coderabbit-cli".to_string()
+        } else {
+            backend.clone().unwrap_or_else(|| "claude".to_string())
+        };
+        let result_model = if source == "coderabbit-cli" {
+            "all".to_string()
+        } else {
+            model.clone().unwrap_or_else(|| "default".to_string())
+        };
 
         let result = tokio::task::spawn_blocking(move || {
             tauri::async_runtime::block_on(async move {
@@ -9393,39 +9462,48 @@ pub async fn start_review_job(
 
         match result {
             Ok(response) => {
-                let review_results = serde_json::to_value(&response).ok();
-                let _ = update_review_session_state(
-                    task_app.clone(),
-                    worktree_id.clone(),
-                    worktree_path.clone(),
-                    session.id.clone(),
-                    Some(false),
-                    review_results.map(Some),
-                )
-                .await;
                 if let Some(job) =
-                    REVIEW_JOB_REGISTRY.mark_completed(&job_id, session.id, &response)
+                    REVIEW_JOB_REGISTRY.mark_completed(&job_id, session_id.clone(), &response)
                 {
+                    let _ = update_review_session_entry(
+                        &task_app,
+                        &worktree_id,
+                        &worktree_path,
+                        &session_id,
+                        &result_backend,
+                        &result_model,
+                        ReviewJobStatus::Completed,
+                        Some(&response),
+                        None,
+                    );
                     emit_review_job_update(&task_app, &job);
                 }
             }
             Err(error) => {
                 let cancelled = error.to_lowercase().contains("cancelled")
                     || error.to_lowercase().contains("canceled");
-                let _ = update_review_session_state(
-                    task_app.clone(),
-                    worktree_id.clone(),
-                    worktree_path.clone(),
-                    session.id.clone(),
-                    Some(false),
-                    None,
-                )
-                .await;
-                let updated = if cancelled {
-                    REVIEW_JOB_REGISTRY.mark_cancelled(&job_id)
+                let (status, updated) = if cancelled {
+                    (
+                        ReviewJobStatus::Cancelled,
+                        REVIEW_JOB_REGISTRY.mark_cancelled(&job_id),
+                    )
                 } else {
-                    REVIEW_JOB_REGISTRY.mark_failed(&job_id, error)
+                    (
+                        ReviewJobStatus::Failed,
+                        REVIEW_JOB_REGISTRY.mark_failed(&job_id, error.clone()),
+                    )
                 };
+                let _ = update_review_session_entry(
+                    &task_app,
+                    &worktree_id,
+                    &worktree_path,
+                    &session_id,
+                    &result_backend,
+                    &result_model,
+                    status,
+                    None,
+                    Some(&error),
+                );
                 if let Some(job) = updated {
                     emit_review_job_update(&task_app, &job);
                 }
@@ -9434,6 +9512,34 @@ pub async fn start_review_job(
     });
 
     Ok(StartReviewJobResponse { job })
+}
+
+fn update_review_session_entry(
+    app: &AppHandle,
+    worktree_id: &str,
+    worktree_path: &str,
+    session_id: &str,
+    backend: &str,
+    model: &str,
+    status: ReviewJobStatus,
+    response: Option<&ReviewResponse>,
+    error: Option<&str>,
+) -> Result<(), String> {
+    crate::chat::with_sessions_mut(app, worktree_path, worktree_id, |sessions| {
+        let session = sessions
+            .find_session_mut(session_id)
+            .ok_or_else(|| format!("Session not found: {session_id}"))?;
+        session.review_results = Some(merge_review_entry(
+            session.review_results.take(),
+            backend,
+            model,
+            status,
+            response,
+            error,
+        )?);
+        session.is_reviewing = REVIEW_JOB_REGISTRY.has_running_for_session(session_id);
+        Ok(())
+    })
 }
 
 #[tauri::command]
@@ -12755,6 +12861,81 @@ mod tests {
     }
 
     #[test]
+    fn review_results_merge_distinct_backend_model_pairs() {
+        let codex = ReviewResponse {
+            summary: "codex".to_string(),
+            findings: vec![],
+            approval_status: "approved".to_string(),
+        };
+        let claude = ReviewResponse {
+            summary: "claude".to_string(),
+            findings: vec![],
+            approval_status: "changes_requested".to_string(),
+        };
+
+        let grouped = merge_review_result(None, "codex", "gpt-5.6-sol", &codex).unwrap();
+        let grouped =
+            merge_review_result(Some(grouped), "claude", "claude-fable-5", &claude).unwrap();
+
+        let reviews = grouped["reviews"].as_array().unwrap();
+        assert_eq!(reviews.len(), 2);
+        assert_eq!(reviews[0]["backend"], "codex");
+        assert_eq!(reviews[1]["model"], "claude-fable-5");
+    }
+
+    #[test]
+    fn grouped_review_tracks_running_status_before_results_arrive() {
+        let grouped = merge_review_entry(
+            None,
+            "codex",
+            "gpt-5.6-sol",
+            ReviewJobStatus::Running,
+            None,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(grouped["reviews"][0]["status"], "running");
+        assert!(grouped["reviews"][0].get("result").is_none());
+    }
+
+    #[test]
+    fn grouped_review_update_preserves_entry_order() {
+        let running = merge_review_entry(
+            None,
+            "codex",
+            "gpt-5.6-sol",
+            ReviewJobStatus::Running,
+            None,
+            None,
+        )
+        .unwrap();
+        let running = merge_review_entry(
+            Some(running),
+            "claude",
+            "claude-fable-5",
+            ReviewJobStatus::Running,
+            None,
+            None,
+        )
+        .unwrap();
+        let response = ReviewResponse {
+            summary: "codex complete".to_string(),
+            findings: vec![],
+            approval_status: "approved".to_string(),
+        };
+
+        let completed =
+            merge_review_result(Some(running), "codex", "gpt-5.6-sol", &response).unwrap();
+
+        let reviews = completed["reviews"].as_array().unwrap();
+        assert_eq!(reviews[0]["backend"], "codex");
+        assert_eq!(reviews[0]["status"], "completed");
+        assert_eq!(reviews[1]["backend"], "claude");
+        assert_eq!(reviews[1]["status"], "running");
+    }
+
+    #[test]
     fn review_job_registry_records_cancelled_state() {
         let registry = ReviewJobRegistry::default();
         registry.insert_running(ReviewJobStart {
@@ -12849,10 +13030,10 @@ mod tests {
     }
 
     #[test]
-    fn review_session_name_identifies_backend_and_model() {
+    fn review_session_name_groups_ai_reviews() {
         assert_eq!(
             review_session_name("ai", Some("codex"), Some("gpt-5.6-sol")),
-            "Code Review · Codex · gpt-5.6-sol"
+            "Code Review"
         );
         assert_eq!(
             review_session_name("coderabbit-cli", None, None),
@@ -13355,13 +13536,17 @@ Body
     }
 
     #[test]
-    fn test_build_claude_structured_output_args_includes_default_tools_without_plan_mode() {
+    fn test_build_claude_structured_output_args_disables_tools_for_structured_output() {
         let args = build_claude_structured_output_args("sonnet", "none", REVIEW_SCHEMA);
 
         assert!(args.windows(2).any(|w| w == ["--max-turns", "3"]));
         assert!(!args.iter().any(|arg| arg == "--permission-mode"));
-        assert!(args.windows(2).any(|w| w == ["--tools", "none"]));
-        assert!(args.windows(2).any(|w| w == ["--tools", "default"]));
+        assert!(args.windows(2).any(|w| w == ["--tools", ""]));
+        assert!(!args.iter().any(|arg| arg == "none" || arg == "default"));
+        assert_eq!(
+            args.iter().filter(|arg| arg.as_str() == "--tools").count(),
+            1
+        );
         assert!(args.windows(2).any(|w| w == ["--model", "sonnet"]));
         assert!(args
             .windows(2)

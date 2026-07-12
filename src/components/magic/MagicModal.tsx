@@ -112,7 +112,10 @@ import {
 } from '@/services/model-catalog'
 import { BackendLabel } from '@/components/ui/backend-label'
 import { ReviewMethodModal } from '@/components/chat/ReviewMethodModal'
-import { resolveCodeReviewConfigs } from '@/lib/code-review-configs'
+import {
+  resolveCodeReviewConfigs,
+  startCodeReviewsSequentially,
+} from '@/lib/code-review-configs'
 
 type MagicOption =
   | 'save-context'
@@ -1601,8 +1604,10 @@ ${resolveInstructions}`
               })
           }
 
-          await Promise.all(
-            reviewConfigs.map(async reviewConfig => {
+          let reviewSessionId: string | undefined
+          await startCodeReviewsSequentially(
+            reviewConfigs,
+            async reviewConfig => {
               const reviewRunId = generateId()
               const reviewLabel =
                 reviewSource === 'coderabbit-cli'
@@ -1644,8 +1649,11 @@ ${resolveInstructions}`
                     reviewRunId,
                     reviewType:
                       reviewSource === 'coderabbit-cli' ? 'all' : null,
+                    sessionId: reviewSessionId,
                   }
                 )
+
+                reviewSessionId ??= job.sessionId
 
                 if (job.sessionId) {
                   const { setActiveSession, clearActiveWorktree } =
@@ -1771,7 +1779,7 @@ ${resolveInstructions}`
               } finally {
                 clearWorktreeLoading(selectedWorktreeId)
               }
-            })
+            }
           )
           break
         }

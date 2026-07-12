@@ -31,6 +31,23 @@ export function resolveCodeReviewConfigs({
   })
 }
 
+export async function startCodeReviewsSequentially<T>(
+  configs: T[],
+  startReview: (config: T) => Promise<void>
+): Promise<void> {
+  const errors: unknown[] = []
+
+  for (const config of configs) {
+    try {
+      await startReview(config)
+    } catch (error) {
+      errors.push(error)
+    }
+  }
+
+  if (errors.length > 0) throw new AggregateError(errors)
+}
+
 export function getCodeReviewSessionName(
   config: MagicCodeReviewConfig
 ): string {

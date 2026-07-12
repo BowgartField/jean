@@ -2249,9 +2249,8 @@ impl Default for AppPreferences {
 // UI State data structure
 // Contains ephemeral UI state that should be restored on app restart
 //
-// NOTE: Session-specific state (answered_questions, submitted_answers, fixed_findings,
-// pending_permission_denials, denied_message_context, reviewing_sessions) is now
-// stored in the Session files. See update_session_state command.
+// NOTE: Durable session-specific state is stored in Session files. Lightweight
+// unsent input drafts stay here so textareas survive full UI reloads.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UIState {
     /// Last opened worktree ID (to restore active worktree)
@@ -2289,6 +2288,10 @@ pub struct UIState {
     /// Active session ID per worktree (for restoring open tabs)
     #[serde(default)]
     pub active_session_ids: std::collections::HashMap<String, String>,
+
+    /// Unsent chat textarea content per session
+    #[serde(default)]
+    pub input_drafts: std::collections::HashMap<String, String>,
 
     /// Whether the review sidebar is visible
     #[serde(default)]
@@ -2457,6 +2460,7 @@ impl Default for UIState {
             left_sidebar_size: None,
             left_sidebar_visible: None,
             active_session_ids: std::collections::HashMap::new(),
+            input_drafts: std::collections::HashMap::new(),
             review_sidebar_visible: None,
             modal_terminal_open: std::collections::HashMap::new(),
             modal_terminal_dock_mode: None,

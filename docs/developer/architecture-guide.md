@@ -69,9 +69,12 @@ original WebSocket response.
 Current example: review magic uses `start_review_job`, which creates a Code
 Review session with a running indicator and starts the AI/CodeRabbit review in a
 Rust background task. AI review supports up to five distinct backend/model pairs
-per worktree; each pair has its own model-compatible reasoning level and gets
-its own named session. Duplicate pairs are rejected while running. Results
-persist into each session's `review_results`, and job progress emits
+per worktree; each pair has its own model-compatible reasoning level. A batch of
+AI reviews shares one Code Review session, and `review_results` stores the
+backend/model results together so the review panel can switch between them;
+entries are created with a running status so the dropdown can show loading
+state before each result arrives.
+Duplicate pairs are rejected while running. Job progress emits
 `review-job:updated`.
 
 ### Command-Centric Design
