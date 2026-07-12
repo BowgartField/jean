@@ -5433,6 +5433,24 @@ mod tests {
             ContentBlock::Text { text } if text == "Recovered from turn output"
         )));
     }
+
+    #[test]
+    fn structured_output_uses_final_schema_valid_agent_message() {
+        let output = concat!(
+            r#"{"type":"item.completed","item":{"type":"agent_message","text":"{\"title\":\"Preparing release notes\",\"body\":\"I’ll inspect the commits first.\"}"}}"#,
+            "\n",
+            r#"{"type":"item.completed","item":{"type":"command_execution","command":"git log","aggregated_output":"commits"}}"#,
+            "\n",
+            r####"{"type":"item.completed","item":{"type":"agent_message","text":"{\"title\":\"Release notes\",\"body\":\"### Fixes\\n- Fixed session recovery.\"}"}}"####,
+            "\n",
+            r#"{"type":"turn.completed"}"#,
+        );
+
+        assert_eq!(
+            extract_codex_structured_output(output).unwrap(),
+            r####"{"title":"Release notes","body":"### Fixes\n- Fixed session recovery."}"####
+        );
+    }
 }
 
 /// Parse Codex NDJSON output to extract structured JSON from --output-schema response.
@@ -5442,7 +5460,7 @@ mod tests {
 /// - `item.completed` with type `agent_message` containing JSON text
 /// - `turn.completed` with an `output` field
 fn extract_codex_structured_output(output: &str) -> Result<String, String> {
-    let mut last_agent_message = None;
+    let mut structured_output = None;
 
     for line in output.lines() {
         let line = line.trim();
@@ -5464,9 +5482,8 @@ fn extract_codex_structured_output(output: &str) -> Result<String, String> {
                     if item_type == "agent_message" {
                         if let Some(text) = extract_agent_message_text(item) {
                             if serde_json::from_str::<serde_json::Value>(&text).is_ok() {
-                                return Ok(text);
+                                structured_output = Some(text);
                             }
-                            last_agent_message = Some(text);
                         }
                     }
                 }
@@ -5476,10 +5493,10 @@ fn extract_codex_structured_output(output: &str) -> Result<String, String> {
                 if let Some(output_val) = parsed.get("output") {
                     if let Some(text) = extract_text_from_turn_output(output_val) {
                         if serde_json::from_str::<serde_json::Value>(&text).is_ok() {
-                            return Ok(text);
+                            structured_output = Some(text);
                         }
                     } else if !output_val.is_null() {
-                        return Ok(output_val.to_string());
+                        structured_output = Some(output_val.to_string());
                     }
                 }
             }
@@ -5487,12 +5504,5 @@ fn extract_codex_structured_output(output: &str) -> Result<String, String> {
         }
     }
 
-    // Fall back to last agent message if it parses as JSON
-    if let Some(msg) = last_agent_message {
-        if serde_json::from_str::<serde_json::Value>(&msg).is_ok() {
-            return Ok(msg);
-        }
-    }
-
-    Err("No structured output found in Codex response".to_string())
+    structured_output.ok_or_else(|| "No structured output found in Codex response".to_string())
 }

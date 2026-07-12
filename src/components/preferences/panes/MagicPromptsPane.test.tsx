@@ -158,17 +158,21 @@ describe('MagicPromptsPane', () => {
   it('keeps magic prompt control labels paired with dropdowns on mobile', () => {
     render(<MagicPromptsPane />)
 
+    expect(screen.getByTestId('magic-prompt-config')).toHaveClass(
+      'border',
+      'rounded-lg'
+    )
     expect(screen.getByTestId('magic-prompt-backend-control')).toHaveClass(
-      'max-md:w-full'
+      'grid-cols-[72px_minmax(0,1fr)]'
     )
     expect(screen.getByTestId('magic-prompt-model-control')).toHaveClass(
-      'max-md:w-full'
+      'grid-cols-[72px_minmax(0,1fr)]'
     )
     expect(screen.getByTestId('magic-prompt-mode-control')).toHaveClass(
-      'max-md:w-full'
+      'grid-cols-[72px_minmax(0,1fr)]'
     )
     expect(screen.getByTestId('magic-prompt-reasoning-control')).toHaveClass(
-      'max-md:w-full'
+      'grid-cols-[72px_minmax(0,1fr)]'
     )
   })
 
@@ -191,6 +195,23 @@ describe('MagicPromptsPane', () => {
         }),
       })
     )
+  })
+
+  it('shows only level names in every reasoning menu', async () => {
+    const user = userEvent.setup()
+    render(<MagicPromptsPane />)
+
+    await user.click(screen.getByRole('combobox', { name: 'Reasoning level' }))
+    expect(screen.getByRole('option', { name: 'Low' })).toBeInTheDocument()
+    expect(screen.queryByText('Light')).toBeNull()
+    await user.keyboard('{Escape}')
+
+    await user.click(screen.getByRole('button', { name: 'Code Review' }))
+    await user.click(
+      screen.getByRole('combobox', { name: 'Review 1 reasoning' })
+    )
+    expect(screen.getByRole('option', { name: 'High' })).toBeInTheDocument()
+    expect(screen.queryByText('Deep')).toBeNull()
   })
 
   it('resets reasoning to the new model default when the backend changes', async () => {

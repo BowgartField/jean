@@ -47,6 +47,8 @@ import {
   useWorktree,
   useProjects,
   useRunScripts,
+  usePackageScripts,
+  type PackageScript,
   projectsQueryKeys,
 } from '@/services/projects'
 import { useProjectsStore } from '@/store/projects-store'
@@ -661,6 +663,9 @@ export function ChatWindow({
 
   // Run scripts for this worktree (used by CMD+R keybinding)
   const { data: runScripts = [] } = useRunScripts(activeWorktreePath ?? null)
+  const { data: packageScripts = [] } = usePackageScripts(
+    activeWorktreePath ?? null
+  )
   const handleRunCommand = useCallback(
     (command: string) => {
       if (!activeWorktreeId) return
@@ -669,6 +674,45 @@ export function ChatWindow({
       useTerminalStore.getState().setModalTerminalOpen(activeWorktreeId, true)
     },
     [activeWorktreeId]
+  )
+  const handleRunPackageScript = useCallback(
+    (script: PackageScript) => {
+      if (!activeWorktreeId) return
+      useTerminalStore
+        .getState()
+        .addTerminal(activeWorktreeId, script.command, script.name, {
+          commandArgs: script.args,
+        })
+      useUIStore.getState().setSessionChatModalOpen(true, activeWorktreeId)
+      useTerminalStore.getState().setModalTerminalOpen(activeWorktreeId, true)
+    },
+    [activeWorktreeId]
+  )
+  const favoritePackageScripts = useMemo(() => {
+    const projectId = worktree?.project_id
+    if (!projectId) return []
+    const prefix = `${projectId}:`
+    return (preferences?.favorite_package_scripts ?? [])
+      .filter(key => key.startsWith(prefix))
+      .map(key => key.slice(prefix.length))
+  }, [preferences?.favorite_package_scripts, worktree?.project_id])
+  const handleToggleFavoritePackageScript = useCallback(
+    (scriptName: string) => {
+      const projectId = worktree?.project_id
+      if (!projectId) return
+      const key = `${projectId}:${scriptName}`
+      const favorites = preferences?.favorite_package_scripts ?? []
+      patchPreferences.mutate({
+        favorite_package_scripts: favorites.includes(key)
+          ? favorites.filter(favorite => favorite !== key)
+          : [...favorites, key],
+      })
+    },
+    [
+      patchPreferences,
+      preferences?.favorite_package_scripts,
+      worktree?.project_id,
+    ]
   )
 
   // Per-session provider selection: persisted session → zustand → project default → global default
@@ -3430,6 +3474,12 @@ export function ChatWindow({
                                   handleOpenProjectSettings
                                 }
                                 onRunCommand={handleRunCommand}
+                                packageScripts={packageScripts}
+                                favoritePackageScripts={favoritePackageScripts}
+                                onRunPackageScript={handleRunPackageScript}
+                                onToggleFavoritePackageScript={
+                                  handleToggleFavoritePackageScript
+                                }
                               />
                             </div>
                           </form>

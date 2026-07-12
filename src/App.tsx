@@ -77,15 +77,18 @@ interface AutoFixStoppedEvent {
   error: string
 }
 
-/** Loading screen shown while preloading initial data (browser mode only). */
-function WebLoadingScreen() {
+function WebLoadingScreen({ label }: { label: string }) {
   return (
-    <div
-      className="flex h-screen w-full flex-col items-center justify-center gap-3 bg-background"
-      role="status"
-    >
-      <div className="size-8 animate-spin rounded-full border-2 border-muted border-t-primary" />
-      <p className="text-sm text-muted-foreground">Jean is loading...</p>
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-background">
+      <p
+        role="status"
+        className="whitespace-nowrap text-[16px] leading-[26px] text-muted-foreground"
+        style={{
+          fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
+        }}
+      >
+        {label}
+      </p>
     </div>
   )
 }
@@ -1216,7 +1219,7 @@ function App() {
 
   // Show loading screen while preloading initial data (web view only)
   if (isPreloading) {
-    return <WebLoadingScreen />
+    return <WebLoadingScreen label="Loading Jean..." />
   }
 
   return (
@@ -1224,12 +1227,7 @@ function App() {
       <ThemeProvider>
         <MainWindow />
         {!isNativeApp() && !wsConnected && (
-          <div
-            className="pointer-events-auto fixed inset-0 z-[70] flex items-center justify-center bg-background/20 backdrop-blur-md"
-            aria-hidden="true"
-          >
-            <div className="size-8 animate-spin rounded-full border-2 border-muted border-t-primary" />
-          </div>
+          <WebLoadingScreen label="Loading Jean..." />
         )}
         {!isNativeApp() && <WsAuthErrorOverlay />}
       </ThemeProvider>

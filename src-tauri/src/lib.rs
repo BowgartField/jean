@@ -283,6 +283,8 @@ pub struct AppPreferences {
     #[serde(default)]
     pub favorite_models: Vec<String>, // Favourited model keys ("backend:model") shown at top of picker
     #[serde(default)]
+    pub favorite_package_scripts: Vec<String>, // Favourited package script keys ("project_id:script")
+    #[serde(default)]
     pub fast_mode_models: Vec<String>, // Model keys ("backend:baseModel") with fast tier last enabled
     #[serde(default = "default_canvas_layout")]
     pub canvas_layout: String, // Canvas display mode: grid or list
@@ -2190,6 +2192,7 @@ impl Default for AppPreferences {
             custom_cli_profiles: Vec::new(),
             default_provider: None,
             favorite_models: Vec::new(),
+            favorite_package_scripts: Vec::new(),
             fast_mode_models: Vec::new(),
             canvas_layout: default_canvas_layout(),
             confirm_session_close: default_confirm_session_close(),
@@ -4762,6 +4765,7 @@ pub fn run() {
             terminal::get_active_terminals,
             terminal::has_active_terminal,
             terminal::get_run_scripts,
+            terminal::get_package_scripts,
             terminal::get_ports,
             terminal::get_terminal_listening_ports,
             terminal::kill_all_terminals,

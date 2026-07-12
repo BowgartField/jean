@@ -74,9 +74,7 @@ describe('MobileSettingsMenu', () => {
 
       await user.click(screen.getByRole('button', { name: /settings/i }))
 
-      const effortItem = screen
-        .getByText('Effort')
-        .closest('[role="menuitem"]')
+      const effortItem = screen.getByText('Effort').closest('[role="menuitem"]')
       const effortIcon = effortItem?.querySelector('svg.lucide-brain')
       expect(effortIcon).not.toHaveClass('mr-2')
     } finally {
@@ -201,6 +199,65 @@ describe('MobileSettingsMenu', () => {
     await user.click(await screen.findByRole('menuitem', { name: /run/i }))
 
     expect(onRunCommand).toHaveBeenCalledWith('bun run dev')
+  })
+
+  it('opens package scripts in a bottom sheet after Run', async () => {
+    const user = userEvent.setup()
+    const onRunPackageScript = vi.fn()
+    const onToggleFavoritePackageScript = vi.fn()
+    const packageScript = {
+      name: 'test:unit',
+      command: 'bun',
+      args: ['run', 'test:unit'],
+    }
+    const favoriteScript = {
+      name: 'lint',
+      command: 'bun',
+      args: ['run', 'lint'],
+    }
+
+    render(
+      <MobileSettingsMenu
+        {...baseProps}
+        worktreeId="worktree-1"
+        runScripts={['bun run dev']}
+        packageScripts={[packageScript, favoriteScript]}
+        favoritePackageScripts={['lint']}
+        onRunPackageScript={onRunPackageScript}
+        onToggleFavoritePackageScript={onToggleFavoritePackageScript}
+      />
+    )
+
+    await user.click(screen.getByRole('button', { name: /settings/i }))
+    const runItem = screen.getByRole('menuitem', { name: 'Run' })
+    const scriptsItem = screen.getByRole('menuitem', { name: 'Scripts' })
+    expect(
+      runItem.compareDocumentPosition(scriptsItem) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+
+    await user.click(scriptsItem)
+    const sheet = screen.getByRole('dialog', { name: 'Scripts' })
+    expect(sheet).toHaveClass('max-h-[75svh]')
+    const scriptButtons = within(sheet).getAllByRole('button', {
+      name: /^(lint|test:unit)$/,
+    })
+    expect(scriptButtons.map(button => button.textContent)).toEqual([
+      'lint',
+      'test:unit',
+    ])
+    expect(
+      within(sheet)
+        .getByRole('button', { name: 'Unfavorite lint' })
+        .querySelector('svg')
+    ).toHaveClass('fill-yellow-500', 'text-yellow-500')
+    await user.click(
+      within(sheet).getByRole('button', { name: 'Favorite test:unit' })
+    )
+    expect(onToggleFavoritePackageScript).toHaveBeenCalledWith('test:unit')
+    await user.click(within(sheet).getByRole('button', { name: 'test:unit' }))
+
+    expect(onRunPackageScript).toHaveBeenCalledWith(packageScript)
   })
 
   it('keeps Claude provider switcher available after messages exist', async () => {

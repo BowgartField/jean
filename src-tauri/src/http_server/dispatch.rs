@@ -1963,6 +1963,11 @@ pub async fn dispatch_command(
             let result = crate::terminal::get_run_scripts(parsed.worktree_path).await;
             to_value(result)
         }
+        "get_package_scripts" => {
+            let parsed = parse_worktree_path_args(&args)?;
+            let result = crate::terminal::get_package_scripts(parsed.worktree_path).await;
+            to_value(result)
+        }
         "get_ports" => {
             let parsed = parse_worktree_path_args(&args)?;
             let result = crate::terminal::get_ports(parsed.worktree_path).await;

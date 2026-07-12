@@ -99,6 +99,8 @@ export const ChatToolbar = memo(function ChatToolbar({
   activeSessionId,
   projectId,
   runScripts,
+  packageScripts,
+  favoritePackageScripts,
   loadedIssueContexts,
   loadedPRContexts,
   loadedSecurityContexts,
@@ -133,6 +135,8 @@ export const ChatToolbar = memo(function ChatToolbar({
   onToggleMcpServer,
   onOpenProjectSettings,
   onRunCommand,
+  onRunPackageScript,
+  onToggleFavoritePackageScript,
 }: ChatToolbarProps) {
   const {
     statuses: mcpStatuses,
@@ -479,6 +483,10 @@ export const ChatToolbar = memo(function ChatToolbar({
             onAttach={onAttach}
             runScripts={runScripts}
             onRunCommand={onRunCommand}
+            packageScripts={packageScripts}
+            favoritePackageScripts={favoritePackageScripts}
+            onRunPackageScript={onRunPackageScript}
+            onToggleFavoritePackageScript={onToggleFavoritePackageScript}
           />
 
           {isMobile && (

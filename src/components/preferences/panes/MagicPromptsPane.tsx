@@ -927,6 +927,13 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
     (selectedKey === 'code_review'
       ? codeReviewConfigs.some(config => config.backend === 'claude')
       : effectiveBackend === 'claude')
+  const hasPromptConfigControls =
+    selectedKey !== 'code_review' &&
+    (currentBackend !== undefined ||
+      showProviderControl ||
+      Boolean(currentModel) ||
+      Boolean(selectedConfig.effortKey) ||
+      Boolean(currentMode))
 
   const saveCodeReviewConfigs = useCallback(
     (configs: MagicCodeReviewConfig[]) => {
@@ -1706,7 +1713,17 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
           </div>
 
           {/* Backend / Model / Provider / Reset row */}
-          <div className="flex flex-wrap items-center gap-2 mb-2 shrink-0">
+          <div
+            data-testid={
+              hasPromptConfigControls ? 'magic-prompt-config' : undefined
+            }
+            className={cn(
+              'mb-2 shrink-0',
+              hasPromptConfigControls
+                ? 'flex w-full flex-col gap-2 rounded-lg border border-border/60 p-2.5'
+                : 'flex flex-wrap items-center gap-2'
+            )}
+          >
             {selectedKey === 'code_review' && (
               <div className="flex w-full flex-col gap-2">
                 {codeReviewConfigs.map((config, index) => {
@@ -1867,9 +1884,6 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
                             {reasoning?.levels.map(level => (
                               <SelectItem key={level.value} value={level.value}>
                                 {level.label}
-                                {level.description
-                                  ? ` · ${level.description}`
-                                  : ''}
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -1893,7 +1907,7 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
             {selectedKey !== 'code_review' && currentBackend !== undefined && (
               <div
                 data-testid="magic-prompt-backend-control"
-                className="flex items-center gap-2 max-md:w-full md:contents"
+                className="grid grid-cols-[72px_minmax(0,1fr)] items-center gap-2"
               >
                 <span className="text-xs text-muted-foreground">Backend</span>
                 <Select
@@ -1903,7 +1917,7 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
                   <SelectTrigger
                     aria-label="Backend"
                     size="sm"
-                    className="flex-1 text-xs md:w-[120px] md:flex-none"
+                    className="w-full min-w-0 text-xs"
                     hideIcon={installedBackends.length <= 1}
                   >
                     <SelectValue />
@@ -1946,7 +1960,10 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
               </div>
             )}
             {showProviderControl && (
-              <div className="flex items-center gap-2 max-md:w-full md:contents">
+              <div
+                data-testid="magic-prompt-provider-control"
+                className="grid w-full grid-cols-[72px_minmax(0,1fr)] items-center gap-2"
+              >
                 <span className="text-xs text-muted-foreground">Provider</span>
                 <Select
                   value={currentProvider ?? 'anthropic'}
@@ -1955,7 +1972,7 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
                   <SelectTrigger
                     aria-label="Provider"
                     size="sm"
-                    className="flex-1 text-xs md:w-[130px] md:flex-none"
+                    className="w-full min-w-0 text-xs"
                   >
                     <SelectValue />
                   </SelectTrigger>
@@ -1973,7 +1990,7 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
             {selectedKey !== 'code_review' && currentModel && (
               <div
                 data-testid="magic-prompt-model-control"
-                className="flex items-center gap-2 max-md:w-full md:contents"
+                className="grid grid-cols-[72px_minmax(0,1fr)] items-center gap-2"
               >
                 <span className="text-xs text-muted-foreground">Model</span>
                 <Popover
@@ -1986,7 +2003,7 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
                       role="combobox"
                       aria-label="Model"
                       aria-expanded={modelPopoverOpen}
-                      className="h-8 flex-1 justify-between text-xs font-normal md:w-[160px] md:flex-none"
+                      className="h-8 w-full min-w-0 justify-between text-xs font-normal"
                     >
                       <span className="truncate">
                         {(() => {
@@ -2202,7 +2219,7 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
             {selectedConfig.effortKey && selectedKey !== 'code_review' && (
               <div
                 data-testid="magic-prompt-reasoning-control"
-                className="flex items-center gap-2 max-md:w-full md:contents"
+                className="grid grid-cols-[72px_minmax(0,1fr)] items-center gap-2"
               >
                 <span className="text-xs text-muted-foreground">
                   {modelReasoning?.type === 'thinking'
@@ -2217,7 +2234,7 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
                   <SelectTrigger
                     aria-label="Reasoning level"
                     size="sm"
-                    className="flex-1 text-xs md:w-[130px] md:flex-none"
+                    className="w-full min-w-0 text-xs"
                   >
                     <SelectValue placeholder="Not supported" />
                   </SelectTrigger>
@@ -2225,7 +2242,6 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
                     {modelReasoning?.levels.map(level => (
                       <SelectItem key={level.value} value={level.value}>
                         {level.label}
-                        {level.description ? ` · ${level.description}` : ''}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -2235,14 +2251,14 @@ export const MagicPromptsPane: React.FC<MagicPromptsPaneProps> = ({
             {currentMode && (
               <div
                 data-testid="magic-prompt-mode-control"
-                className="flex items-center gap-2 max-md:w-full md:contents"
+                className="grid grid-cols-[72px_minmax(0,1fr)] items-center gap-2"
               >
                 <span className="text-xs text-muted-foreground">Mode</span>
                 <Select value={currentMode} onValueChange={handleModeChange}>
                   <SelectTrigger
                     aria-label="Default mode"
                     size="sm"
-                    className="flex-1 text-xs md:w-[110px] md:flex-none"
+                    className="w-full min-w-0 text-xs"
                   >
                     <SelectValue />
                   </SelectTrigger>

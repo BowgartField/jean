@@ -92,6 +92,7 @@ import {
   useRemoveProject,
   useReorderWorktrees,
   projectsQueryKeys,
+  type PackageScript,
 } from '@/services/projects'
 import { chatQueryKeys, cancelChatMessage } from '@/services/chat'
 import {
@@ -106,6 +107,7 @@ import { useGitStatus } from '@/services/git-status'
 import { useChatStore } from '@/store/chat-store'
 import { useProjectsStore } from '@/store/projects-store'
 import { useUIStore } from '@/store/ui-store'
+import { useTerminalStore } from '@/store/terminal-store'
 import { isBaseSession, type Worktree } from '@/types/projects'
 import { getEditorLabel, getTerminalLabel } from '@/types/preferences'
 import type { LabelData, Session, WorktreeSessions } from '@/types/chat'
@@ -138,6 +140,7 @@ import {
 } from '@/components/chat/session-card-utils'
 import { WorktreeSetupCard } from '@/components/chat/WorktreeSetupCard'
 import { OpenInButton } from '@/components/open-in/OpenInButton'
+import { ScriptsButton } from '@/components/open-in/ScriptsButton'
 import { useCanvasStoreState } from '@/components/chat/hooks/useCanvasStoreState'
 import {
   type WorktreeSortMode,
@@ -1093,6 +1096,28 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
       setSelectedWorktreeModal({ worktreeId, worktreePath })
     },
     [markWorktreeLastUsed]
+  )
+
+  const handlePackageScript = useCallback(
+    async (script: PackageScript) => {
+      let baseWorktree = worktrees.find(isBaseSession)
+      if (!baseWorktree) {
+        try {
+          baseWorktree = await createBaseSession.mutateAsync(projectId)
+        } catch {
+          return
+        }
+      }
+
+      useTerminalStore
+        .getState()
+        .addTerminal(baseWorktree.id, script.command, script.name, {
+          commandArgs: script.args,
+        })
+      openWorktreeModal(baseWorktree.id, baseWorktree.path)
+      useTerminalStore.getState().setModalTerminalOpen(baseWorktree.id, true)
+    },
+    [createBaseSession, openWorktreeModal, projectId, worktrees]
   )
 
   const handleCanvasResolveConflicts = useCallback(
@@ -3232,6 +3257,10 @@ export function ProjectCanvasView({ projectId }: ProjectCanvasViewProps) {
             {!isMobile && (
               <div className="flex items-center gap-2 shrink-0 justify-end col-start-3">
                 <OpenInButton worktreePath={project.path} />
+                <ScriptsButton
+                  worktreePath={project.path}
+                  onRun={handlePackageScript}
+                />
               </div>
             )}
           </div>
