@@ -1,4 +1,4 @@
-# Release System
+# Atelier Release System
 
 This document explains how the automated release system works and how to use it.
 
@@ -22,10 +22,10 @@ First, generate a keypair for signing updates:
 bun add -g @tauri-apps/cli@next
 
 # Generate keypair
-tauri signer generate -w ~/.tauri/myapp.key
+tauri signer generate -w ~/.tauri/atelier.key
 
 # This outputs:
-# Private key: (saved to ~/.tauri/myapp.key)
+# Private key: (saved to ~/.tauri/atelier.key)
 # Public key: dW50cnVzdGVkIGNvbW1lbnQ6...
 ```
 
@@ -33,8 +33,14 @@ tauri signer generate -w ~/.tauri/myapp.key
 
 Add these secrets to your GitHub repository (Settings → Secrets and variables → Actions):
 
-- `TAURI_PRIVATE_KEY`: Content of `~/.tauri/myapp.key`
+- `TAURI_PRIVATE_KEY`: Content of `~/.tauri/atelier.key`
 - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`: Password you set (if any)
+- `APPLE_CERTIFICATE`: Base64-encoded Developer ID Application `.p12`
+- `APPLE_CERTIFICATE_PASSWORD`: Password used to export the `.p12`
+- `APPLE_SIGNING_IDENTITY`: Full Developer ID Application identity
+- `APPLE_ID`: Apple Developer account email
+- `APPLE_PASSWORD`: Apple app-specific password used for notarization
+- `APPLE_TEAM_ID`: Apple Developer team identifier
 
 ### 3. Update Configuration Files
 
@@ -46,7 +52,7 @@ Add these secrets to your GitHub repository (Settings → Secrets and variables 
     "updater": {
       "active": true,
       "endpoints": [
-        "https://github.com/YOUR_USERNAME/YOUR_REPO/releases/latest/download/latest.json"
+        "https://github.com/BowgartField/atelier/releases/latest/download/latest.json"
       ],
       "dialog": true,
       "pubkey": "YOUR_PUBLIC_KEY_FROM_STEP_1"
@@ -57,13 +63,13 @@ Add these secrets to your GitHub repository (Settings → Secrets and variables 
 
 **Update GitHub workflow in `.github/workflows/release.yml`:**
 
-- Change `Tauri Template App` to your app name
-- Update release body text
+- Keep release artifact names aligned with the `Atelier` product name
+- Update release body text when preparing the release
 
 **Update bundle info in `tauri.conf.json`:**
 
-- Change `publisher`, `shortDescription`, `longDescription`
-- Update `productName` and `identifier`
+- Keep `publisher`, descriptions, signing identity, and updater endpoint current
+- Keep `productName` and `identifier` consistent across releases
 
 ## Release Process
 

@@ -2,7 +2,7 @@
 name = "jean"
 version = "0.1.66"
 description = "Jean - AI Assistant"
-authors = ["Andras Bacsai"]
+authors = ["JB Holdings SIA"]
 edition = "2021"
 default-run = "jean"
 

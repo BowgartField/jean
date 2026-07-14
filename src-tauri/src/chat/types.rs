@@ -2164,6 +2164,7 @@ mod tests {
             codex_turn_id: None,
             cursor_chat_id: None,
             grok_session_id: None,
+            git_patch: None,
         });
 
         let restored = metadata.to_session();
@@ -2205,6 +2206,7 @@ mod tests {
             codex_turn_id: None,
             cursor_chat_id: None,
             grok_session_id: None,
+            git_patch: None,
         });
 
         assert!(metadata.find_run("run-1").is_some());
@@ -2236,6 +2238,7 @@ mod tests {
             codex_turn_id: None,
             cursor_chat_id: None,
             grok_session_id: None,
+            git_patch: None,
         };
 
         // Cancelled-with-content now renders user + partial assistant (incl tool calls).
@@ -2288,6 +2291,7 @@ mod tests {
             codex_turn_id: None,
             cursor_chat_id: None,
             grok_session_id: None,
+            git_patch: None,
         });
         metadata.runs.push(RunEntry {
             run_id: "run-completed".to_string(),
@@ -2312,6 +2316,7 @@ mod tests {
             codex_turn_id: None,
             cursor_chat_id: None,
             grok_session_id: None,
+            git_patch: None,
         });
 
         // Cancelled partial turn (user + assistant) + completed turn (user + assistant) = 4.
@@ -2354,6 +2359,7 @@ mod tests {
             codex_turn_id: None,
             cursor_chat_id: None,
             grok_session_id: None,
+            git_patch: None,
         });
 
         assert!(metadata.latest_claude_session_id().is_none());
@@ -2382,6 +2388,7 @@ mod tests {
             codex_turn_id: None,
             cursor_chat_id: None,
             grok_session_id: None,
+            git_patch: None,
         });
 
         assert_eq!(metadata.latest_claude_session_id(), Some("claude-sess-abc"));

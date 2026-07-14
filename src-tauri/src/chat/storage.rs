@@ -1102,9 +1102,7 @@ pub fn move_session_to_worktree(
         save_metadata_internal(app, &metadata)?;
     }
 
-    log::info!(
-        "Moved session {session_id} from worktree {from_worktree_id} to {to_worktree_id}"
-    );
+    log::info!("Moved session {session_id} from worktree {from_worktree_id} to {to_worktree_id}");
 
     Ok(())
 }

@@ -1,4 +1,4 @@
-name: 'Release Jean'
+name: 'Release Atelier'
 
 on:
   release:
@@ -139,7 +139,7 @@ jobs:
         run: |
           VERSION="${RELEASE_TAG#v}"
           BUNDLE_DIR="src-tauri/target/release/bundle/appimage"
-          APPIMAGE=$(find "$BUNDLE_DIR" -name "Jean_${VERSION}_*.AppImage" ! -name "*.tar.gz" -print -quit 2>/dev/null)
+          APPIMAGE=$(find "$BUNDLE_DIR" -name "Atelier_${VERSION}_*.AppImage" ! -name "*.tar.gz" -print -quit 2>/dev/null)
           if [ -n "$APPIMAGE" ] && [ -f "$APPIMAGE" ]; then
             gh release upload "$RELEASE_TAG" "$APPIMAGE" --clobber
             # Upload updater artifacts (.tar.gz + .sig)
@@ -162,12 +162,12 @@ jobs:
           ARCH_LABEL="amd64"
           PLATFORM_KEY="linux-x86_64"
           if [ "$(uname -m)" = "aarch64" ]; then
-            # Convention: "arm64" (not "aarch64") — must match jean.build download page
+            # Convention: "arm64" (not "aarch64") — keep release artifact names stable
             ARCH_LABEL="arm64"
             PLATFORM_KEY="linux-aarch64"
           fi
 
-          APPIMAGE_TAR="Jean_${VERSION}_${ARCH_LABEL}.AppImage.tar.gz"
+          APPIMAGE_TAR="Atelier_${VERSION}_${ARCH_LABEL}.AppImage.tar.gz"
           SIG_FILE="${BUNDLE_DIR}/${APPIMAGE_TAR}.sig"
 
           if [ ! -f "$SIG_FILE" ]; then
@@ -176,7 +176,7 @@ jobs:
           fi
 
           SIGNATURE=$(cat "$SIG_FILE")
-          URL="https://github.com/coollabsio/jean/releases/download/${RELEASE_TAG}/${APPIMAGE_TAR}"
+          URL="https://github.com/BowgartField/atelier/releases/download/${RELEASE_TAG}/${APPIMAGE_TAR}"
 
           # Download current latest.json, patch Linux platform entry, re-upload
           gh release download "$RELEASE_TAG" -p "latest.json" -D /tmp --clobber
@@ -194,37 +194,3 @@ jobs:
 
           gh release upload "$RELEASE_TAG" /tmp/latest.json --clobber
           echo "Patched latest.json: ${PLATFORM_KEY} -> ${URL}"
-
-  update-homebrew-tap:
-    name: Update Homebrew Tap
-    needs: [prepare-release, publish-tauri]
-    runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'release' && github.event.action == 'published')
-
-    steps:
-      - name: Wait for DMG availability
-        run: |
-          TAG="${{ needs.prepare-release.outputs.tag }}"
-          VERSION="${TAG#v}"
-          DMG_URL="https://github.com/coollabsio/jean/releases/download/$TAG/Jean_${VERSION}_universal.dmg"
-
-          echo "Waiting for DMG at: $DMG_URL"
-          for i in $(seq 1 30); do
-            if curl --output /dev/null --silent --head --fail "$DMG_URL"; then
-              echo "DMG is available"
-              exit 0
-            fi
-            echo "Attempt $i/30: waiting 10s..."
-            sleep 10
-          done
-
-          echo "Error: DMG not available after 5 minutes"
-          exit 1
-
-      - name: Trigger Homebrew tap update
-        env:
-          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-        run: |
-          gh workflow run update-cask.yml \
-            --repo coollabsio/homebrew-jean \
-            --field version='${{ needs.prepare-release.outputs.tag }}'

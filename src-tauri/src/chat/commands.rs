@@ -1893,14 +1893,22 @@ pub async fn move_session_to_worktree(
                 if let Err(e) = std::fs::write(&context_path, &transcript) {
                     log::warn!("Failed to write migration transcript: {e}");
                 } else {
-                    log::info!("Saved migration transcript for session {session_id} ({} messages)", messages.len());
+                    log::info!(
+                        "Saved migration transcript for session {session_id} ({} messages)",
+                        messages.len()
+                    );
                 }
             }
         }
     }
 
     // Move the session in storage
-    super::storage::move_session_to_worktree(&app, &session_id, &from_worktree_id, &to_worktree_id)?;
+    super::storage::move_session_to_worktree(
+        &app,
+        &session_id,
+        &from_worktree_id,
+        &to_worktree_id,
+    )?;
 
     // Apply stashed changes to target worktree
     if stashed {

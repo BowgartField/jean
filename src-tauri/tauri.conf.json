@@ -30,9 +30,7 @@
         "shadow": true,
         "dragDropEnabled": false,
         "windowEffects": {
-          "effects": [
-            "sidebar"
-          ],
+          "effects": ["sidebar"],
           "radius": 12,
           "state": "active"
         }
@@ -43,10 +41,7 @@
       "assetProtocol": {
         "enable": true,
         "scope": {
-          "allow": [
-            "**/.jean/images/**",
-            "$APPDATA/**"
-          ],
+          "allow": ["**/.jean/images/**", "$APPDATA/**"],
           "requireLiteralLeadingDot": false
         }
       }
@@ -67,16 +62,16 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "publisher": "Andras Bacsai",
+    "publisher": "JB Holdings SIA",
     "category": "DeveloperTool",
     "shortDescription": "Atelier - AI Development Workspace",
     "longDescription": "Atelier is an AI development workspace built with Tauri, React, and TypeScript.",
-    "copyright": "Copyright © 2025 Andras Bacsai. All rights reserved.",
+    "copyright": "Copyright © 2026 JB Holdings SIA. All rights reserved.",
     "macOS": {
       "frameworks": [],
       "minimumSystemVersion": "10.15",
-      "signingIdentity": "Developer ID Application: coolLabs Solutions Korlatolt Felelossegu Tarsasag (8D3F6CQFS8)",
-      "providerShortName": "8D3F6CQFS8",
+      "signingIdentity": "Developer ID Application: JB Holdings SIA (SQ47CHL585)",
+      "providerShortName": "SQ47CHL585",
       "entitlements": null,
       "exceptionDomain": ""
     },
@@ -90,10 +85,10 @@
     "updater": {
       "active": true,
       "endpoints": [
-        "https://github.com/coollabsio/jean/releases/latest/download/latest.json"
+        "https://github.com/BowgartField/atelier/releases/latest/download/latest.json"
       ],
       "dialog": true,
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDYyNzkyNTI0QUFENzA3MUYKUldRZkI5ZXFKQ1Y1WWdod05PSjhkcUVBUnNyOWJTcEpVazBRN01SUndya2JQcTdNeUxrS0pFY3QK"
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDU3QjI5MzM1REE1MUNFQ0IKUldUTHpsSGFOWk95VjNGYUYyM09ENWp5YkY5NThLTHFuMVcvYzg4Vjk5UEl0QnY3UXowZ0RGU0YK"
     }
   }
 }

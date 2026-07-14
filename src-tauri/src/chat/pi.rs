@@ -1792,6 +1792,7 @@ mod tests {
             codex_turn_id: None,
             cursor_chat_id: None,
             grok_session_id: None,
+            git_patch: None,
         };
 
         let lines = vec![

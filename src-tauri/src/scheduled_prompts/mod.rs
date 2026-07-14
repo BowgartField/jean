@@ -116,8 +116,7 @@ fn write_store(app: &AppHandle, prompts: &[ScheduledPrompt]) -> Result<(), Strin
     let path = store_path(app)?;
     let json = serde_json::to_string_pretty(prompts)
         .map_err(|e| format!("Failed to serialize scheduled prompts: {e}"))?;
-    std::fs::write(&path, json)
-        .map_err(|e| format!("Failed to write scheduled_prompts.json: {e}"))
+    std::fs::write(&path, json).map_err(|e| format!("Failed to write scheduled_prompts.json: {e}"))
 }
 
 /// Read-modify-write the store under the store lock.
@@ -155,9 +154,8 @@ async fn resolve_reset_timestamp(
         "codex" => {
             let usage = crate::codex_cli::get_codex_usage(app.clone()).await?;
             let window = if weekly { usage.weekly } else { usage.session };
-            let window = window.ok_or_else(|| {
-                format!("Codex usage snapshot has no {window_label} window yet")
-            })?;
+            let window = window
+                .ok_or_else(|| format!("Codex usage snapshot has no {window_label} window yet"))?;
             // Codex only reports an explicit reset timestamp once some quota is
             // consumed; at low usage it sends the window length instead. Fall
             // back to `now + window_length` so scheduling still works (this is a
@@ -177,9 +175,9 @@ async fn resolve_reset_timestamp(
         _ => {
             let usage = crate::claude_cli::get_claude_usage().await?;
             let window = if weekly { usage.weekly } else { usage.session };
-            window.and_then(|w| w.resets_at).ok_or_else(|| {
-                format!("Claude usage snapshot has no {window_label} reset time")
-            })
+            window
+                .and_then(|w| w.resets_at)
+                .ok_or_else(|| format!("Claude usage snapshot has no {window_label} reset time"))
         }
     }
 }
@@ -298,9 +296,17 @@ fn spawn_fire(app: AppHandle, entry: ScheduledPrompt) {
 
         match result {
             Ok(()) => {
-                log::info!("scheduled_prompts: fired {} (session={})", entry.id, entry.session_id);
-                if let Err(err) = mutate_store(&app, |prompts| prompts.retain(|p| p.id != entry.id)) {
-                    log::warn!("scheduled_prompts: failed to remove fired entry {}: {err}", entry.id);
+                log::info!(
+                    "scheduled_prompts: fired {} (session={})",
+                    entry.id,
+                    entry.session_id
+                );
+                if let Err(err) = mutate_store(&app, |prompts| prompts.retain(|p| p.id != entry.id))
+                {
+                    log::warn!(
+                        "scheduled_prompts: failed to remove fired entry {}: {err}",
+                        entry.id
+                    );
                 }
             }
             Err(err) => {

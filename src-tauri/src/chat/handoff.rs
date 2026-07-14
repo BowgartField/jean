@@ -334,6 +334,7 @@ mod tests {
             codex_turn_id: None,
             cursor_chat_id: None,
             grok_session_id: None,
+            git_patch: None,
         });
 
         assert_eq!(latest_completed_backend(&metadata), Some(Backend::Claude));
@@ -392,6 +393,7 @@ mod tests {
             codex_turn_id: None,
             cursor_chat_id: None,
             grok_session_id: None,
+            git_patch: None,
         });
         metadata.runs.push(RunEntry {
             run_id: "run-2".to_string(),
@@ -416,6 +418,7 @@ mod tests {
             codex_turn_id: None,
             cursor_chat_id: None,
             grok_session_id: None,
+            git_patch: None,
         });
 
         assert_eq!(

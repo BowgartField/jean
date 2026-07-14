@@ -5140,6 +5140,7 @@ mod tests {
             codex_turn_id: None,
             cursor_chat_id: None,
             grok_session_id: None,
+            git_patch: None,
         };
 
         let message = parse_codex_run_to_message(&lines, &run).expect("message");
@@ -5196,6 +5197,7 @@ mod tests {
             codex_turn_id: None,
             cursor_chat_id: None,
             grok_session_id: None,
+            git_patch: None,
         };
 
         let message = parse_codex_run_to_message(&lines, &run).expect("message");
@@ -5249,6 +5251,7 @@ mod tests {
             codex_turn_id: None,
             cursor_chat_id: None,
             grok_session_id: None,
+            git_patch: None,
         };
 
         let message = parse_codex_run_to_message(&lines, &run).expect("message");
@@ -5305,6 +5308,7 @@ mod tests {
             codex_turn_id: None,
             cursor_chat_id: None,
             grok_session_id: None,
+            git_patch: None,
         };
 
         let message = parse_codex_run_to_message(&lines, &run).expect("message");
@@ -5400,6 +5404,7 @@ mod tests {
             codex_turn_id: None,
             cursor_chat_id: None,
             grok_session_id: None,
+            git_patch: None,
         };
 
         let message = parse_codex_run_to_message(&lines, &run).expect("message");
@@ -5456,6 +5461,7 @@ mod tests {
             codex_turn_id: None,
             cursor_chat_id: None,
             grok_session_id: None,
+            git_patch: None,
         };
 
         let message = parse_codex_run_to_message(&lines, &run).expect("message");
@@ -5517,6 +5523,7 @@ mod tests {
             codex_turn_id: None,
             cursor_chat_id: None,
             grok_session_id: None,
+            git_patch: None,
         };
 
         let message = parse_codex_run_to_message(&lines, &run).expect("message");
@@ -5559,6 +5566,7 @@ mod tests {
             codex_turn_id: None,
             cursor_chat_id: None,
             grok_session_id: None,
+            git_patch: None,
         };
 
         let message = parse_codex_run_to_message(&lines, &run).expect("message");

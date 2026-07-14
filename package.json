@@ -3,8 +3,8 @@
   "private": true,
   "version": "0.1.66",
   "type": "module",
-  "author": "Andras Bacsai",
-  "copyright": "Copyright © 2025 Andras Bacsai. All rights reserved.",
+  "author": "JB Holdings SIA",
+  "copyright": "Copyright © 2026 JB Holdings SIA. All rights reserved.",
   "license": "Apache-2.0",
   "scripts": {
     "dev": "vite",

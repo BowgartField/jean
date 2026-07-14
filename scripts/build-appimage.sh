@@ -20,7 +20,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 MACHINE_ARCH="$(uname -m)"  # "x86_64" or "aarch64"
 BUNDLE_DIR="$PROJECT_DIR/src-tauri/target/release/bundle/appimage"
-APPDIR="$BUNDLE_DIR/Jean.AppDir"
+APPDIR="$BUNDLE_DIR/Atelier.AppDir"
 CUSTOM_APPRUN="$SCRIPT_DIR/appimage-webkit-fix.sh"
 LINUXDEPLOY_BIN="${HOME}/.cache/tauri/linuxdeploy-${MACHINE_ARCH}.AppImage"
 LINUXDEPLOY_PLUGIN_BIN="${HOME}/.cache/tauri/linuxdeploy-plugin-appimage.AppImage"
@@ -41,7 +41,7 @@ NO_STRIP=true bun run tauri build --bundles appimage 2>&1 || {
         exit 1
     fi
     cd "$BUNDLE_DIR"
-    NO_STRIP=1 "$LINUXDEPLOY_BIN" --appdir Jean.AppDir --output appimage
+    NO_STRIP=1 "$LINUXDEPLOY_BIN" --appdir Atelier.AppDir --output appimage
 }
 
 if [ ! -d "$APPDIR" ]; then
@@ -63,7 +63,7 @@ echo "==> Repackaging AppImage..."
 cd "$BUNDLE_DIR"
 
 # Remove old AppImage files
-rm -f Jean*.AppImage
+rm -f Atelier*.AppImage
 
 if [ ! -x "$LINUXDEPLOY_PLUGIN_BIN" ]; then
     echo "ERROR: linuxdeploy appimage plugin not found/executable at $LINUXDEPLOY_PLUGIN_BIN"
@@ -71,19 +71,19 @@ if [ ! -x "$LINUXDEPLOY_PLUGIN_BIN" ]; then
 fi
 
 # Keep NO_STRIP in the repack phase too (Arch/Fedora RELR compatibility).
-NO_STRIP=1 ARCH="$MACHINE_ARCH" "$LINUXDEPLOY_PLUGIN_BIN" --appdir Jean.AppDir 2>&1
+NO_STRIP=1 ARCH="$MACHINE_ARCH" "$LINUXDEPLOY_PLUGIN_BIN" --appdir Atelier.AppDir 2>&1
 
 # Rename to standard naming convention
 ARCH_LABEL="amd64"
 if [ "$MACHINE_ARCH" = "aarch64" ]; then
-    # Convention: "arm64" (not "aarch64") — must match jean.build download page
+    # Convention: "arm64" (not "aarch64") — keep release artifact names stable
     ARCH_LABEL="arm64"
 fi
 
-OUTPUT_NAME="Jean-${MACHINE_ARCH}.AppImage"
+OUTPUT_NAME="Atelier-${MACHINE_ARCH}.AppImage"
 if [ -f "$OUTPUT_NAME" ]; then
     VERSION=$(grep '"version"' "$PROJECT_DIR/src-tauri/tauri.conf.json" | head -1 | sed 's/.*: *"\(.*\)".*/\1/')
-    FINAL_NAME="Jean_${VERSION}_${ARCH_LABEL}.AppImage"
+    FINAL_NAME="Atelier_${VERSION}_${ARCH_LABEL}.AppImage"
     mv "$OUTPUT_NAME" "$FINAL_NAME"
     echo "==> AppImage built successfully: $BUNDLE_DIR/$FINAL_NAME"
 

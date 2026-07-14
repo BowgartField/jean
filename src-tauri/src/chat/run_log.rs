@@ -214,11 +214,7 @@ impl RunLogWriter {
     ///
     /// This is used when resuming a detached process that was still running
     /// after the app restarted.
-    pub fn resume(
-        app: &tauri::AppHandle,
-        session_id: &str,
-        run_id: &str,
-    ) -> Result<Self, String> {
+    pub fn resume(app: &tauri::AppHandle, session_id: &str, run_id: &str) -> Result<Self, String> {
         let session_dir = get_session_dir(app, session_id)?;
         let jsonl_path = session_dir.join(format!("{run_id}.jsonl"));
 
@@ -1388,6 +1384,7 @@ mod tests {
             codex_turn_id: None,
             cursor_chat_id: None,
             grok_session_id: None,
+            git_patch: None,
         }
     }
 
@@ -1697,6 +1694,7 @@ mod tests {
             codex_turn_id: None,
             cursor_chat_id: None,
             grok_session_id: None,
+            git_patch: None,
         };
 
         let lines = vec![
@@ -2424,8 +2422,8 @@ pub fn truncate_session_to_message(
     use super::storage::{get_session_dir, load_metadata, save_metadata};
 
     // Load session metadata
-    let mut metadata = load_metadata(app, session_id)?
-        .ok_or_else(|| format!("Session {session_id} not found"))?;
+    let mut metadata =
+        load_metadata(app, session_id)?.ok_or_else(|| format!("Session {session_id} not found"))?;
 
     // Find the index of the run containing the target assistant message
     let target_run_index = metadata
@@ -2438,7 +2436,9 @@ pub fn truncate_session_to_message(
                 .unwrap_or(false)
         })
         .ok_or_else(|| {
-            format!("Assistant message {up_to_assistant_message_id} not found in session {session_id}")
+            format!(
+                "Assistant message {up_to_assistant_message_id} not found in session {session_id}"
+            )
         })?;
 
     // If this is already the last run, nothing to truncate
@@ -2465,10 +2465,7 @@ pub fn truncate_session_to_message(
                     patch.len()
                 );
                 if let Err(e) = apply_reverse_patch(path, patch) {
-                    log::warn!(
-                        "Failed to apply reverse patch for run {}: {e}",
-                        run.run_id
-                    );
+                    log::warn!("Failed to apply reverse patch for run {}: {e}", run.run_id);
                     // Continue with other patches even if one fails
                 }
             }

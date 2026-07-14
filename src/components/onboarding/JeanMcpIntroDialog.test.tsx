@@ -101,14 +101,14 @@ describe('JeanMcpIntroDialog', () => {
     })
   })
 
-  it('shows the enabled Jean MCP state', () => {
+  it('shows the enabled Atelier MCP state', () => {
     renderDialog()
 
     expect(
-      screen.getByRole('dialog', { name: /new: jean mcp server/i })
+      screen.getByRole('dialog', { name: /new: atelier mcp server/i })
     ).toBeInTheDocument()
     expect(
-      screen.getByRole('switch', { name: /enable jean mcp/i })
+      screen.getByRole('switch', { name: /enable atelier mcp/i })
     ).toBeChecked()
   })
 
@@ -130,11 +130,13 @@ describe('JeanMcpIntroDialog', () => {
     })
   })
 
-  it('can disable Jean MCP with the switch', async () => {
+  it('can disable Atelier MCP with the switch', async () => {
     const user = userEvent.setup()
     renderDialog()
 
-    await user.click(screen.getByRole('switch', { name: /enable jean mcp/i }))
+    await user.click(
+      screen.getByRole('switch', { name: /enable atelier mcp/i })
+    )
 
     expect(mocks.patchPreferencesMutate).toHaveBeenCalledWith({
       jean_mcp_enabled: false,

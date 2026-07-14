@@ -24,7 +24,6 @@ import {
   Wand2,
   Star,
   Check,
-  ChevronDown,
   Eye,
   MoreHorizontal,
 } from 'lucide-react'
@@ -1551,7 +1550,7 @@ export function GitHubDashboardModal() {
                 <Input
                   value={searchQuery}
                   onChange={e => setSearchQuery(e.target.value)}
-                  placeholder="Search..."
+                  placeholder={searchPlaceholder}
                   className="pl-8 !h-7 py-0 text-base md:text-xs"
                 />
               </div>
