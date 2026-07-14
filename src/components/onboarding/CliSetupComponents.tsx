@@ -192,7 +192,7 @@ export function SetupState({
       </div>
       {disabled ? (
         <p className="text-xs text-muted-foreground">
-          Manual versions can be used after Jean loads enough CLI metadata to
+          Manual versions can be used after Atelier loads enough CLI metadata to
           know which download source to check.
         </p>
       ) : (
@@ -282,7 +282,7 @@ export function SetupState({
           </div>
         )}
         <p className="text-xs text-muted-foreground">
-          {cliName} will be installed separately in Jean&apos;s application data
+          {cliName} will be installed separately in Atelier&apos;s application data
           folder — it won&apos;t affect your global installation. Authentication
           and configuration from your global {cliName} setup will be used.
         </p>
@@ -623,7 +623,7 @@ export function CliPathSelector({
       <div className="text-center text-sm text-muted-foreground">
         {pathFound
           ? `Choose how to run ${cliName}.`
-          : `No system ${cliName} detected — Jean will manage the installation.`}
+          : `No system ${cliName} detected — Atelier will manage the installation.`}
       </div>
 
       <div className="space-y-3">
@@ -667,8 +667,8 @@ export function CliPathSelector({
           <div className="flex items-center justify-between">
             <div className="font-medium">
               {jeanInstalled
-                ? `Use Jean-managed ${cliName}`
-                : 'Install with Jean'}
+                ? `Use Atelier-managed ${cliName}`
+                : 'Install with Atelier'}
             </div>
             {currentSource === 'jean' && (
               <span className="text-xs px-2 py-0.5 rounded bg-primary/20 text-primary">
@@ -678,8 +678,8 @@ export function CliPathSelector({
           </div>
           <div className="text-sm text-muted-foreground">
             {jeanInstalled
-              ? 'Continue with the version Jean manages (or pick another version next).'
-              : 'Jean will install and manage the CLI.'}
+              ? 'Continue with the version Atelier manages (or pick another version next).'
+              : 'Atelier will install and manage the CLI.'}
           </div>
         </button>
       </div>

@@ -114,16 +114,16 @@ function JeanMcpIntroDialogContent() {
 
       if (failures.length > 0) {
         toast.warning(
-          `Jean MCP added to ${successes.length}/${results.length} CLI config${
+          `Atelier MCP added to ${successes.length}/${results.length} CLI config${
             results.length === 1 ? '' : 's'
           }`
         )
       } else {
-        toast.success('Jean MCP added to your CLI configs')
+        toast.success('Atelier MCP added to your CLI configs')
       }
     } catch (error) {
-      console.error('Failed to add Jean MCP config', error)
-      toast.error('Failed to add Jean MCP automatically')
+      console.error('Failed to add Atelier MCP config', error)
+      toast.error('Failed to add Atelier MCP automatically')
     } finally {
       setInstalling(false)
     }
@@ -144,10 +144,10 @@ function JeanMcpIntroDialogContent() {
     >
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>New: Jean MCP Server</DialogTitle>
+          <DialogTitle>New: Atelier MCP Server</DialogTitle>
           <DialogDescription>
-            Jean can expose its own tools to your local AI CLIs through MCP, so
-            they can call back into Jean to create worktrees, inspect project
+            Atelier can expose its own tools to your local AI CLIs through MCP, so
+            they can call back into Atelier to create worktrees, inspect project
             context, and start background investigations.
           </DialogDescription>
         </DialogHeader>
@@ -164,7 +164,7 @@ function JeanMcpIntroDialogContent() {
                 htmlFor="jean-mcp-intro-enabled"
                 className="cursor-pointer"
               >
-                Enable Jean MCP server
+                Enable Atelier MCP server
               </Label>
               <p className="text-xs text-muted-foreground">
                 You can disable this now or later in Settings → MCP Servers.
@@ -173,7 +173,7 @@ function JeanMcpIntroDialogContent() {
           </div>
 
           <p className="text-sm text-muted-foreground">
-            Jean will not change your CLI configs unless you choose automatic
+            Atelier will not change your CLI configs unless you choose automatic
             setup. Manual setup snippets are available in Settings.
           </p>
         </div>

@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Jean",
+  "productName": "Atelier",
   "version": "0.1.66",
   "identifier": "com.jean.desktop",
   "build": {
@@ -13,7 +13,7 @@
   "app": {
     "windows": [
       {
-        "title": "Jean",
+        "title": "Atelier",
         "width": 800,
         "height": 600,
         "minWidth": 1000,
@@ -69,8 +69,8 @@
     ],
     "publisher": "Andras Bacsai",
     "category": "DeveloperTool",
-    "shortDescription": "Jean - AI Assistant",
-    "longDescription": "Jean is an AI assistant application built with Tauri, React, and TypeScript.",
+    "shortDescription": "Atelier - AI Development Workspace",
+    "longDescription": "Atelier is an AI development workspace built with Tauri, React, and TypeScript.",
     "copyright": "Copyright © 2025 Andras Bacsai. All rights reserved.",
     "macOS": {
       "frameworks": [],

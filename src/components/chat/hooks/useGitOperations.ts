@@ -748,7 +748,7 @@ export function useGitOperations({
 
         try {
           if (!worktree?.pr_number) {
-            throw new Error('Open or link a PR in Jean first')
+            throw new Error('Open or link a PR in Atelier first')
           }
 
           const result = await invoke<TriggerCodeRabbitPrReviewResponse>(

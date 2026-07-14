@@ -1,4 +1,4 @@
-# Contributing to Jean
+# Contributing to Atelier
 
 ## Prerequisites
 

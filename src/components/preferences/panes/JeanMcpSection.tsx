@@ -153,7 +153,7 @@ export const JeanMcpSection: React.FC = () => {
   const handleInstall = useCallback(
     async (assumeEnabled = false) => {
       if ((!enabled && !assumeEnabled) || !serverRunning) {
-        setTemporaryInstallState('error', 'Enable Jean MCP first')
+        setTemporaryInstallState('error', 'Enable Atelier MCP first')
         return
       }
       if (installableBackends.length === 0) {
@@ -184,8 +184,8 @@ export const JeanMcpSection: React.FC = () => {
             : 'Added'
         )
       } catch (e) {
-        setTemporaryInstallState('error', 'Failed to add Jean MCP')
-        console.error('Failed to add Jean MCP config', e)
+        setTemporaryInstallState('error', 'Failed to add Atelier MCP')
+        console.error('Failed to add Atelier MCP config', e)
       }
     },
     [
@@ -217,7 +217,7 @@ export const JeanMcpSection: React.FC = () => {
 
   const handleCopy = (label: string, content: string | null) => {
     if (!content) {
-      toast.error(`No ${label} snippet available — enable Jean MCP first`)
+      toast.error(`No ${label} snippet available — enable Atelier MCP first`)
       return
     }
     copyToClipboard(content)
@@ -228,10 +228,10 @@ export const JeanMcpSection: React.FC = () => {
 
   return (
     <>
-      <SettingsSection title="Jean MCP Server" anchorId="pref-mcp-section-jean">
+      <SettingsSection title="Atelier MCP Server" anchorId="pref-mcp-section-jean">
         <p className="text-sm text-muted-foreground">
-          Expose Jean&apos;s own commands over MCP so spawned local CLIs can
-          call back into Jean (create worktrees, list GitHub issues, send chat
+          Expose Atelier&apos;s own commands over MCP so spawned local CLIs can
+          call back into Atelier (create worktrees, list GitHub issues, send chat
           messages, etc).
         </p>
         <div className="flex items-center gap-3 rounded-md border px-4 py-3">
@@ -241,7 +241,7 @@ export const JeanMcpSection: React.FC = () => {
             onCheckedChange={handleEnabledChange}
           />
           <Label htmlFor="jean-mcp-enabled" className="flex-1 cursor-pointer">
-            Enable Jean MCP
+            Enable Atelier MCP
           </Label>
           {checkingServer && (
             <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -309,7 +309,7 @@ export const JeanMcpSection: React.FC = () => {
                     One-click config install
                   </Label>
                   <p className="text-xs text-muted-foreground">
-                    Safely merges Jean MCP config into the CLI user configs.
+                    Safely merges Atelier MCP config into the CLI user configs.
                   </p>
                 </div>
                 <Button
@@ -330,7 +330,7 @@ export const JeanMcpSection: React.FC = () => {
                   title={installMessage}
                 >
                   {transientButton ?? (
-                    <span>Add current Jean MCP ({modeLabel})</span>
+                    <span>Add current Atelier MCP ({modeLabel})</span>
                   )}
                 </Button>
               </div>
@@ -387,10 +387,10 @@ export const JeanMcpSection: React.FC = () => {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              Add Jean MCP to your CLI configs?
+              Add Atelier MCP to your CLI configs?
             </AlertDialogTitle>
             <AlertDialogDescription>
-              Jean MCP is enabled. Jean can add it automatically to your
+              Atelier MCP is enabled. Atelier can add it automatically to your
               installed CLI config files, or you can copy the manual snippets
               below.
             </AlertDialogDescription>

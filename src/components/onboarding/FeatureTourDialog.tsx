@@ -60,10 +60,10 @@ const steps = [
   },
   {
     title: 'Automate the project routine',
-    description: 'Jean can remember the setup, run, and cleanup work.',
+    description: 'Atelier can remember the setup, run, and cleanup work.',
     items: [
       {
-        shortcut: 'jean.json' as ShortcutString,
+        shortcut: 'project config' as ShortcutString,
         label: 'Project automation file',
         detail:
           'Keep scripts in your repository so every worktree starts the same way.',
@@ -77,13 +77,13 @@ const steps = [
       {
         shortcut: 'run' as ShortcutString,
         label: 'Run',
-        detail: 'Launch your dev server from Jean with the run shortcut.',
+        detail: 'Launch your dev server from Atelier with the run shortcut.',
       },
     ] satisfies TourItem[],
   },
   {
     title: 'Bring your favorite AI backend',
-    description: 'Use Jean with the AI agents and models that fit each task.',
+    description: 'Use Atelier with the AI agents and models that fit each task.',
     items: backendOptions.map(backend => ({
       label: backend.label,
       detail:
@@ -94,12 +94,12 @@ const steps = [
   },
   {
     title: 'Mr. Robot',
-    description: 'Let Jean keep an eye on your issue queue.',
+    description: 'Let Atelier keep an eye on your issue queue.',
     items: [
       {
         label: 'Issue sweeps',
         detail:
-          'Poll open GitHub issues and create one Jean worktree per issue.',
+          'Poll open GitHub issues and create one Atelier worktree per issue.',
       },
       {
         label: 'Focused plans',

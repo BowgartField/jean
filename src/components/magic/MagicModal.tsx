@@ -1543,7 +1543,7 @@ ${resolveInstructions}`
 
             try {
               if (!worktree.pr_number) {
-                throw new Error('Open or link a PR in Jean first')
+                throw new Error('Open or link a PR in Atelier first')
               }
 
               const result = await invoke<TriggerCodeRabbitPrReviewResponse>(
@@ -2386,7 +2386,7 @@ ${resolveInstructions}`
                 <p className="text-sm text-destructive">{linkPrError}</p>
               )}
               <p className="text-xs text-muted-foreground">
-                Jean will validate this PR with GitHub and store the link on the
+                Atelier will validate this PR with GitHub and store the link on the
                 current worktree.
               </p>
             </div>

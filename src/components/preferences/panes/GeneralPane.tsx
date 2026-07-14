@@ -752,7 +752,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
     }
     const { name, cmd } = labelMap[target]
     setIsDeletingCli(true)
-    const toastId = toast.loading(`Removing Jean-managed ${name}...`)
+    const toastId = toast.loading(`Removing Atelier-managed ${name}...`)
     try {
       await invoke(cmd)
       const sourceKey =
@@ -814,12 +814,12 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                       ? grokPathDetection?.found
                       : coderabbitPathDetection?.found
       if (pathFound) {
-        toast.success(`Jean-managed ${name} removed. Using system PATH.`, {
+        toast.success(`Atelier-managed ${name} removed. Using system PATH.`, {
           id: toastId,
         })
       } else {
         toast.warning(
-          `Jean-managed ${name} removed. No system PATH version found — ${name} unavailable until reinstalled.`,
+          `Atelier-managed ${name} removed. No system PATH version found — ${name} unavailable until reinstalled.`,
           { id: toastId }
         )
       }
@@ -1690,7 +1690,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="jean">Jean (managed)</SelectItem>
+                  <SelectItem value="jean">Atelier (managed)</SelectItem>
                   <SelectItem value="path" disabled={!pathDetection?.found}>
                     System PATH
                     {!pathDetection?.found && ' (not found)'}
@@ -1700,7 +1700,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
             </InlineField>
             {!cliStatus?.installed && !pathDetection?.found && (
               <p className="text-xs text-muted-foreground px-1">
-                Install with Jean, or install <code>claude</code> yourself in
+                Install with Atelier, or install <code>claude</code> yourself in
                 your environment — we&apos;ll detect it on your PATH.
               </p>
             )}
@@ -1837,7 +1837,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="jean">Jean (managed)</SelectItem>
+                  <SelectItem value="jean">Atelier (managed)</SelectItem>
                   <SelectItem value="path" disabled={!ghPathDetection?.found}>
                     System PATH
                     {!ghPathDetection?.found && ' (not found)'}
@@ -1847,7 +1847,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
             </InlineField>
             {!ghStatus?.installed && !ghPathDetection?.found && (
               <p className="text-xs text-muted-foreground px-1">
-                Install with Jean, or install <code>gh</code> yourself in your
+                Install with Atelier, or install <code>gh</code> yourself in your
                 environment — we&apos;ll detect it on your PATH.
               </p>
             )}
@@ -1995,7 +1995,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="jean">Jean (managed)</SelectItem>
+                      <SelectItem value="jean">Atelier (managed)</SelectItem>
                       <SelectItem
                         value="path"
                         disabled={!coderabbitPathDetection?.found}
@@ -2158,7 +2158,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="jean">Jean (managed)</SelectItem>
+                  <SelectItem value="jean">Atelier (managed)</SelectItem>
                   <SelectItem
                     value="path"
                     disabled={!codexPathDetection?.found}
@@ -2171,7 +2171,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
             </InlineField>
             {!codexStatus?.installed && !codexPathDetection?.found && (
               <p className="text-xs text-muted-foreground px-1">
-                Install with Jean, or install <code>codex</code> yourself in
+                Install with Atelier, or install <code>codex</code> yourself in
                 your environment — we&apos;ll detect it on your PATH.
               </p>
             )}
@@ -2316,7 +2316,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="jean">Jean (managed)</SelectItem>
+                  <SelectItem value="jean">Atelier (managed)</SelectItem>
                   <SelectItem
                     value="path"
                     disabled={!opencodePathDetection?.found}
@@ -2329,7 +2329,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
             </InlineField>
             {!opencodeStatus?.installed && !opencodePathDetection?.found && (
               <p className="text-xs text-muted-foreground px-1">
-                Install with Jean, or install <code>opencode</code> yourself in
+                Install with Atelier, or install <code>opencode</code> yourself in
                 your environment — we&apos;ll detect it on your PATH.
               </p>
             )}
@@ -2438,7 +2438,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                 </Tooltip>
               }
             >
-              {/* Cursor has no Jean-managed binary — the installer runs
+              {/* Cursor has no Atelier-managed binary — the installer runs
                   Cursor's own script and the result lives on PATH. The
                   Select is disabled but kept for visual parity with the
                   other CLI rows. */}
@@ -2453,7 +2453,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
             </InlineField>
             {!cursorStatus?.installed && !cursorPathDetection?.found && (
               <p className="text-xs text-muted-foreground px-1">
-                Install with Jean, or install <code>cursor-agent</code> yourself
+                Install with Atelier, or install <code>cursor-agent</code> yourself
                 in your environment — we&apos;ll detect it on your PATH.
               </p>
             )}
@@ -2502,7 +2502,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
               description={
                 piStatus?.installed
                   ? 'Enables PI AI sessions through the PI CLI.'
-                  : 'PI can be Jean-managed or discovered from your system PATH.'
+                  : 'PI can be Atelier-managed or discovered from your system PATH.'
               }
             >
               {isPiLoading ? (
@@ -2559,7 +2559,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="jean">Jean (managed)</SelectItem>
+                    <SelectItem value="jean">Atelier (managed)</SelectItem>
                     <SelectItem value="path" disabled={!piPathDetection?.found}>
                       System PATH
                       {!piPathDetection?.found && ' (not found)'}
@@ -2702,7 +2702,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="jean">Jean (managed)</SelectItem>
+                    <SelectItem value="jean">Atelier (managed)</SelectItem>
                     <SelectItem
                       value="path"
                       disabled={!commandcodePathDetection?.found}
@@ -3273,7 +3273,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
               description={
                 grokStatus?.installed
                   ? 'Enables Grok AI sessions through the Grok CLI.'
-                  : 'Grok can be Jean-managed or discovered from your system PATH.'
+                  : 'Grok can be Atelier-managed or discovered from your system PATH.'
               }
             >
               {isGrokLoading ? (
@@ -3337,7 +3337,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="jean">Jean (managed)</SelectItem>
+                    <SelectItem value="jean">Atelier (managed)</SelectItem>
                     <SelectItem
                       value="path"
                       disabled={!grokPathDetection?.found}
@@ -4152,7 +4152,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
             <div className="space-y-4">
               <InlineField
                 label="Desktop notifications"
-                description="Show a native system banner when a session needs your input or finishes, but only while Jean is in the background."
+                description="Show a native system banner when a session needs your input or finishes, but only while Atelier is in the background."
               >
                 <Switch
                   checked={preferences?.desktop_notifications_enabled ?? true}
@@ -4162,7 +4162,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
 
               <InlineField
                 label="Web access sounds"
-                description="Applies only when using Jean in browser or mobile web access. Turn off to keep phone music uninterrupted."
+                description="Applies only when using Atelier in browser or mobile web access. Turn off to keep phone music uninterrupted."
               >
                 <div className="flex items-center gap-2">
                   <Checkbox
@@ -4174,7 +4174,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                     htmlFor="web-access-sounds-enabled"
                     className="cursor-pointer text-sm"
                   >
-                    Play Jean sounds in web access
+                    Play Atelier sounds in web access
                   </Label>
                 </div>
               </InlineField>
@@ -4545,7 +4545,7 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              Delete Jean-managed{' '}
+              Delete Atelier-managed{' '}
               {deleteCliTarget === 'claude'
                 ? 'Claude CLI'
                 : deleteCliTarget === 'codex'
@@ -4580,8 +4580,8 @@ export const GeneralPane: React.FC<{ scope?: PreferencesPaneScope }> = ({
                                 ? grokPathDetection?.found
                                 : false
                 return pathFound
-                  ? 'The Jean-managed binary will be removed and the source will switch to System PATH. You can reinstall it later from this page.'
-                  : 'The Jean-managed binary will be removed. No System PATH version was detected, so this backend will be unavailable until you reinstall it.'
+                  ? 'The Atelier-managed binary will be removed and the source will switch to System PATH. You can reinstall it later from this page.'
+                  : 'The Atelier-managed binary will be removed. No System PATH version was detected, so this backend will be unavailable until you reinstall it.'
               })()}
             </AlertDialogDescription>
           </AlertDialogHeader>

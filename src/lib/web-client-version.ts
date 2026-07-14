@@ -30,10 +30,10 @@ export function checkWebClientVersion(serverInfo: ServerBuildInfo): boolean {
     serverVersion: serverInfo.appVersion,
   })
 
-  toast.warning('Jean was updated', {
+  toast.warning('Atelier was updated', {
     id: 'web-client-stale',
     description: serverInfo.appVersion
-      ? `Reload Web Access to use Jean ${serverInfo.appVersion} and the latest features.`
+      ? `Reload Web Access to use Atelier ${serverInfo.appVersion} and the latest features.`
       : 'Reload Web Access to use the latest features.',
     duration: Infinity,
     closeButton: false,

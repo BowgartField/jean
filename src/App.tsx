@@ -707,7 +707,7 @@ function App() {
 
   // A fresh page bootstrap is faster and more reliable than repairing stale
   // in-memory state. The backend keeps long-running jobs and
-  // terminals alive, so reloading behaves like reopening Jean without losing
+  // terminals alive, so reloading behaves like reopening Atelier without losing
   // backend work.
   const wsConnected = useWsConnectionStatus()
   useEffect(() => {
@@ -867,7 +867,7 @@ function App() {
     queryClient,
   ])
 
-  // Show the one-time Jean MCP announcement only after setup is complete.
+  // Show the one-time Atelier MCP announcement only after setup is complete.
   // This must never compete with first-run onboarding or the feature tour.
   useEffect(() => {
     if (!isNativeApp()) return
@@ -1219,7 +1219,7 @@ function App() {
 
   // Show loading screen while preloading initial data (web view only)
   if (isPreloading) {
-    return <WebLoadingScreen label="Loading Jean..." />
+    return <WebLoadingScreen label="Loading Atelier..." />
   }
 
   return (
@@ -1227,7 +1227,7 @@ function App() {
       <ThemeProvider>
         <MainWindow />
         {!isNativeApp() && !wsConnected && (
-          <WebLoadingScreen label="Loading Jean..." />
+          <WebLoadingScreen label="Loading Atelier..." />
         )}
         {!isNativeApp() && <WsAuthErrorOverlay />}
       </ThemeProvider>

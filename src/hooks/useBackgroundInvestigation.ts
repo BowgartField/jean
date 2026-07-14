@@ -336,7 +336,7 @@ const investigationConfig = {
 
 /**
  * Process a single background investigation: build prompt, then ask the backend
- * to reuse the same active/first session selection and send flow as Jean MCP.
+ * to reuse the same active/first session selection and send flow as Atelier MCP.
  */
 async function processBackgroundInvestigation(
   worktreeId: string,

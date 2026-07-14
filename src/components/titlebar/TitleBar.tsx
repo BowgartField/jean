@@ -44,7 +44,7 @@ interface TitleBarProps {
 
 export function TitleBar({
   className,
-  title = 'Jean',
+  title = 'Atelier',
   hideTitle = false,
 }: TitleBarProps) {
   const { leftSidebarVisible, toggleLeftSidebar } = useUIStore()

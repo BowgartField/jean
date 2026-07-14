@@ -47,7 +47,7 @@ export function SetupIncompleteBanner() {
     return (
       <div className="flex w-full shrink-0 items-center justify-center gap-2 px-4 py-1.5 text-xs text-muted-foreground">
         <Loader2 className="h-3 w-3 animate-spin" />
-        <span>Calling Jean…</span>
+        <span>Calling Atelier…</span>
       </div>
     )
   }
@@ -73,7 +73,7 @@ export function SetupIncompleteBanner() {
   return (
     <div className="flex w-full shrink-0 items-center justify-center gap-2 bg-amber-500/15 px-4 py-1.5 text-xs text-amber-400">
       <span>
-        Setup incomplete — Jean requires GitHub CLI and at least one AI backend.
+        Setup incomplete — Atelier requires GitHub CLI and at least one AI backend.
       </span>
       <button
         onClick={handleCompleteSetup}

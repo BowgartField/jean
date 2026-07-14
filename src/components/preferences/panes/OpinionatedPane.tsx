@@ -77,7 +77,7 @@ const PLUGINS: PluginDefinition[] = [
     ],
     usage: [
       {
-        note: "Installs through Caveman's unified installer where supported, then mirrors Jean-global skills for every Jean AI backend found on this machine.",
+        note: "Installs through Caveman's unified installer where supported, then mirrors Atelier-global skills for every Atelier AI backend found on this machine.",
       },
       {
         note: 'Claude and OpenCode can auto-activate. Codex and Cursor expose skills for per-session activation with /caveman; Cursor also gets an always-on rule when the installer can write one.',
@@ -114,7 +114,7 @@ const PLUGINS: PluginDefinition[] = [
     ],
     usage: [
       {
-        note: 'Installs through Claude when available, then mirrors Superpowers skills into every Jean AI backend. Without Claude, Jean fetches the Superpowers repo directly.',
+        note: 'Installs through Claude when available, then mirrors Superpowers skills into every Atelier AI backend. Without Claude, Atelier fetches the Superpowers repo directly.',
       },
       {
         label: 'Brainstorm a feature',
@@ -406,7 +406,7 @@ export const OpinionatedPane: React.FC = () => {
     <div className="space-y-6">
       <SettingsSection
         title="Recommended Plugins"
-        description="Curated tools that enhance your development workflow across Jean AI backends."
+        description="Curated tools that enhance your development workflow across Atelier AI backends."
         anchorId="pref-opinionated-section-recommended-plugins"
       >
         <div className="space-y-3">

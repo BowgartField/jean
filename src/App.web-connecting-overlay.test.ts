@@ -18,10 +18,10 @@ describe('web connecting overlay', () => {
   it('uses the same centered loading layout for opening and reconnecting', () => {
     expect(source).toContain('function WebLoadingScreen({ label }')
     expect(
-      source.match(/<WebLoadingScreen label="Loading Jean\.\.\." \/>/g)
+      source.match(/<WebLoadingScreen label="Loading Atelier\.\.\." \/>/g)
     ).toHaveLength(2)
-    expect(source).not.toContain('Jean is loading...')
-    expect(source).not.toContain('Reconnecting to Jean...')
+    expect(source).not.toContain('Atelier is loading...')
+    expect(source).not.toContain('Reconnecting to Atelier...')
     expect(source).not.toContain('animate-spin')
     expect(source).not.toContain('size-[32px]')
     expect(source).toMatch(/<p\s+role="status"/)

@@ -428,8 +428,8 @@ class WsTransport {
         localStorage.removeItem('jean-http-token')
         this.setAuthError(
           token
-            ? "Invalid access token. Check the URL in Jean's Web Access settings."
-            : "No access token provided. Use the URL from Jean's Web Access settings."
+            ? "Invalid access token. Check the URL in Atelier's Web Access settings."
+            : "No access token provided. Use the URL from Atelier's Web Access settings."
         )
         return
       }

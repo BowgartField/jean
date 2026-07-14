@@ -113,8 +113,8 @@ function JeanConfigWizardContent() {
             <FileCode2 className="mt-0.5 size-5 shrink-0 text-muted-foreground" />
             <div className="space-y-1 text-sm text-muted-foreground">
               <p>
-                Jean uses a{' '}
-                <code className="text-foreground/80">jean.json</code> file in
+                Atelier uses a{' '}
+                <code className="text-foreground/80">project automation</code> file in
                 your project root to automate repetitive tasks:
               </p>
               <ul className="list-disc pl-4 space-y-0.5">

@@ -98,7 +98,7 @@ export function ReviewMethodModal({
         <div className="grid min-w-0 gap-2">
           <ReviewChoice
             icon={<Bot className="size-4" />}
-            title="Jean"
+            title="Atelier"
             subtitle="Uses your configured review backend"
             badge="Default"
             shortcut="1"
@@ -121,7 +121,7 @@ export function ReviewMethodModal({
             prSubtitle={
               codeRabbitPrAvailable
                 ? 'Add @coderabbitai review comment'
-                : 'Open or link a PR in Jean first'
+                : 'Open or link a PR in Atelier first'
             }
             onCliReview={() => choose(onCodeRabbitCliReview)}
             onPrReview={() => choose(onCodeRabbitPrReview)}

@@ -3702,7 +3702,7 @@ function EmptyDashboardTabs({
             onClick={() => openProjectSettings(projectId, 'jean-json')}
           >
             <FileJson className="h-3 w-3" />
-            Add a jean.json to automate setup &amp; dev server
+            Add a project automation file to automate setup &amp; dev server
           </button>
         )}
       </div>

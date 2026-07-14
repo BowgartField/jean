@@ -278,7 +278,7 @@ export function PermissionApproval({
       </div>
 
       <div className="mb-4 text-muted-foreground">
-        Jean wants to use the following tools. Select which to allow:
+        Atelier wants to use the following tools. Select which to allow:
       </div>
 
       <div className="mb-4 space-y-2.5">

@@ -6,7 +6,7 @@
  * commits + closing-keyword issue references, writes user-facing grouped notes,
  * and updates the PR description in place via `gh pr edit`.
  *
- * This mirrors the `/release` slash command but is owned by Jean (no dependency
+ * This mirrors the `/release` slash command but is owned by Atelier (no dependency
  * on any external skill file).
  */
 const RELEASE_NOTES_INSTRUCTION = `You are updating the description of an existing GitHub pull request with user-facing release notes, following the /release command workflow as closely as possible.

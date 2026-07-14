@@ -123,7 +123,7 @@ export function JeanJsonPane({
     <div className="space-y-6">
       <SettingsSection title="Automation Scripts">
         <p className="text-xs text-muted-foreground">
-          Scripts from jean.json — setup runs after worktree creation, teardown
+          Project automation scripts — setup runs after worktree creation, teardown
           before deletion, run launches via the run command
         </p>
         <div className="space-y-4">

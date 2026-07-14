@@ -157,12 +157,12 @@ export function MainWindowContent({
       ) : (
         <div className="flex flex-1 flex-col items-center justify-center gap-6 font-sans">
           <h1 className="text-4xl font-bold text-foreground">
-            Welcome to Jean!
+            Welcome to Atelier!
           </h1>
           {awaitingBackendCheck || backendsLoading ? (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" />
-              <span>Calling Jean…</span>
+              <span>Calling Atelier…</span>
             </div>
           ) : setupIncomplete ? (
             <div className="flex flex-col items-center gap-3">

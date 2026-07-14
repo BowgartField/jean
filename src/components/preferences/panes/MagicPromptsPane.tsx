@@ -535,7 +535,7 @@ const PROMPT_SECTIONS: PromptSection[] = [
         key: 'provider_switch_handoff',
         label: 'Provider Switch Handoff',
         description:
-          'Hidden prompt prepended when a session switches between AI backends so the new provider uses Jean-local history as context.',
+          'Hidden prompt prepended when a session switches between AI backends so the new provider uses Atelier-local history as context.',
         variables: [
           {
             name: '{previous_backend}',
@@ -547,7 +547,7 @@ const PROMPT_SECTIONS: PromptSection[] = [
           },
           {
             name: '{history}',
-            description: 'Bounded Jean-local conversation history',
+            description: 'Bounded Atelier-local conversation history',
           },
         ],
         defaultValue: DEFAULT_PROVIDER_SWITCH_HANDOFF_PROMPT,

@@ -202,11 +202,11 @@ describe('model option helpers', () => {
     expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain(
       'Every Codex response that contains or revises a plan while the current execution mode is plan'
     )
-    expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain('Jean Worktree Policy')
+    expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain('Atelier Worktree Policy')
     expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain(
       'Do NOT create git worktrees manually'
     )
-    expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain('Jean MCP/tools')
+    expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain('Atelier MCP/tools')
     expect(DEFAULT_GLOBAL_SYSTEM_PROMPT).toContain(
       'VERY IMPORTANT: Keep Code Simple'
     )

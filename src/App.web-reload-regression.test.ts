@@ -13,7 +13,7 @@ describe('web reload recovery UI', () => {
       /captureWebReloadState\(\)[\s\S]*?window\.location\.reload\(\)/
     )
     expect(source).toContain(
-      'return <WebLoadingScreen label="Loading Jean..." />'
+      'return <WebLoadingScreen label="Loading Atelier..." />'
     )
     expect(source).not.toContain('WebReloadingOverlay')
   })

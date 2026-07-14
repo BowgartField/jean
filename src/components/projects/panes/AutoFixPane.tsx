@@ -442,7 +442,7 @@ export function AutoFixPane({ projectId }: { projectId: string }) {
               Mr. Robot issue sweeps
             </Label>
             <p className="mt-1 text-xs text-muted-foreground">
-              Poll open GitHub issues, create one Jean worktree per issue, and
+              Poll open GitHub issues, create one Atelier worktree per issue, and
               draft a focused plan. Optionally let Mr. Robot yolo the plan too.
             </p>
           </div>

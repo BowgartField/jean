@@ -613,23 +613,23 @@ export const DEFAULT_GLOBAL_SYSTEM_PROMPT = `### 1. Planning Guidance
 - **No Laziness**: Find root causes. No temporary fixes. Senior developer standards.
 - **Minimal Impact**: Changes should only touch what's necessary. Avoid introducing bugs.
 
-## Jean Worktree Policy
+## Atelier Worktree Policy
 - Do NOT create git worktrees manually (\`git worktree add\`, Superpowers \`using-git-worktrees\`, or similar) unless the user explicitly asks for a new worktree.
-- If a new worktree is explicitly required, use Jean's worktree features through Jean MCP/tools, not raw git worktree commands.
-- If already in a Jean worktree or base/main workspace, continue in the current workspace.
+- If a new worktree is explicitly required, use Atelier's worktree features through Atelier MCP/tools, not raw git worktree commands.
+- If already in an Atelier worktree or base/main workspace, continue in the current workspace.
 
 ## Important!
 
 - After each finished task, please write a few bullet points on how to test the changes.`
 
-export const DEFAULT_PROVIDER_SWITCH_HANDOFF_PROMPT = `You are continuing a Jean chat session after the user switched AI backends.
+export const DEFAULT_PROVIDER_SWITCH_HANDOFF_PROMPT = `You are continuing an Atelier chat session after the user switched AI backends.
 
-Jean-local history is the source of truth because provider-owned server history may be incomplete after backend switches.
+Atelier-local history is the source of truth because provider-owned server history may be incomplete after backend switches.
 
 Previous backend: {previous_backend}
 Current backend: {current_backend}
 
-Use the Jean-local history below to reconstruct context before answering the user's latest message. Do not mention this hidden handoff unless it is directly relevant.
+Use the Atelier-local history below to reconstruct context before answering the user's latest message. Do not mention this hidden handoff unless it is directly relevant.
 
 <jean_local_history>
 {history}
@@ -1260,7 +1260,7 @@ export const PREDEFINED_CLI_PROFILES: CustomCliProfile[] = [
 export type FileEditMode = 'inline' | 'external'
 
 export const fileEditModeOptions: { value: FileEditMode; label: string }[] = [
-  { value: 'inline', label: 'Jean (inline editor)' },
+  { value: 'inline', label: 'Atelier (inline editor)' },
   { value: 'external', label: 'External editor' },
 ]
 
@@ -1718,7 +1718,7 @@ export const newSessionKindOptions: {
   value: NewSessionKind
   label: string
 }[] = [
-  { value: 'chat', label: 'Jean Chat' },
+  { value: 'chat', label: 'Atelier Chat' },
   { value: 'terminal', label: 'Terminal' },
   { value: 'codex', label: 'Codex' },
   { value: 'claude', label: 'Claude' },
@@ -1731,7 +1731,7 @@ export function getNewSessionKindLabel(
   kind: NewSessionKind | undefined
 ): string {
   const option = newSessionKindOptions.find(opt => opt.value === kind)
-  return option?.label ?? 'Jean Chat'
+  return option?.label ?? 'Atelier Chat'
 }
 
 export function getOpenInDefaultLabel(
@@ -2012,7 +2012,7 @@ export const defaultPreferences: AppPreferences = {
   confirm_session_close: true, // Default: enabled (show confirmation)
   default_execution_mode: 'plan', // Default: plan mode
   default_backend: 'claude', // Default: Claude
-  default_new_session_kind: 'chat', // Default: Jean Chat for CMD+T
+  default_new_session_kind: 'chat', // Default: Atelier Chat for CMD+T
   selected_codex_model: 'gpt-5.5', // Default: latest Codex model
   selected_opencode_model: 'opencode/gpt-5.5', // Default OpenCode model
   selected_cursor_model: 'cursor/auto', // Default Cursor model

@@ -52,11 +52,11 @@ export function WebAccessAuthScreen({
               setToken(event.target.value)
               if (emptyError) setEmptyError(false)
             }}
-            placeholder="Paste your Jean web access token"
+            placeholder="Paste your Atelier web access token"
           />
           {emptyError && (
             <p className="text-xs text-destructive">
-              Enter the access token from Jean&apos;s Web Access settings.
+              Enter the access token from Atelier&apos;s Web Access settings.
             </p>
           )}
         </div>

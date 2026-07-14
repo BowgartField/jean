@@ -163,10 +163,10 @@ export function QuickActionsTab({
                 className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs text-muted-foreground/40 hover:text-foreground hover:bg-accent cursor-pointer transition-colors"
               >
                 <Settings className="h-4 w-4" />
-                <span>Configure jean.json</span>
+                <span>Configure project automation</span>
               </button>
             </TooltipTrigger>
-            <TooltipContent side="bottom">Configure jean.json</TooltipContent>
+            <TooltipContent side="bottom">Configure project automation</TooltipContent>
           </Tooltip>
         </div>
       )}

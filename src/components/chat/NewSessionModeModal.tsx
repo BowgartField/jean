@@ -330,8 +330,8 @@ export function NewSessionModeModal() {
                       <MessageSquarePlus className="size-4" />
                     )
                   }
-                  title="Jean Chat"
-                  subtitle="Normal ChatWindow session with Jean features"
+                  title="Atelier Chat"
+                  subtitle="Normal ChatWindow session with Atelier features"
                   badge="Default"
                   shortcut="↵"
                   showShortcut={!isMobile}

@@ -27,12 +27,12 @@ describe('ensureTerminalFontLoaded', () => {
     expect(load).toHaveBeenNthCalledWith(
       1,
       '400 13px "JetBrains Mono", monospace',
-      'Jean terminal font probe ➜ ✗'
+      'Atelier terminal font probe ➜ ✗'
     )
     expect(load).toHaveBeenNthCalledWith(
       2,
       '500 13px "JetBrains Mono", monospace',
-      'Jean terminal font probe ➜ ✗'
+      'Atelier terminal font probe ➜ ✗'
     )
   })
 

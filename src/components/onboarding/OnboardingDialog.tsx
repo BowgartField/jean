@@ -1875,7 +1875,7 @@ function OnboardingDialogContent() {
     const dialogStep = step as OnboardingStep
     if (dialogStep === 'wsl-setup') {
       return {
-        title: 'Welcome to Jean',
+        title: 'Welcome to Atelier',
         description: 'Choose your development environment.',
       }
     }
@@ -1884,7 +1884,7 @@ function OnboardingDialogContent() {
       return {
         title: onboardingManuallyTriggered
           ? 'Install AI Backends'
-          : 'Welcome to Jean',
+          : 'Welcome to Atelier',
         description: onboardingManuallyTriggered
           ? 'Select additional AI backends to install.'
           : 'Select at least one AI backend to install. GitHub CLI setup is required next.',
@@ -1906,7 +1906,7 @@ function OnboardingDialogContent() {
         description: isGhReinstall
           ? 'Select a version to install. This will replace the current installation.'
           : hasPathCli
-            ? 'Choose to use your system GitHub CLI or install with Jean.'
+            ? 'Choose to use your system GitHub CLI or install with Atelier.'
             : 'GitHub CLI is required for GitHub integration.',
       }
     }
@@ -1933,7 +1933,7 @@ function OnboardingDialogContent() {
         description: isReinstall
           ? 'Select a version to install. This will replace the current installation.'
           : pathDetection.data?.found
-            ? 'Choose to use your system Claude or install with Jean.'
+            ? 'Choose to use your system Claude or install with Atelier.'
             : 'Select a version to install.',
       }
     }
@@ -1949,7 +1949,7 @@ function OnboardingDialogContent() {
         description: isReinstall
           ? 'Select a version to install. This will replace the current installation.'
           : hasPathCli
-            ? 'Choose to use your system Codex or install with Jean.'
+            ? 'Choose to use your system Codex or install with Atelier.'
             : 'Select a version to install.',
       }
     }
@@ -1968,7 +1968,7 @@ function OnboardingDialogContent() {
         description: isReinstall
           ? 'Select a version to install. This will replace the current installation.'
           : hasPathCli
-            ? 'Choose to use your system OpenCode or install with Jean.'
+            ? 'Choose to use your system OpenCode or install with Atelier.'
             : 'Select a version to install.',
       }
     }
@@ -1981,7 +1981,7 @@ function OnboardingDialogContent() {
         description: isPiReinstall
           ? 'Select a version to install. This will replace the current installation.'
           : piPathDetection.data?.found
-            ? 'Choose to use your system PI or install with Jean.'
+            ? 'Choose to use your system PI or install with Atelier.'
             : 'Select a version to install.',
       }
     }
@@ -1997,7 +1997,7 @@ function OnboardingDialogContent() {
         description: isCommandcodeReinstall
           ? 'Select a version to install. This will replace the current installation.'
           : commandcodePathDetection.data?.found
-            ? 'Choose to use your system Command Code or install with Jean.'
+            ? 'Choose to use your system Command Code or install with Atelier.'
             : 'Select a version to install.',
       }
     }
@@ -2010,7 +2010,7 @@ function OnboardingDialogContent() {
         description: isGrokReinstall
           ? 'Select a version to install. This will replace the current installation.'
           : grokPathDetection.data?.found
-            ? 'Choose to use your system Grok or install with Jean.'
+            ? 'Choose to use your system Grok or install with Atelier.'
             : 'Select a version to install.',
       }
     }
@@ -2625,7 +2625,7 @@ function SuccessState({
       </div>
 
       <Button onClick={onContinue} className="w-full" size="lg">
-        Continue to Jean
+        Continue to Atelier
       </Button>
     </div>
   )

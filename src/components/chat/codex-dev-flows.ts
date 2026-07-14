@@ -53,7 +53,7 @@ export const CODEX_DEV_FLOWS: CodexDevFlowDefinition[] = [
         {
           header: 'Framework',
           id: 'framework',
-          question: 'Which framework should Jean optimize for?',
+          question: 'Which framework should Atelier optimize for?',
           options: [
             {
               label: 'React',

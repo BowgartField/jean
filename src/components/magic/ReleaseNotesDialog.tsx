@@ -332,7 +332,7 @@ export function ReleaseNotesDialog() {
               {!isLoadingReleases && !releasesError && releases.length > 0 && (
                 <div className="py-1">
                   <div className="px-4 py-1 text-xs text-muted-foreground">
-                    Select a release to compare changes since. Jean will inspect
+                    Select a release to compare changes since. Atelier will inspect
                     matched merged PRs and closing issue references.
                   </div>
                   {releases.map((release, index) => (

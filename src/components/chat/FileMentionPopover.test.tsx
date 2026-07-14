@@ -61,7 +61,7 @@ vi.mock('@/services/projects', async () => {
       data: [
         {
           id: 'current',
-          name: 'Jean',
+          name: 'Atelier',
           path: '/tmp/jean',
           default_branch: 'main',
           added_at: 0,
@@ -134,7 +134,7 @@ describe('FileMentionPopover linked project scopes', () => {
     const scopeSelector = screen.getByLabelText('Project scope selector')
     expect(scopeSelector).toBeInTheDocument()
     expect(
-      screen.getByRole('button', { name: 'Search files in Jean current' })
+      screen.getByRole('button', { name: 'Search files in Atelier current' })
     ).toHaveAttribute('aria-pressed', 'true')
     expect(
       screen.getByRole('button', { name: 'Search files in Docs' })
@@ -205,7 +205,7 @@ describe('FileMentionPopover linked project scopes', () => {
     act(() => handleRef.current?.selectPreviousScope())
 
     expect(
-      screen.getByRole('button', { name: 'Search files in Jean current' })
+      screen.getByRole('button', { name: 'Search files in Atelier current' })
     ).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getByText('src/App.tsx')).toBeInTheDocument()
   })
@@ -262,7 +262,7 @@ describe('FileMentionPopover linked project scopes', () => {
     const commandListEl = commandList as HTMLElement
     expect(screen.getByLabelText('Project scope selector')).toBeInTheDocument()
     expect(
-      screen.getByRole('button', { name: 'Search files in Jean current' })
+      screen.getByRole('button', { name: 'Search files in Atelier current' })
     ).toBeInTheDocument()
     expect(
       screen.getByRole('button', { name: 'Search files in Docs' })

@@ -3132,7 +3132,7 @@ export function useMessageHandlers({
         contentItems: [
           {
             type: 'inputText',
-            text: 'Jean does not support Codex dynamic tool calls yet.',
+            text: 'Atelier does not support Codex dynamic tool calls yet.',
           },
         ],
       })

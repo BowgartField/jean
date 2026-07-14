@@ -5,7 +5,7 @@ export async function ensureTerminalFontLoaded(
   if (typeof document === 'undefined' || !document.fonts?.load) return
 
   try {
-    const probe = 'Jean terminal font probe ➜ ✗'
+    const probe = 'Atelier terminal font probe ➜ ✗'
     await Promise.all([
       document.fonts.load(`400 ${fontSize}px ${fontFamily}`, probe),
       document.fonts.load(`500 ${fontSize}px ${fontFamily}`, probe),

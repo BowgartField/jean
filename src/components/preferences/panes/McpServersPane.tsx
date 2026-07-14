@@ -260,7 +260,7 @@ export const McpServersPane: React.FC = () => {
                         server.disabled ? 'cursor-default' : 'cursor-pointer'
                       )}
                     >
-                      {server.name}
+                      {server.name === 'jean' ? 'Atelier' : server.name}
                     </Label>
                     {jeanMcpMode(server.name, server.config) && (
                       <span className="rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase text-muted-foreground">

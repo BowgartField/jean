@@ -112,7 +112,7 @@ function renderWithQueryClient(children: ReactNode) {
 
 async function openDropdown() {
   const user = userEvent.setup()
-  renderWithQueryClient(<UnreadBell title="Jean" />)
+  renderWithQueryClient(<UnreadBell title="Atelier" />)
   await user.click(screen.getByRole('button', { name: /2 finished sessions/i }))
   await screen.findByText('Session one')
   return user
@@ -132,7 +132,7 @@ describe('UnreadBell', () => {
       entries: [
         {
           project_id: 'project-1',
-          project_name: 'Jean',
+          project_name: 'Atelier',
           worktree_id: 'worktree-1',
           worktree_name: 'main',
           worktree_path: '/repo',
@@ -189,7 +189,7 @@ describe('UnreadBell', () => {
   })
 
   it('shows the finished sessions shortcut hint on native desktop', () => {
-    renderWithQueryClient(<UnreadBell title="Jean" />)
+    renderWithQueryClient(<UnreadBell title="Atelier" />)
 
     expect(
       screen.getByText(/(?:⌘|⌃|Ctrl) \+ ⇧|Shift \+ F/i)

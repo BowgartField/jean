@@ -2167,7 +2167,7 @@ export function useSaveJeanConfig() {
       queryClient.invalidateQueries({ queryKey: ['ports'] })
     },
     onError: error => {
-      toast.error('Failed to save jean.json', {
+      toast.error('Failed to save the project automation file', {
         description: String(error),
       })
     },

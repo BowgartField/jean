@@ -558,7 +558,7 @@ export const AppearancePane: React.FC = () => {
         <div className="space-y-4">
           <InlineField
             label="Edit files in"
-            description="How to edit files when viewing them in Jean"
+            description="How to edit files when viewing them in Atelier"
           >
             <Select
               value={preferences?.file_edit_mode ?? 'external'}

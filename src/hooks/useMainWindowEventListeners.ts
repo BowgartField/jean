@@ -274,7 +274,7 @@ function executeKeybindingAction(
         const firstScript = runScripts?.[0]
         if (!firstScript) {
           const projectId = useProjectsStore.getState().selectedProjectId
-          toast.error('No run script configured in jean.json', {
+          toast.error('No run script configured in the project automation file', {
             action: projectId
               ? {
                   label: 'Configure',
@@ -788,8 +788,8 @@ export function useMainWindowEventListeners() {
           // Show simple about dialog with dynamic version
           const appVersion = await getVersion()
           await message(
-            `Jean\n\nVersion: ${appVersion}\n\nBuilt with Tauri v2 + React + TypeScript`,
-            { title: 'About Jean', kind: 'info' }
+            `Atelier\n\nVersion: ${appVersion}\n\nBuilt with Tauri v2 + React + TypeScript`,
+            { title: 'About Atelier', kind: 'info' }
           )
         }),
 

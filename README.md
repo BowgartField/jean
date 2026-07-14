@@ -1,6 +1,8 @@
 <div align="center">
 
-# Jean
+# Atelier
+
+### Jean.build but better — stronger — faster
 
 A desktop AI assistant for managing multiple projects, worktrees, and chat sessions with Claude CLI, Codex CLI, Cursor CLI, and OpenCode.
 
@@ -10,7 +12,7 @@ Tauri v2 · React 19 · Rust · TypeScript · Tailwind CSS v4 · shadcn/ui v4 ·
 
 ## About the Project
 
-Jean is an opinionated native desktop app built with Tauri that gives you a powerful interface for working with Claude CLI, Codex CLI, Cursor CLI, and OpenCode across multiple projects. It has strong opinions about how AI-assisted development should work — managing git worktrees, chat sessions, terminals, GitHub and Linear integrations in one cohesive workflow.
+Atelier is a global native desktop app built with Tauri that gives you a powerful interface for working with Claude CLI, Codex CLI, Cursor CLI, and OpenCode across multiple projects — managing git worktrees, chat sessions, terminals, GitHub and Linear integrations in one cohesive workflow.
 
 No vendor lock-in. Everything runs locally on your machine with your own Claude CLI, Codex CLI, Cursor CLI, or OpenCode installation.
 
@@ -80,14 +82,14 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for full development setup and guidelines
 
 ## Headless Web Access
 
-Run Jean without the desktop window and expose the web UI over HTTP:
+Run Atelier without the desktop window and expose the web UI over HTTP:
 
 ```bash
 jean --headless --host 127.0.0.1 --port 3456
 ```
 
 `--host` accepts `localhost` or an IP address. Passing a specific address such
-as your Tailscale IP binds Jean only to that interface.
+as your Tailscale IP binds Atelier only to that interface.
 
 ## Roadmap
 

@@ -344,7 +344,7 @@ export const WebAccessPane: React.FC = () => {
   return (
     <div className="space-y-6">
       <p className="text-sm text-muted-foreground">
-        Enable HTTP server to access Jean from a web browser on your local
+        Enable HTTP server to access Atelier from a web browser on your local
         network. All commands are routed over WebSocket with token
         authentication.
       </p>
@@ -394,7 +394,7 @@ export const WebAccessPane: React.FC = () => {
 
           <InlineField
             label="Auto-start"
-            description="Start the HTTP server automatically when Jean launches"
+                description="Start the HTTP server automatically when Atelier launches"
           >
             <Switch
               checked={preferences?.http_server_auto_start ?? false}
@@ -461,7 +461,7 @@ export const WebAccessPane: React.FC = () => {
               <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
               <div className="text-sm text-amber-600 dark:text-amber-400">
                 <strong>Security Warning:</strong> Anyone on your network can
-                access Jean without authentication. Only disable this on trusted
+                access Atelier without authentication. Only disable this on trusted
                 networks.
               </div>
             </div>
@@ -509,7 +509,7 @@ export const WebAccessPane: React.FC = () => {
           {serverStatus?.running && serverStatus?.port && (
             <InlineField
               label="Access URLs"
-              description="Open in a browser to access Jean"
+                description="Open in a browser to access Atelier"
             >
               <div className="flex flex-col gap-2">
                 {showLocalhostUrl && (
