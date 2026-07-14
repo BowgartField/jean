@@ -11,6 +11,7 @@ import {
 import {
   Archive,
   ChevronDown,
+  ArrowRightLeft,
   Eye,
   EyeOff,
   GitBranchPlus,
@@ -24,6 +25,8 @@ import {
   Plus,
   Trash2,
 } from 'lucide-react'
+import { useQueryClient } from '@tanstack/react-query'
+import { invoke } from '@/lib/transport'
 import { ModalCloseButton } from '@/components/ui/modal-close-button'
 import { cn } from '@/lib/utils'
 import { dismissibleToast } from '@/lib/dismissible-toast'
@@ -47,6 +50,7 @@ import { useBrowserStore } from '@/store/browser-store'
 import { useUIStore } from '@/store/ui-store'
 import {
   useSessions,
+  chatQueryKeys,
   useRenameSession,
   useReorderSessions,
   reconnectNativeCliSession,
@@ -55,6 +59,7 @@ import {
 import { usePreferences } from '@/services/preferences'
 import {
   useWorktree,
+  useWorktrees,
   useProjects,
   useRunScripts,
   type PackageScript,
@@ -102,10 +107,14 @@ import {
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
 import { WorktreeDropdownMenu } from '@/components/projects/WorktreeDropdownMenu'
 import { LabelModal } from './LabelModal'
+import { MoveSessionDialog } from './MoveSessionDialog'
 import { useSessionArchive } from './hooks/useSessionArchive'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { pushNeedsRemotePicker, useRemotePicker } from '@/hooks/useRemotePicker'
@@ -173,6 +182,7 @@ interface SessionChatModalProps {
   worktreePath: string
   isOpen: boolean
   onClose: () => void
+  onNavigateToWorktree?: (worktreeId: string, worktreePath: string) => void
 }
 
 export function SessionChatModal({
@@ -180,6 +190,7 @@ export function SessionChatModal({
   worktreePath,
   isOpen,
   onClose,
+  onNavigateToWorktree,
 }: SessionChatModalProps) {
   const isMobile = useIsMobile()
   const isTouch = useIsTouchDevice()
@@ -323,6 +334,59 @@ export function SessionChatModal({
   const branchDiffRemoved =
     gitStatus?.branch_diff_removed ?? worktree?.cached_branch_diff_removed ?? 0
   const defaultBranch = project?.default_branch ?? 'main'
+
+  // Move session to worktree
+  const queryClient = useQueryClient()
+  const { data: allWorktrees } = useWorktrees(project?.id ?? null)
+  const otherWorktrees = useMemo(
+    () =>
+      (allWorktrees ?? [])
+        .filter(wt => wt.id !== worktreeId && !wt.archived_at)
+        .map(wt => ({ id: wt.id, name: wt.name, path: wt.path, branch: wt.branch })),
+    [allWorktrees, worktreeId]
+  )
+  const hasUncommittedChanges = (uncommittedAdded + uncommittedRemoved) > 0
+  const [moveSessionState, setMoveSessionState] = useState<{
+    sessionId: string
+    targetWorktree: { id: string; name: string; path: string }
+  } | null>(null)
+
+  const handleMoveSession = useCallback(
+    async (sessionId: string, targetWt: { id: string; name: string; path: string }, migrateChanges: boolean) => {
+      const toastId = toast.loading(`Moving session to ${targetWt.name}...`)
+      try {
+        await invoke('move_session_to_worktree', {
+          sessionId,
+          fromWorktreeId: worktreeId,
+          toWorktreeId: targetWt.id,
+          migrateChanges,
+          fromWorktreePath: worktreePath,
+          toWorktreePath: targetWt.path,
+        })
+        queryClient.invalidateQueries({ queryKey: chatQueryKeys.sessions(worktreeId) })
+        queryClient.invalidateQueries({ queryKey: chatQueryKeys.sessions(targetWt.id) })
+        toast.success(`Session moved to ${targetWt.name}`, { id: toastId })
+
+        // Navigate to the target worktree to follow the moved session
+        useChatStore.getState().setActiveSession(targetWt.id, sessionId)
+        onNavigateToWorktree?.(targetWt.id, targetWt.path)
+      } catch (error) {
+        toast.error(`Failed to move session: ${error}`, { id: toastId })
+      }
+    },
+    [worktreeId, worktreePath, queryClient, onNavigateToWorktree]
+  )
+
+  const handleMoveSessionClick = useCallback(
+    (sessionId: string, targetWt: { id: string; name: string; path: string }) => {
+      if (hasUncommittedChanges) {
+        setMoveSessionState({ sessionId, targetWorktree: targetWt })
+      } else {
+        void handleMoveSession(sessionId, targetWt, false)
+      }
+    },
+    [hasUncommittedChanges, handleMoveSession]
+  )
 
   const hasSetActiveRef = useRef<string | null>(null)
 
@@ -1352,6 +1416,29 @@ export function SessionChatModal({
                             <Archive className="mr-2 h-4 w-4" />
                             Archive Session
                           </ContextMenuItem>
+                          {otherWorktrees.length > 0 && (
+                            <ContextMenuSub>
+                              <ContextMenuSubTrigger>
+                                <ArrowRightLeft className="mr-2 h-4 w-4" />
+                                Move to Worktree
+                              </ContextMenuSubTrigger>
+                              <ContextMenuSubContent className="w-48">
+                                {otherWorktrees.map(wt => (
+                                  <ContextMenuItem
+                                    key={wt.id}
+                                    onSelect={() =>
+                                      handleMoveSessionClick(session.id, wt)
+                                    }
+                                  >
+                                    <span className="truncate">{wt.name}</span>
+                                    <span className="ml-auto max-w-[100px] truncate text-xs text-muted-foreground">
+                                      {wt.branch}
+                                    </span>
+                                  </ContextMenuItem>
+                                ))}
+                              </ContextMenuSubContent>
+                            </ContextMenuSub>
+                          )}
                           <ContextMenuSeparator />
                           <ContextMenuItem
                             variant="destructive"
@@ -1441,6 +1528,26 @@ export function SessionChatModal({
         onConfirm={executeCloseAction}
         branchName={worktree?.branch}
         mode="session"
+      />
+      <MoveSessionDialog
+        open={!!moveSessionState}
+        onOpenChange={open => {
+          if (!open) setMoveSessionState(null)
+        }}
+        sourceWorktreeName={worktree?.name ?? 'source'}
+        targetWorktreeName={moveSessionState?.targetWorktree.name ?? ''}
+        onMoveWithChanges={() => {
+          if (moveSessionState) {
+            void handleMoveSession(moveSessionState.sessionId, moveSessionState.targetWorktree, true)
+            setMoveSessionState(null)
+          }
+        }}
+        onMoveWithoutChanges={() => {
+          if (moveSessionState) {
+            void handleMoveSession(moveSessionState.sessionId, moveSessionState.targetWorktree, false)
+            setMoveSessionState(null)
+          }
+        }}
       />
     </>
   )
