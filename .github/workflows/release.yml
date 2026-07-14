@@ -45,6 +45,7 @@ jobs:
   publish-tauri:
     name: Publish Tauri (${{ matrix.platform }})
     needs: prepare-release
+    environment: release
     permissions:
       contents: write
     strategy:
