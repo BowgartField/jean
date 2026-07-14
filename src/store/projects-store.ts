@@ -23,6 +23,9 @@ interface ProjectsUIState {
   // Dashboard worktree collapse overrides (list view): true=collapsed, false=expanded
   dashboardWorktreeCollapseOverrides: Record<string, boolean>
 
+  // GitHub dashboard project collapse overrides: true=collapsed, false=expanded
+  githubDashboardProjectCollapseOverrides: Record<string, boolean>
+
   // Expansion state for folders
   expandedFolderIds: Set<string>
 
@@ -78,6 +81,12 @@ interface ProjectsUIState {
     overrides: Record<string, boolean>
   ) => void
 
+  // GitHub dashboard project collapse actions
+  setGitHubDashboardProjectCollapsed: (id: string, collapsed: boolean) => void
+  setGitHubDashboardProjectCollapseOverrides: (
+    overrides: Record<string, boolean>
+  ) => void
+
   // Folder expansion actions
   toggleFolderExpanded: (id: string) => void
   expandFolder: (id: string) => void
@@ -128,6 +137,7 @@ export const useProjectsStore = create<ProjectsUIState>()(
       expandedProjectIds: new Set<string>(),
       expandedWorktreeIds: new Set<string>(),
       dashboardWorktreeCollapseOverrides: {},
+      githubDashboardProjectCollapseOverrides: {},
       expandedFolderIds: new Set<string>(),
       projectAccessTimestamps: {},
       projectCanvasSettings: {},
@@ -265,6 +275,34 @@ export const useProjectsStore = create<ProjectsUIState>()(
               : { dashboardWorktreeCollapseOverrides: overrides },
           undefined,
           'setDashboardWorktreeCollapseOverrides'
+        ),
+
+      // GitHub dashboard project collapse actions
+      setGitHubDashboardProjectCollapsed: (id, collapsed) =>
+        set(
+          state => {
+            const current =
+              state.githubDashboardProjectCollapseOverrides[id] ?? false
+            if (current === collapsed) return state
+            return {
+              githubDashboardProjectCollapseOverrides: {
+                ...state.githubDashboardProjectCollapseOverrides,
+                [id]: collapsed,
+              },
+            }
+          },
+          undefined,
+          'setGitHubDashboardProjectCollapsed'
+        ),
+
+      setGitHubDashboardProjectCollapseOverrides: overrides =>
+        set(
+          state =>
+            state.githubDashboardProjectCollapseOverrides === overrides
+              ? state
+              : { githubDashboardProjectCollapseOverrides: overrides },
+          undefined,
+          'setGitHubDashboardProjectCollapseOverrides'
         ),
 
       setProjectCanvasSettings: settings =>

@@ -97,6 +97,7 @@ interface UIState {
   workflowRunsModalOpen: boolean
   workflowRunsModalProjectPath: string | null
   workflowRunsModalBranch: string | null
+  workflowRunsModalWorkflowName: string | null
   cliUpdateModalOpen: boolean
   cliUpdateModalType: CliUpdateModalType
   cliLoginModalOpen: boolean
@@ -187,7 +188,8 @@ interface UIState {
   setWorkflowRunsModalOpen: (
     open: boolean,
     projectPath?: string | null,
-    branch?: string | null
+    branch?: string | null,
+    workflowName?: string | null
   ) => void
   openCliUpdateModal: (type: Exclude<CliUpdateModalType, null>) => void
   closeCliUpdateModal: () => void
@@ -283,6 +285,7 @@ export const useUIStore = create<UIState>()(
       workflowRunsModalOpen: false,
       workflowRunsModalProjectPath: null,
       workflowRunsModalBranch: null,
+      workflowRunsModalWorkflowName: null,
       cliUpdateModalOpen: false,
       cliUpdateModalType: null,
       cliLoginModalOpen: false,
@@ -547,12 +550,15 @@ export const useUIStore = create<UIState>()(
           'setReviewCommentsModalOpen'
         ),
 
-      setWorkflowRunsModalOpen: (open, projectPath, branch) =>
+      setWorkflowRunsModalOpen: (open, projectPath, branch, workflowName) =>
         set(
           {
             workflowRunsModalOpen: open,
             workflowRunsModalProjectPath: open ? (projectPath ?? null) : null,
             workflowRunsModalBranch: open ? (branch ?? null) : null,
+            workflowRunsModalWorkflowName: open
+              ? (workflowName ?? null)
+              : null,
           },
           undefined,
           'setWorkflowRunsModalOpen'

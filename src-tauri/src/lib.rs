@@ -2394,6 +2394,10 @@ pub struct UIState {
     #[serde(default)]
     pub dashboard_worktree_collapse_overrides: std::collections::HashMap<String, bool>,
 
+    /// GitHub dashboard project collapse overrides: projectId → collapsed (true/false)
+    #[serde(default)]
+    pub github_dashboard_project_collapse_overrides: std::collections::HashMap<String, bool>,
+
     /// Project canvas settings per project
     #[serde(default)]
     pub project_canvas_settings: std::collections::HashMap<String, ProjectCanvasSettings>,
@@ -2487,6 +2491,7 @@ impl Default for UIState {
             browser_bottom_panel_height: None,
             project_access_timestamps: std::collections::HashMap::new(),
             dashboard_worktree_collapse_overrides: std::collections::HashMap::new(),
+            github_dashboard_project_collapse_overrides: std::collections::HashMap::new(),
             project_canvas_settings: std::collections::HashMap::new(),
             github_dashboard_favorite_project_ids: Vec::new(),
             last_opened_per_project: std::collections::HashMap::new(),
@@ -4747,6 +4752,8 @@ pub fn run() {
             projects::get_advisory_context_content,
             // GitHub Actions commands
             projects::list_workflow_runs,
+            projects::get_workflow_run,
+            projects::get_workflow_job_logs,
             // Saved context commands
             projects::attach_saved_context,
             projects::remove_saved_context,

@@ -99,6 +99,8 @@ export interface UIState {
   project_access_timestamps?: Record<string, number>
   /** Dashboard worktree collapse overrides: worktreeId → collapsed (true/false) */
   dashboard_worktree_collapse_overrides?: Record<string, boolean>
+  /** GitHub dashboard project collapse overrides: projectId → collapsed (true/false) */
+  github_dashboard_project_collapse_overrides?: Record<string, boolean>
   /** Project canvas settings per project */
   project_canvas_settings?: Record<string, ProjectCanvasSettingsState>
   /** Favorited projects shown first in the GitHub Dashboard */
