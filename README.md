@@ -101,14 +101,10 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
 
 ## Core Maintainer
 
-|                                                                                                                                                                            Andras Bacsai                                                                                                                                                                             |
+|                                                                                                                                                                            Jean-Benoît RICHEZ                                                                                                                                                                             |
 | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------: |
-|                                                                                                                                         <img src="https://github.com/andrasbacsai.png" width="200px" alt="Andras Bacsai" />                                                                                                                                          |
-| <a href="https://github.com/andrasbacsai"><img src="https://api.iconify.design/devicon:github.svg" width="25px"></a> <a href="https://x.com/heyandras"><img src="https://api.iconify.design/devicon:twitter.svg" width="25px"></a> <a href="https://bsky.app/profile/heyandras.dev"><img src="https://api.iconify.design/simple-icons:bluesky.svg" width="25px"></a> |
-
-## Philosophy
-
-Learn more about our approach: [Philosophy](https://coollabs.io/philosophy/)
+<!-- |                                                                                                                                         <img src="https://github.com/andrasbacsai.png" width="200px" alt="Andras Bacsai" />                                                                                                                                          | -->
+| <a href="https://github.com/BowgartField"><img src="https://api.iconify.design/devicon:github.svg" width="25px"></a> <a href="https://x.com/jeanbenoit_rcz"><img src="https://api.iconify.design/devicon:twitter.svg" width="25px"></a></a> |
 
 ## Star History
 
