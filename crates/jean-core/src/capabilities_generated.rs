@@ -493,26 +493,6 @@ pub const UNAVAILABLE_CAPABILITIES: &[CommandCapability] = &[
         available: false,
     },
     CommandCapability {
-        command: "get_github_issue",
-        class: CapabilityClass::AdapterBacked,
-        available: false,
-    },
-    CommandCapability {
-        command: "get_github_issue_by_number",
-        class: CapabilityClass::AdapterBacked,
-        available: false,
-    },
-    CommandCapability {
-        command: "get_github_pr",
-        class: CapabilityClass::AdapterBacked,
-        available: false,
-    },
-    CommandCapability {
-        command: "get_github_pr_by_number",
-        class: CapabilityClass::AdapterBacked,
-        available: false,
-    },
-    CommandCapability {
         command: "get_github_remotes",
         class: CapabilityClass::AdapterBacked,
         available: false,
@@ -784,21 +764,6 @@ pub const UNAVAILABLE_CAPABILITIES: &[CommandCapability] = &[
     },
     CommandCapability {
         command: "list_dependabot_alerts",
-        class: CapabilityClass::AdapterBacked,
-        available: false,
-    },
-    CommandCapability {
-        command: "list_github_issues",
-        class: CapabilityClass::AdapterBacked,
-        available: false,
-    },
-    CommandCapability {
-        command: "list_github_labels",
-        class: CapabilityClass::AdapterBacked,
-        available: false,
-    },
-    CommandCapability {
-        command: "list_github_prs",
         class: CapabilityClass::AdapterBacked,
         available: false,
     },
@@ -1264,16 +1229,6 @@ pub const UNAVAILABLE_CAPABILITIES: &[CommandCapability] = &[
     },
     CommandCapability {
         command: "save_worktree_pr",
-        class: CapabilityClass::AdapterBacked,
-        available: false,
-    },
-    CommandCapability {
-        command: "search_github_issues",
-        class: CapabilityClass::AdapterBacked,
-        available: false,
-    },
-    CommandCapability {
-        command: "search_github_prs",
         class: CapabilityClass::AdapterBacked,
         available: false,
     },

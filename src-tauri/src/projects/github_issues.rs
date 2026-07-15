@@ -8,7 +8,8 @@ use super::git::get_repo_identifier;
 use crate::gh_cli::config::resolve_gh_binary;
 
 pub use jean_core::{
-    AdvisoryContext, AdvisoryVulnerability, GitHubAuthor, GitHubComment, GitHubLabel,
+    AdvisoryContext, AdvisoryVulnerability, GitHubAuthor, GitHubComment, GitHubIssue,
+    GitHubIssueDetail, GitHubIssueListResult, GitHubLabel, GitHubPullRequest,
     GitHubPullRequestDetail, IssueContext, PullRequestContext, SecurityAlertContext,
 };
 
@@ -20,79 +21,14 @@ fn gh_command(gh: &Path, project_path: &str) -> Command {
 // GitHub Types
 // =============================================================================
 
-pub fn parse_github_labels_response(stdout: &str) -> Result<Vec<GitHubLabel>, String> {
-    serde_json::from_str(stdout).map_err(|e| format!("Failed to parse gh labels response: {e}"))
-}
-
-/// GitHub issue from list response
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GitHubIssue {
-    pub number: u32,
-    pub title: String,
-    pub body: Option<String>,
-    pub state: String,
-    pub labels: Vec<GitHubLabel>,
-    pub created_at: String,
-    pub author: GitHubAuthor,
-}
-
-/// GitHub issue detail with comments (from gh issue view)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GitHubIssueDetail {
-    pub number: u32,
-    pub title: String,
-    pub body: Option<String>,
-    pub state: String,
-    pub labels: Vec<GitHubLabel>,
-    pub created_at: String,
-    pub author: GitHubAuthor,
-    #[serde(default)]
-    pub url: String,
-    #[serde(default)]
-    pub comments: Vec<GitHubComment>,
-}
-
-/// Result of listing GitHub issues, includes total count for pagination awareness
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GitHubIssueListResult {
-    pub issues: Vec<GitHubIssue>,
-    pub total_count: u32,
-}
-
 #[tauri::command]
 pub async fn list_github_labels(
     app: AppHandle,
     project_path: String,
 ) -> Result<Vec<GitHubLabel>, String> {
-    log::trace!("Listing GitHub labels for {project_path}");
-
-    let gh = resolve_gh_binary(&app);
-    let output = gh_command(&gh, &project_path)
-        .args(["label", "list", "--json", "name,color", "-L", "1000"])
-        .output()
-        .map_err(|e| format!("Failed to run gh label list: {e}"))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        if is_gh_cli_auth_error(&stderr) {
-            return Err("GitHub CLI not authenticated. Run 'gh auth login' first.".to_string());
-        }
-        if stderr.contains("not a git repository") {
-            return Err("Not a git repository".to_string());
-        }
-        if stderr.contains("Could not resolve") {
-            return Err("Could not resolve repository. Is this a GitHub repository?".to_string());
-        }
-        return Err(format!("gh label list failed: {stderr}"));
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let mut labels = parse_github_labels_response(&stdout)?;
-    labels.sort_by_key(|label| label.name.to_lowercase());
-    Ok(labels)
+    crate::backend_runtime::github_service(&app)
+        .list_labels(&project_path)
+        .map_err(|error| error.to_string())
 }
 
 /// Detect gh errors caused by a directory that cannot be resolved to a GitHub
@@ -134,84 +70,9 @@ pub async fn list_github_issues(
     project_path: String,
     state: Option<String>,
 ) -> Result<GitHubIssueListResult, String> {
-    log::trace!("Listing GitHub issues for {project_path} with state: {state:?}");
-
-    let gh = resolve_gh_binary(&app);
-    let state_arg = state.unwrap_or_else(|| "open".to_string());
-
-    // Run gh issue list
-    let output = gh_command(&gh, &project_path)
-        .args([
-            "issue",
-            "list",
-            "--json",
-            "number,title,body,state,labels,createdAt,author",
-            "-L",
-            "1000",
-            "--state",
-            &state_arg,
-        ])
-        .output()
-        .map_err(|e| format!("Failed to run gh issue list: {e}"))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        // Handle specific errors
-        if is_gh_cli_auth_error(&stderr) {
-            return Err("GitHub CLI not authenticated. Run 'gh auth login' first.".to_string());
-        }
-        if stderr.contains("not a git repository") {
-            return Err("Not a git repository".to_string());
-        }
-        if stderr.contains("Could not resolve") {
-            return Err("Could not resolve repository. Is this a GitHub repository?".to_string());
-        }
-        return Err(format!("gh issue list failed: {stderr}"));
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let issues: Vec<GitHubIssue> =
-        serde_json::from_str(&stdout).map_err(|e| format!("Failed to parse gh response: {e}"))?;
-
-    // Get accurate total count from GitHub search API
-    let total_count =
-        get_issue_total_count(&gh, &project_path, &state_arg).unwrap_or(issues.len() as u32);
-
-    log::trace!("Found {} issues (total: {total_count})", issues.len());
-    Ok(GitHubIssueListResult {
-        issues,
-        total_count,
-    })
-}
-
-/// Get accurate total issue count from GitHub search API
-///
-/// Uses `gh api search/issues` to get the real total count without fetching all issues.
-/// Falls back to None on any error so callers can use issues.len() instead.
-fn get_issue_total_count(gh: &Path, project_path: &str, state: &str) -> Option<u32> {
-    let repo_id = get_repo_identifier(project_path).ok()?;
-    let state_qualifier = match state {
-        "closed" => "+state:closed",
-        "all" => "",
-        _ => "+state:open",
-    };
-    let query = format!(
-        "search/issues?q=repo:{}/{}+is:issue{}&per_page=1",
-        repo_id.owner, repo_id.repo, state_qualifier
-    );
-
-    let output = gh_command(gh, project_path)
-        .args(["api", &query])
-        .output()
-        .ok()?;
-
-    if !output.status.success() {
-        return None;
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let json: serde_json::Value = serde_json::from_str(&stdout).ok()?;
-    json.get("total_count")?.as_u64().map(|n| n as u32)
+    crate::backend_runtime::github_service(&app)
+        .list_issues(&project_path, state.as_deref())
+        .map_err(|error| error.to_string())
 }
 
 /// Search GitHub issues using GitHub's search syntax
@@ -224,45 +85,9 @@ pub async fn search_github_issues(
     project_path: String,
     query: String,
 ) -> Result<Vec<GitHubIssue>, String> {
-    log::trace!("Searching GitHub issues for {project_path} with query: {query}");
-
-    let gh = resolve_gh_binary(&app);
-    let output = gh_command(&gh, &project_path)
-        .args([
-            "issue",
-            "list",
-            "--search",
-            &query,
-            "--json",
-            "number,title,body,state,labels,createdAt,author",
-            "-L",
-            "100",
-            "--state",
-            "all",
-        ])
-        .output()
-        .map_err(|e| format!("Failed to run gh issue list --search: {e}"))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        if is_gh_cli_auth_error(&stderr) {
-            return Err("GitHub CLI not authenticated. Run 'gh auth login' first.".to_string());
-        }
-        if stderr.contains("not a git repository") {
-            return Err("Not a git repository".to_string());
-        }
-        if stderr.contains("Could not resolve") {
-            return Err("Could not resolve repository. Is this a GitHub repository?".to_string());
-        }
-        return Err(format!("gh issue list --search failed: {stderr}"));
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let issues: Vec<GitHubIssue> =
-        serde_json::from_str(&stdout).map_err(|e| format!("Failed to parse gh response: {e}"))?;
-
-    log::trace!("Search found {} issues", issues.len());
-    Ok(issues)
+    crate::backend_runtime::github_service(&app)
+        .search_issues(&project_path, &query)
+        .map_err(|error| error.to_string())
 }
 
 /// Get a GitHub issue by number, returning the same type as list_github_issues.
@@ -275,37 +100,9 @@ pub async fn get_github_issue_by_number(
     project_path: String,
     issue_number: u32,
 ) -> Result<GitHubIssue, String> {
-    log::trace!("Getting GitHub issue #{issue_number} by number for {project_path}");
-
-    let gh = resolve_gh_binary(&app);
-    let output = gh_command(&gh, &project_path)
-        .args([
-            "issue",
-            "view",
-            &issue_number.to_string(),
-            "--json",
-            "number,title,body,state,labels,createdAt,author",
-        ])
-        .output()
-        .map_err(|e| format!("Failed to run gh issue view: {e}"))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        if is_gh_cli_auth_error(&stderr) {
-            return Err("GitHub CLI not authenticated. Run 'gh auth login' first.".to_string());
-        }
-        if stderr.contains("Could not resolve") || stderr.contains("not found") {
-            return Err(format!("Issue #{issue_number} not found"));
-        }
-        return Err(format!("gh issue view failed: {stderr}"));
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let issue: GitHubIssue =
-        serde_json::from_str(&stdout).map_err(|e| format!("Failed to parse gh response: {e}"))?;
-
-    log::trace!("Got issue #{}: {}", issue.number, issue.title);
-    Ok(issue)
+    crate::backend_runtime::github_service(&app)
+        .issue(&project_path, issue_number)
+        .map_err(|error| error.to_string())
 }
 
 /// Get detailed information about a specific GitHub issue
@@ -317,39 +114,9 @@ pub async fn get_github_issue(
     project_path: String,
     issue_number: u32,
 ) -> Result<GitHubIssueDetail, String> {
-    log::trace!("Getting GitHub issue #{issue_number} for {project_path}");
-
-    let gh = resolve_gh_binary(&app);
-    // Run gh issue view
-    let output = gh_command(&gh, &project_path)
-        .args([
-            "issue",
-            "view",
-            &issue_number.to_string(),
-            "--json",
-            "number,title,body,state,labels,createdAt,author,url,comments",
-        ])
-        .output()
-        .map_err(|e| format!("Failed to run gh issue view: {e}"))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        // Handle specific errors
-        if is_gh_cli_auth_error(&stderr) {
-            return Err("GitHub CLI not authenticated. Run 'gh auth login' first.".to_string());
-        }
-        if stderr.contains("Could not resolve") || stderr.contains("not found") {
-            return Err(format!("Issue #{issue_number} not found"));
-        }
-        return Err(format!("gh issue view failed: {stderr}"));
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let issue: GitHubIssueDetail =
-        serde_json::from_str(&stdout).map_err(|e| format!("Failed to parse gh response: {e}"))?;
-
-    log::trace!("Got issue #{}: {}", issue.number, issue.title);
-    Ok(issue)
+    crate::backend_runtime::github_service(&app)
+        .issue_detail(&project_path, issue_number)
+        .map_err(|error| error.to_string())
 }
 
 /// Generate a slug from an issue title for branch naming
@@ -1251,23 +1018,6 @@ pub async fn remove_issue_context(
 // GitHub Pull Request Types and Commands
 // =============================================================================
 
-/// GitHub pull request from list response
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GitHubPullRequest {
-    pub number: u32,
-    pub title: String,
-    pub body: Option<String>,
-    pub state: String,
-    pub head_ref_name: String,
-    pub base_ref_name: String,
-    pub is_draft: bool,
-    pub created_at: String,
-    pub author: GitHubAuthor,
-    #[serde(default)]
-    pub labels: Vec<GitHubLabel>,
-}
-
 /// GitHub inline review comment (on specific diff lines), normalized to camelCase for frontend
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1398,46 +1148,9 @@ pub async fn list_github_prs(
     project_path: String,
     state: Option<String>,
 ) -> Result<Vec<GitHubPullRequest>, String> {
-    log::trace!("Listing GitHub PRs for {project_path} with state: {state:?}");
-
-    let gh = resolve_gh_binary(&app);
-    let state_arg = state.unwrap_or_else(|| "open".to_string());
-
-    // Run gh pr list
-    let output = gh_command(&gh, &project_path)
-        .args([
-            "pr",
-            "list",
-            "--json",
-            "number,title,body,state,headRefName,baseRefName,isDraft,createdAt,author,labels",
-            "-L",
-            "1000",
-            "--state",
-            &state_arg,
-        ])
-        .output()
-        .map_err(|e| format!("Failed to run gh pr list: {e}"))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        if is_gh_cli_auth_error(&stderr) {
-            return Err("GitHub CLI not authenticated. Run 'gh auth login' first.".to_string());
-        }
-        if stderr.contains("not a git repository") {
-            return Err("Not a git repository".to_string());
-        }
-        if stderr.contains("Could not resolve") {
-            return Err("Could not resolve repository. Is this a GitHub repository?".to_string());
-        }
-        return Err(format!("gh pr list failed: {stderr}"));
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let prs: Vec<GitHubPullRequest> =
-        serde_json::from_str(&stdout).map_err(|e| format!("Failed to parse gh response: {e}"))?;
-
-    log::trace!("Found {} PRs", prs.len());
-    Ok(prs)
+    crate::backend_runtime::github_service(&app)
+        .list_pull_requests(&project_path, state.as_deref())
+        .map_err(|error| error.to_string())
 }
 
 /// Search GitHub pull requests using GitHub's search syntax
@@ -1450,45 +1163,9 @@ pub async fn search_github_prs(
     project_path: String,
     query: String,
 ) -> Result<Vec<GitHubPullRequest>, String> {
-    log::trace!("Searching GitHub PRs for {project_path} with query: {query}");
-
-    let gh = resolve_gh_binary(&app);
-    let output = gh_command(&gh, &project_path)
-        .args([
-            "pr",
-            "list",
-            "--search",
-            &query,
-            "--json",
-            "number,title,body,state,headRefName,baseRefName,isDraft,createdAt,author,labels",
-            "-L",
-            "100",
-            "--state",
-            "all",
-        ])
-        .output()
-        .map_err(|e| format!("Failed to run gh pr list --search: {e}"))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        if is_gh_cli_auth_error(&stderr) {
-            return Err("GitHub CLI not authenticated. Run 'gh auth login' first.".to_string());
-        }
-        if stderr.contains("not a git repository") {
-            return Err("Not a git repository".to_string());
-        }
-        if stderr.contains("Could not resolve") {
-            return Err("Could not resolve repository. Is this a GitHub repository?".to_string());
-        }
-        return Err(format!("gh pr list --search failed: {stderr}"));
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let prs: Vec<GitHubPullRequest> =
-        serde_json::from_str(&stdout).map_err(|e| format!("Failed to parse gh response: {e}"))?;
-
-    log::trace!("Search found {} PRs", prs.len());
-    Ok(prs)
+    crate::backend_runtime::github_service(&app)
+        .search_pull_requests(&project_path, &query)
+        .map_err(|error| error.to_string())
 }
 
 /// Get a GitHub PR by number, returning the same type as list_github_prs.
@@ -1501,37 +1178,9 @@ pub async fn get_github_pr_by_number(
     project_path: String,
     pr_number: u32,
 ) -> Result<GitHubPullRequest, String> {
-    log::trace!("Getting GitHub PR #{pr_number} by number for {project_path}");
-
-    let gh = resolve_gh_binary(&app);
-    let output = gh_command(&gh, &project_path)
-        .args([
-            "pr",
-            "view",
-            &pr_number.to_string(),
-            "--json",
-            "number,title,body,state,headRefName,baseRefName,isDraft,createdAt,author,labels",
-        ])
-        .output()
-        .map_err(|e| format!("Failed to run gh pr view: {e}"))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        if is_gh_cli_auth_error(&stderr) {
-            return Err("GitHub CLI not authenticated. Run 'gh auth login' first.".to_string());
-        }
-        if stderr.contains("Could not resolve") || stderr.contains("not found") {
-            return Err(format!("PR #{pr_number} not found"));
-        }
-        return Err(format!("gh pr view failed: {stderr}"));
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let pr: GitHubPullRequest =
-        serde_json::from_str(&stdout).map_err(|e| format!("Failed to parse gh response: {e}"))?;
-
-    log::trace!("Got PR #{}: {}", pr.number, pr.title);
-    Ok(pr)
+    crate::backend_runtime::github_service(&app)
+        .pull_request(&project_path, pr_number)
+        .map_err(|error| error.to_string())
 }
 
 /// Get detailed information about a specific GitHub PR
@@ -2778,18 +2427,6 @@ mod tests {
             start_line: Some(10),
             line: Some(12),
         }
-    }
-
-    #[test]
-    fn parses_github_labels_response() {
-        let labels = parse_github_labels_response(
-            r##"[{"name":"bug","color":"d73a4a"},{"name":"help wanted","color":"008672"}]"##,
-        )
-        .expect("labels");
-
-        assert_eq!(labels.len(), 2);
-        assert_eq!(labels[0].name, "bug");
-        assert_eq!(labels[1].color, "008672");
     }
 
     #[test]

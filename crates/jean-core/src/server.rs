@@ -1,7 +1,7 @@
 use crate::auth::validate_token;
 use crate::{
-    BackendContext, BackendError, BackendErrorCode, ChatService, GitService, ProjectService,
-    SessionService, WsEvent,
+    BackendContext, BackendError, BackendErrorCode, ChatService, GitHubService, GitService,
+    ProjectService, SessionService, WsEvent,
 };
 use async_trait::async_trait;
 use axum::body::Body;
@@ -103,6 +103,7 @@ impl CommandDispatcher for HeadlessDispatcher {
     async fn dispatch(&self, command: &str, args: Value) -> Result<Value, BackendError> {
         let projects = ProjectService::new(self.context.persistence.clone());
         let git = GitService::default();
+        let github = GitHubService::default();
         let sessions = SessionService::new(self.context.persistence.clone());
         let chat = ChatService::new(self.context.clone());
         match command {
@@ -114,6 +115,58 @@ impl CommandDispatcher for HeadlessDispatcher {
                 "commands": crate::HEADLESS_CAPABILITIES,
                 "unavailable": crate::capabilities::UNAVAILABLE_CAPABILITIES,
             })),
+            "list_github_labels" => {
+                let path = string_field(&args, "projectPath", "project_path")?;
+                Ok(serde_json::to_value(github.list_labels(path)?)?)
+            }
+            "list_github_issues" => {
+                let path = string_field(&args, "projectPath", "project_path")?;
+                let state = optional_string_field(&args, "state", "state")?;
+                Ok(serde_json::to_value(
+                    github.list_issues(path, state.as_deref())?,
+                )?)
+            }
+            "search_github_issues" => {
+                let path = string_field(&args, "projectPath", "project_path")?;
+                let query = string_field(&args, "query", "query")?;
+                Ok(serde_json::to_value(github.search_issues(path, query)?)?)
+            }
+            "get_github_issue_by_number" => {
+                let path = string_field(&args, "projectPath", "project_path")?;
+                let number = u32_field(&args, "issueNumber", "issue_number")?;
+                Ok(serde_json::to_value(github.issue(path, number)?)?)
+            }
+            "get_github_issue" => {
+                let path = string_field(&args, "projectPath", "project_path")?;
+                let number = u32_field(&args, "issueNumber", "issue_number")?;
+                Ok(serde_json::to_value(github.issue_detail(path, number)?)?)
+            }
+            "list_github_prs" => {
+                let path = string_field(&args, "projectPath", "project_path")?;
+                let state = optional_string_field(&args, "state", "state")?;
+                Ok(serde_json::to_value(
+                    github.list_pull_requests(path, state.as_deref())?,
+                )?)
+            }
+            "search_github_prs" => {
+                let path = string_field(&args, "projectPath", "project_path")?;
+                let query = string_field(&args, "query", "query")?;
+                Ok(serde_json::to_value(
+                    github.search_pull_requests(path, query)?,
+                )?)
+            }
+            "get_github_pr_by_number" => {
+                let path = string_field(&args, "projectPath", "project_path")?;
+                let number = u32_field(&args, "prNumber", "pr_number")?;
+                Ok(serde_json::to_value(github.pull_request(path, number)?)?)
+            }
+            "get_github_pr" => {
+                let path = string_field(&args, "projectPath", "project_path")?;
+                let number = u32_field(&args, "prNumber", "pr_number")?;
+                Ok(serde_json::to_value(
+                    github.pull_request_detail(path, number)?,
+                )?)
+            }
             "load_preferences" => self.context.persistence.load_preferences(),
             "save_preferences" => {
                 let preferences = required_field(&args, "preferences")?;
@@ -819,6 +872,14 @@ fn u16_field(args: &Value, field: &str) -> Result<u16, BackendError> {
         .and_then(Value::as_u64)
         .and_then(|value| u16::try_from(value).ok())
         .ok_or_else(|| missing_field(field))
+}
+
+fn u32_field(args: &Value, camel_case: &str, snake_case: &str) -> Result<u32, BackendError> {
+    args.get(camel_case)
+        .or_else(|| args.get(snake_case))
+        .and_then(Value::as_u64)
+        .and_then(|value| u32::try_from(value).ok())
+        .ok_or_else(|| missing_field(camel_case))
 }
 
 fn optional_usize_field(
