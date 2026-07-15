@@ -1,7 +1,7 @@
 use crate::auth::validate_token;
 use crate::{
-    BackendContext, BackendError, BackendErrorCode, ChatService, GitHubService, GitService,
-    LinearService, ProjectService, SessionService, WsEvent,
+    BackendContext, BackendError, BackendErrorCode, ChatService, ContextService, GitHubService,
+    GitService, LinearService, ProjectService, SessionService, WsEvent,
 };
 use async_trait::async_trait;
 use axum::body::Body;
@@ -104,6 +104,12 @@ impl CommandDispatcher for HeadlessDispatcher {
         let projects = ProjectService::new(self.context.persistence.clone());
         let git = GitService::default();
         let github = GitHubService::default();
+        let github_for_diff = github.clone();
+        let contexts = ContextService::with_pr_diff_loader(
+            self.context.persistence.clone(),
+            git,
+            Arc::new(move |path, number| github_for_diff.pull_request_diff(path, number)),
+        );
         let linear = LinearService::new(self.context.persistence.clone());
         let sessions = SessionService::new(self.context.persistence.clone());
         let chat = ChatService::new(self.context.clone());
@@ -196,6 +202,66 @@ impl CommandDispatcher for HeadlessDispatcher {
                 Ok(serde_json::to_value(
                     linear.issue_by_number(project_id, number).await?,
                 )?)
+            }
+            "load_issue_context" => {
+                let session_id = string_field(&args, "sessionId", "session_id")?;
+                let number = u32_field(&args, "issueNumber", "issue_number")?;
+                let path = string_field(&args, "projectPath", "project_path")?;
+                Ok(serde_json::to_value(
+                    contexts.load_issue(&github, session_id, number, path)?,
+                )?)
+            }
+            "list_loaded_issue_contexts" => {
+                let session_id = string_field(&args, "sessionId", "session_id")?;
+                let worktree_id = optional_string_field(&args, "worktreeId", "worktree_id")?;
+                Ok(serde_json::to_value(
+                    contexts.list_issues(session_id, worktree_id.as_deref())?,
+                )?)
+            }
+            "remove_issue_context" => {
+                let session_id = string_field(&args, "sessionId", "session_id")?;
+                let number = u32_field(&args, "issueNumber", "issue_number")?;
+                let path = string_field(&args, "projectPath", "project_path")?;
+                contexts.remove_issue(session_id, number, path)?;
+                Ok(Value::Null)
+            }
+            "get_issue_context_content" => {
+                let session_id = string_field(&args, "sessionId", "session_id")?;
+                let number = u32_field(&args, "issueNumber", "issue_number")?;
+                let path = string_field(&args, "projectPath", "project_path")?;
+                Ok(Value::String(
+                    contexts.issue_content(session_id, number, path)?,
+                ))
+            }
+            "load_pr_context" => {
+                let session_id = string_field(&args, "sessionId", "session_id")?;
+                let number = u32_field(&args, "prNumber", "pr_number")?;
+                let path = string_field(&args, "projectPath", "project_path")?;
+                Ok(serde_json::to_value(
+                    contexts.load_pull_request(&github, session_id, number, path)?,
+                )?)
+            }
+            "list_loaded_pr_contexts" => {
+                let session_id = string_field(&args, "sessionId", "session_id")?;
+                let worktree_id = optional_string_field(&args, "worktreeId", "worktree_id")?;
+                Ok(serde_json::to_value(
+                    contexts.list_pull_requests(session_id, worktree_id.as_deref())?,
+                )?)
+            }
+            "remove_pr_context" => {
+                let session_id = string_field(&args, "sessionId", "session_id")?;
+                let number = u32_field(&args, "prNumber", "pr_number")?;
+                let path = string_field(&args, "projectPath", "project_path")?;
+                contexts.remove_pull_request(session_id, number, path)?;
+                Ok(Value::Null)
+            }
+            "get_pr_context_content" => {
+                let session_id = string_field(&args, "sessionId", "session_id")?;
+                let number = u32_field(&args, "prNumber", "pr_number")?;
+                let path = string_field(&args, "projectPath", "project_path")?;
+                Ok(Value::String(
+                    contexts.pull_request_content(session_id, number, path)?,
+                ))
             }
             "load_preferences" => self.context.persistence.load_preferences(),
             "save_preferences" => {
@@ -1609,6 +1675,72 @@ mod tests {
             .unwrap();
         assert_eq!(worktrees.as_array().unwrap().len(), 1);
         assert_eq!(worktrees[0]["id"], "w1");
+    }
+
+    #[tokio::test]
+    async fn headless_dispatcher_reads_and_removes_shared_github_contexts() {
+        let context = test_context();
+        let repo = tempfile::tempdir().unwrap();
+        assert!(std::process::Command::new("git")
+            .current_dir(repo.path())
+            .args(["init"])
+            .output()
+            .unwrap()
+            .status
+            .success());
+        assert!(std::process::Command::new("git")
+            .current_dir(repo.path())
+            .args(["remote", "add", "origin", "git@github.com:acme/widget.git"])
+            .output()
+            .unwrap()
+            .status
+            .success());
+        let directory = context.persistence.git_contexts_dir().unwrap();
+        std::fs::write(
+            directory.join("acme-widget-issue-12.md"),
+            "# GitHub Issue #12: Shared dispatch\n\n### @octo (today)\n",
+        )
+        .unwrap();
+        context
+            .persistence
+            .update_context_references(|references| {
+                references.issues.insert(
+                    "acme-widget-12".to_string(),
+                    crate::ContextRef {
+                        sessions: vec!["session".to_string()],
+                        orphaned_at: None,
+                    },
+                );
+                Ok(())
+            })
+            .unwrap();
+        let dispatcher = HeadlessDispatcher::new(context);
+        let path = repo.path().to_str().unwrap();
+
+        let listed = dispatcher
+            .dispatch(
+                "list_loaded_issue_contexts",
+                serde_json::json!({"sessionId":"session"}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(listed[0]["title"], "Shared dispatch");
+        let content = dispatcher
+            .dispatch(
+                "get_issue_context_content",
+                serde_json::json!({"sessionId":"session","issueNumber":12,"projectPath":path}),
+            )
+            .await
+            .unwrap();
+        assert!(content.as_str().unwrap().contains("Shared dispatch"));
+        dispatcher
+            .dispatch(
+                "remove_issue_context",
+                serde_json::json!({"sessionId":"session","issueNumber":12,"projectPath":path}),
+            )
+            .await
+            .unwrap();
+        assert!(!directory.join("acme-widget-issue-12.md").exists());
     }
 
     #[tokio::test]

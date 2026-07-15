@@ -15,6 +15,18 @@ pub struct GitRemote {
     pub name: String,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct GitHubRepository {
+    pub owner: String,
+    pub repo: String,
+}
+
+impl GitHubRepository {
+    pub fn key(&self) -> String {
+        format!("{}-{}", self.owner, self.repo)
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct GitIdentity {
     pub name: Option<String>,
@@ -227,8 +239,12 @@ impl GitService {
     }
 
     pub fn repository_key(self, path: &str) -> Result<String, BackendError> {
+        Ok(self.github_repository(path)?.key())
+    }
+
+    pub fn github_repository(self, path: &str) -> Result<GitHubRepository, BackendError> {
         let remote = self.text(Path::new(path), &["remote", "get-url", "origin"])?;
-        parse_github_repository_key(&remote).ok_or_else(|| {
+        parse_github_repository(&remote).ok_or_else(|| {
             invalid(format!(
                 "Origin is not a supported GitHub repository URL: {remote}"
             ))
@@ -979,7 +995,7 @@ impl GitService {
     }
 }
 
-fn parse_github_repository_key(remote: &str) -> Option<String> {
+fn parse_github_repository(remote: &str) -> Option<GitHubRepository> {
     let trimmed = remote.trim().trim_end_matches('/').trim_end_matches(".git");
     let path = if let Some(path) = trimmed.strip_prefix("git@github.com:") {
         path
@@ -994,7 +1010,10 @@ fn parse_github_repository_key(remote: &str) -> Option<String> {
     if owner.is_empty() || repository.is_empty() || repository.contains('/') {
         return None;
     }
-    Some(format!("{owner}-{repository}"))
+    Some(GitHubRepository {
+        owner: owner.to_string(),
+        repo: repository.to_string(),
+    })
 }
 
 fn build_diff(kind: &str, base_ref: String, target_ref: String, raw_patch: String) -> GitDiff {

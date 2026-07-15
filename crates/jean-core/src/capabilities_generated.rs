@@ -513,11 +513,6 @@ pub const UNAVAILABLE_CAPABILITIES: &[CommandCapability] = &[
         available: false,
     },
     CommandCapability {
-        command: "get_issue_context_content",
-        class: CapabilityClass::AdapterBacked,
-        available: false,
-    },
-    CommandCapability {
         command: "get_jean_config",
         class: CapabilityClass::AdapterBacked,
         available: false,
@@ -549,11 +544,6 @@ pub const UNAVAILABLE_CAPABILITIES: &[CommandCapability] = &[
     },
     CommandCapability {
         command: "get_opencode_server_status",
-        class: CapabilityClass::AdapterBacked,
-        available: false,
-    },
-    CommandCapability {
-        command: "get_pr_context_content",
         class: CapabilityClass::AdapterBacked,
         available: false,
     },
@@ -783,17 +773,7 @@ pub const UNAVAILABLE_CAPABILITIES: &[CommandCapability] = &[
         available: false,
     },
     CommandCapability {
-        command: "list_loaded_issue_contexts",
-        class: CapabilityClass::AdapterBacked,
-        available: false,
-    },
-    CommandCapability {
         command: "list_loaded_linear_issue_contexts",
-        class: CapabilityClass::AdapterBacked,
-        available: false,
-    },
-    CommandCapability {
-        command: "list_loaded_pr_contexts",
         class: CapabilityClass::AdapterBacked,
         available: false,
     },
@@ -883,22 +863,12 @@ pub const UNAVAILABLE_CAPABILITIES: &[CommandCapability] = &[
         available: false,
     },
     CommandCapability {
-        command: "load_issue_context",
-        class: CapabilityClass::AdapterBacked,
-        available: false,
-    },
-    CommandCapability {
         command: "load_linear_issue_context",
         class: CapabilityClass::AdapterBacked,
         available: false,
     },
     CommandCapability {
         command: "load_older_session_messages",
-        class: CapabilityClass::AdapterBacked,
-        available: false,
-    },
-    CommandCapability {
-        command: "load_pr_context",
         class: CapabilityClass::AdapterBacked,
         available: false,
     },
@@ -1048,17 +1018,7 @@ pub const UNAVAILABLE_CAPABILITIES: &[CommandCapability] = &[
         available: false,
     },
     CommandCapability {
-        command: "remove_issue_context",
-        class: CapabilityClass::AdapterBacked,
-        available: false,
-    },
-    CommandCapability {
         command: "remove_linear_issue_context",
-        class: CapabilityClass::AdapterBacked,
-        available: false,
-    },
-    CommandCapability {
-        command: "remove_pr_context",
         class: CapabilityClass::AdapterBacked,
         available: false,
     },

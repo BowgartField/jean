@@ -1,9 +1,10 @@
-use crate::{BackendError, GitService, PersistenceService};
+use crate::{BackendError, BackendErrorCode, GitHubService, GitService, PersistenceService};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GitHubAuthor {
@@ -137,6 +138,27 @@ pub struct WorktreeContexts {
     pub security: Option<SecurityAlertContext>,
     pub advisory: Option<AdvisoryContext>,
     pub linear: Option<LinearIssueContext>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoadedIssueContext {
+    pub number: u32,
+    pub title: String,
+    pub comment_count: usize,
+    pub repo_owner: String,
+    pub repo_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoadedPullRequestContext {
+    pub number: u32,
+    pub title: String,
+    pub comment_count: usize,
+    pub review_count: usize,
+    pub repo_owner: String,
+    pub repo_name: String,
 }
 
 pub fn slugify_issue_title(title: &str) -> String {
@@ -321,6 +343,188 @@ impl ContextService {
         Ok(())
     }
 
+    pub fn load_issue(
+        &self,
+        github: &GitHubService,
+        session_id: &str,
+        issue_number: u32,
+        project_path: &str,
+    ) -> Result<LoadedIssueContext, BackendError> {
+        let repository = self.git.github_repository(project_path)?;
+        let issue = github.issue_detail(project_path, issue_number)?;
+        let context = IssueContext {
+            number: issue.number,
+            title: issue.title.clone(),
+            body: issue.body,
+            comments: issue.comments,
+        };
+        std::fs::write(
+            self.persistence
+                .git_contexts_dir()?
+                .join(format!("{}-issue-{issue_number}.md", repository.key())),
+            format_issue_context_markdown(&context),
+        )?;
+        self.add_reference(
+            "issues",
+            format!("{}-{issue_number}", repository.key()),
+            session_id,
+        )?;
+        Ok(LoadedIssueContext {
+            number: issue.number,
+            title: issue.title,
+            comment_count: context.comments.len(),
+            repo_owner: repository.owner,
+            repo_name: repository.repo,
+        })
+    }
+
+    pub fn list_issues(
+        &self,
+        session_id: &str,
+        worktree_id: Option<&str>,
+    ) -> Result<Vec<LoadedIssueContext>, BackendError> {
+        let mut contexts = Vec::new();
+        for key in self.combined_keys("issues", session_id, worktree_id)? {
+            let Some((owner, repo, number)) = parse_numbered_context_key(&key) else {
+                continue;
+            };
+            let path = self
+                .persistence
+                .git_contexts_dir()?
+                .join(format!("{owner}-{repo}-issue-{number}.md"));
+            let Ok(content) = std::fs::read_to_string(path) else {
+                continue;
+            };
+            let title = context_title(&content, "# GitHub Issue #")
+                .unwrap_or_else(|| format!("Issue #{number}"));
+            contexts.push(LoadedIssueContext {
+                number,
+                title,
+                comment_count: content.matches("### @").count(),
+                repo_owner: owner,
+                repo_name: repo,
+            });
+        }
+        contexts.sort_by_key(|context| context.number);
+        Ok(contexts)
+    }
+
+    pub fn remove_issue(
+        &self,
+        session_id: &str,
+        issue_number: u32,
+        project_path: &str,
+    ) -> Result<(), BackendError> {
+        let repository = self.git.github_repository(project_path)?;
+        let key = format!("{}-{issue_number}", repository.key());
+        if self.remove_reference("issues", &key, session_id)? {
+            remove_file_if_exists(
+                &self
+                    .persistence
+                    .git_contexts_dir()?
+                    .join(format!("{}-issue-{issue_number}.md", repository.key())),
+            )?;
+        }
+        Ok(())
+    }
+
+    pub fn issue_content(
+        &self,
+        session_id: &str,
+        issue_number: u32,
+        project_path: &str,
+    ) -> Result<String, BackendError> {
+        self.numbered_content("issues", "issue", session_id, issue_number, project_path)
+    }
+
+    pub fn load_pull_request(
+        &self,
+        github: &GitHubService,
+        session_id: &str,
+        number: u32,
+        project_path: &str,
+    ) -> Result<LoadedPullRequestContext, BackendError> {
+        let repository = self.git.github_repository(project_path)?;
+        let context = github.pull_request_context(project_path, number)?;
+        std::fs::write(
+            self.persistence
+                .git_contexts_dir()?
+                .join(format!("{}-pr-{number}.md", repository.key())),
+            format_pr_context_markdown(&context),
+        )?;
+        self.add_reference("prs", format!("{}-{number}", repository.key()), session_id)?;
+        Ok(LoadedPullRequestContext {
+            number: context.number,
+            title: context.title,
+            comment_count: context.comments.len(),
+            review_count: context.reviews.len(),
+            repo_owner: repository.owner,
+            repo_name: repository.repo,
+        })
+    }
+
+    pub fn list_pull_requests(
+        &self,
+        session_id: &str,
+        worktree_id: Option<&str>,
+    ) -> Result<Vec<LoadedPullRequestContext>, BackendError> {
+        let mut contexts = Vec::new();
+        for key in self.combined_keys("prs", session_id, worktree_id)? {
+            let Some((owner, repo, number)) = parse_numbered_context_key(&key) else {
+                continue;
+            };
+            let path = self
+                .persistence
+                .git_contexts_dir()?
+                .join(format!("{owner}-{repo}-pr-{number}.md"));
+            let Ok(content) = std::fs::read_to_string(path) else {
+                continue;
+            };
+            let title = context_title(&content, "# GitHub Pull Request #")
+                .unwrap_or_else(|| format!("PR #{number}"));
+            let comment_count = section_header_count(&content, "## Comments", None);
+            let review_count = section_header_count(&content, "## Reviews", Some("## Comments"));
+            contexts.push(LoadedPullRequestContext {
+                number,
+                title,
+                comment_count,
+                review_count,
+                repo_owner: owner,
+                repo_name: repo,
+            });
+        }
+        contexts.sort_by_key(|context| context.number);
+        Ok(contexts)
+    }
+
+    pub fn remove_pull_request(
+        &self,
+        session_id: &str,
+        number: u32,
+        project_path: &str,
+    ) -> Result<(), BackendError> {
+        let repository = self.git.github_repository(project_path)?;
+        let key = format!("{}-{number}", repository.key());
+        if self.remove_reference("prs", &key, session_id)? {
+            remove_file_if_exists(
+                &self
+                    .persistence
+                    .git_contexts_dir()?
+                    .join(format!("{}-pr-{number}.md", repository.key())),
+            )?;
+        }
+        Ok(())
+    }
+
+    pub fn pull_request_content(
+        &self,
+        session_id: &str,
+        number: u32,
+        project_path: &str,
+    ) -> Result<String, BackendError> {
+        self.numbered_content("prs", "pr", session_id, number, project_path)
+    }
+
     fn add_reference(
         &self,
         category: &str,
@@ -344,6 +548,147 @@ impl ContextService {
             Ok(())
         })
     }
+
+    fn remove_reference(
+        &self,
+        category: &str,
+        key: &str,
+        session_id: &str,
+    ) -> Result<bool, BackendError> {
+        self.persistence.update_context_references(|references| {
+            let entries = reference_map_mut(references, category);
+            let Some(reference) = entries.get_mut(key) else {
+                return Ok(false);
+            };
+            reference.sessions.retain(|id| id != session_id);
+            if reference.sessions.is_empty() && reference.orphaned_at.is_none() {
+                reference.orphaned_at = Some(now_seconds());
+                Ok(true)
+            } else {
+                Ok(false)
+            }
+        })
+    }
+
+    fn combined_keys(
+        &self,
+        category: &str,
+        session_id: &str,
+        worktree_id: Option<&str>,
+    ) -> Result<Vec<String>, BackendError> {
+        let references = self.persistence.load_context_references()?;
+        let entries = reference_map(&references, category);
+        Ok(entries
+            .iter()
+            .filter(|(_, reference)| {
+                reference.sessions.iter().any(|id| id == session_id)
+                    || worktree_id.is_some_and(|worktree_id| {
+                        reference.sessions.iter().any(|id| id == worktree_id)
+                    })
+            })
+            .map(|(key, _)| key.clone())
+            .collect())
+    }
+
+    fn numbered_content(
+        &self,
+        category: &str,
+        file_kind: &str,
+        session_id: &str,
+        number: u32,
+        project_path: &str,
+    ) -> Result<String, BackendError> {
+        let repository = self.git.github_repository(project_path)?;
+        let key = format!("{}-{number}", repository.key());
+        if !self
+            .combined_keys(category, session_id, None)?
+            .iter()
+            .any(|candidate| candidate == &key)
+        {
+            return Err(BackendError::new(
+                BackendErrorCode::InvalidArgument,
+                format!("Session does not have {file_kind} #{number} loaded"),
+            ));
+        }
+        let path = self
+            .persistence
+            .git_contexts_dir()?
+            .join(format!("{}-{file_kind}-{number}.md", repository.key()));
+        std::fs::read_to_string(&path).map_err(|error| {
+            BackendError::new(
+                BackendErrorCode::Io,
+                format!("Failed to read {file_kind} context file: {error}"),
+            )
+        })
+    }
+}
+
+fn reference_map<'a>(
+    references: &'a ContextReferences,
+    category: &str,
+) -> &'a HashMap<String, ContextRef> {
+    match category {
+        "issues" => &references.issues,
+        "prs" => &references.prs,
+        "security" => &references.security,
+        "advisories" => &references.advisories,
+        "linear" => &references.linear,
+        _ => unreachable!("known context category"),
+    }
+}
+
+fn reference_map_mut<'a>(
+    references: &'a mut ContextReferences,
+    category: &str,
+) -> &'a mut HashMap<String, ContextRef> {
+    match category {
+        "issues" => &mut references.issues,
+        "prs" => &mut references.prs,
+        "security" => &mut references.security,
+        "advisories" => &mut references.advisories,
+        "linear" => &mut references.linear,
+        _ => unreachable!("known context category"),
+    }
+}
+
+fn parse_numbered_context_key(key: &str) -> Option<(String, String, u32)> {
+    let (repository, number) = key.rsplit_once('-')?;
+    let (owner, repo) = repository.split_once('-')?;
+    Some((owner.to_string(), repo.to_string(), number.parse().ok()?))
+}
+
+fn context_title(content: &str, prefix: &str) -> Option<String> {
+    content
+        .lines()
+        .next()?
+        .strip_prefix(prefix)?
+        .split_once(": ")
+        .map(|(_, title)| title.to_string())
+}
+
+fn section_header_count(content: &str, start: &str, end: Option<&str>) -> usize {
+    let Some(start) = content.find(start) else {
+        return 0;
+    };
+    let section = &content[start..];
+    let end = end
+        .and_then(|marker| section.find(marker))
+        .unwrap_or(section.len());
+    section[..end].matches("### @").count()
+}
+
+fn remove_file_if_exists(path: &Path) -> Result<(), BackendError> {
+    if path.exists() {
+        std::fs::remove_file(path)?;
+    }
+    Ok(())
+}
+
+fn now_seconds() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
 }
 
 fn native_pr_diff(project_path: &str, number: u32) -> Result<String, BackendError> {
@@ -517,7 +862,14 @@ fn nonempty(value: Option<&str>) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ResolvedAppPaths;
+    use crate::{GhRunner, ResolvedAppPaths};
+    use std::process::Output;
+
+    fn successful_output(stdout: &[u8]) -> Output {
+        let mut output = Command::new("git").arg("--version").output().unwrap();
+        output.stdout = stdout.to_vec();
+        output
+    }
 
     #[test]
     fn context_types_keep_the_frontend_camel_case_contract() {
@@ -599,5 +951,74 @@ mod tests {
             references.linear["Widget-ENG-9"].sessions,
             vec!["worktree-1"]
         );
+    }
+
+    #[test]
+    fn issue_and_pr_context_lifecycle_is_shared() {
+        let temp = tempfile::tempdir().unwrap();
+        let repo = temp.path().join("repo");
+        std::fs::create_dir(&repo).unwrap();
+        assert!(Command::new("git")
+            .current_dir(&repo)
+            .args(["init"])
+            .output()
+            .unwrap()
+            .status
+            .success());
+        assert!(Command::new("git")
+            .current_dir(&repo)
+            .args(["remote", "add", "origin", "git@github.com:acme/widget.git"])
+            .output()
+            .unwrap()
+            .status
+            .success());
+        let persistence = Arc::new(PersistenceService::new(Arc::new(ResolvedAppPaths::new(
+            temp.path().join("data"),
+            temp.path().join("config"),
+            temp.path().join("cache"),
+            temp.path().join("resources"),
+        ))));
+        let service = ContextService::new(persistence.clone(), GitService::default());
+        let runner: GhRunner = Arc::new(|_, args| {
+            let stdout = match (args.first().copied(), args.get(1).copied()) {
+                (Some("issue"), Some("view")) => br#"{"number":12,"title":"Shared issue","body":"body","state":"OPEN","labels":[],"createdAt":"2026-01-01","author":{"login":"octo"},"comments":[{"body":"hello","author":{"login":"octo"},"createdAt":"2026-01-02"}]}"#.as_slice(),
+                (Some("pr"), Some("view")) => br#"{"number":42,"title":"Shared PR","body":"body","state":"OPEN","headRefName":"feature","baseRefName":"main","isDraft":false,"createdAt":"2026-01-01","author":{"login":"octo"},"comments":[{"body":"comment","author":{"login":"octo"},"createdAt":"2026-01-02"}],"reviews":[{"body":"review","state":"APPROVED","author":{"login":"reviewer"},"submittedAt":"2026-01-03"}]}"#.as_slice(),
+                (Some("pr"), Some("diff")) => b"diff --git a/file b/file\n".as_slice(),
+                _ => unreachable!(),
+            };
+            Ok(successful_output(stdout))
+        });
+        let github = GitHubService::new(runner);
+        let path = repo.to_str().unwrap();
+
+        let issue = service.load_issue(&github, "session", 12, path).unwrap();
+        let pr = service
+            .load_pull_request(&github, "session", 42, path)
+            .unwrap();
+        assert_eq!(issue.comment_count, 1);
+        assert_eq!(pr.review_count, 1);
+        assert_eq!(
+            service.list_issues("session", None).unwrap()[0].title,
+            "Shared issue"
+        );
+        assert_eq!(
+            service.list_pull_requests("session", None).unwrap()[0].comment_count,
+            1
+        );
+        assert!(service
+            .issue_content("session", 12, path)
+            .unwrap()
+            .contains("Shared issue"));
+        assert!(service
+            .pull_request_content("session", 42, path)
+            .unwrap()
+            .contains("diff --git"));
+
+        service.remove_issue("session", 12, path).unwrap();
+        service.remove_pull_request("session", 42, path).unwrap();
+        let directory = persistence.git_contexts_dir().unwrap();
+        assert!(!directory.join("acme-widget-issue-12.md").exists());
+        assert!(!directory.join("acme-widget-pr-42.md").exists());
+        assert!(service.issue_content("session", 12, path).is_err());
     }
 }

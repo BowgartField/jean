@@ -67,6 +67,12 @@ impl PersistenceService {
         Ok(result)
     }
 
+    pub fn load_context_references(&self) -> Result<crate::ContextReferences, BackendError> {
+        let path = self.git_contexts_dir()?.join("references.json");
+        let value = load_json_or_unlocked(&path, serde_json::json!({}))?;
+        serde_json::from_value(value).map_err(BackendError::from)
+    }
+
     pub fn session_index_path(&self, worktree_id: &str) -> Result<PathBuf, BackendError> {
         Ok(self
             .ensure_dir(self.sessions_dir()?.join("index"))?

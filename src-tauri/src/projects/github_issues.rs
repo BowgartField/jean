@@ -10,7 +10,8 @@ use crate::gh_cli::config::resolve_gh_binary;
 pub use jean_core::{
     AdvisoryContext, AdvisoryVulnerability, GitHubAuthor, GitHubComment, GitHubIssue,
     GitHubIssueDetail, GitHubIssueListResult, GitHubLabel, GitHubPullRequest,
-    GitHubPullRequestDetail, IssueContext, PullRequestContext, SecurityAlertContext,
+    GitHubPullRequestDetail, IssueContext, LoadedIssueContext, LoadedPullRequestContext,
+    PullRequestContext, SecurityAlertContext,
 };
 
 fn gh_command(gh: &Path, project_path: &str) -> Command {
@@ -134,17 +135,6 @@ pub fn generate_branch_name_from_issue(issue_number: u32, title: &str) -> String
 /// Format issue context as markdown for the context file
 pub fn format_issue_context_markdown(ctx: &IssueContext) -> String {
     jean_core::format_issue_context_markdown(ctx)
-}
-
-/// Loaded issue context info returned to frontend
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LoadedIssueContext {
-    pub number: u32,
-    pub title: String,
-    pub comment_count: usize,
-    pub repo_owner: String,
-    pub repo_name: String,
 }
 
 // =============================================================================
@@ -840,51 +830,14 @@ pub async fn load_issue_context(
     issue_number: u32,
     project_path: String,
 ) -> Result<LoadedIssueContext, String> {
-    log::trace!("Loading issue #{issue_number} context for session {session_id}");
-
-    // Get repo identifier for shared storage
-    let repo_id = get_repo_identifier(&project_path)?;
-    let repo_key = repo_id.to_key();
-
-    // Fetch issue data from GitHub
-    let issue = get_github_issue(app.clone(), project_path, issue_number).await?;
-
-    // Create issue context
-    let ctx = IssueContext {
-        number: issue.number,
-        title: issue.title.clone(),
-        body: issue.body,
-        comments: issue.comments,
-    };
-
-    // Write to shared git-context directory
-    let contexts_dir = get_github_contexts_dir(&app)?;
-    std::fs::create_dir_all(&contexts_dir)
-        .map_err(|e| format!("Failed to create git-context directory: {e}"))?;
-
-    // File format: {repo_key}-issue-{number}.md
-    let context_file = contexts_dir.join(format!("{repo_key}-issue-{issue_number}.md"));
-    let context_content = format_issue_context_markdown(&ctx);
-
-    std::fs::write(&context_file, context_content)
-        .map_err(|e| format!("Failed to write issue context file: {e}"))?;
-
-    // Add reference tracking
-    add_issue_reference(&app, &repo_key, issue_number, &session_id)?;
-
-    log::trace!(
-        "Issue context loaded successfully for issue #{} ({} comments)",
-        issue_number,
-        ctx.comments.len()
-    );
-
-    Ok(LoadedIssueContext {
-        number: issue.number,
-        title: issue.title,
-        comment_count: ctx.comments.len(),
-        repo_owner: repo_id.owner,
-        repo_name: repo_id.repo,
-    })
+    crate::backend_runtime::context_service(&app)?
+        .load_issue(
+            &crate::backend_runtime::github_service(&app),
+            &session_id,
+            issue_number,
+            &project_path,
+        )
+        .map_err(|error| error.to_string())
 }
 
 /// List all loaded issue contexts for a session
@@ -894,66 +847,9 @@ pub async fn list_loaded_issue_contexts(
     session_id: String,
     worktree_id: Option<String>,
 ) -> Result<Vec<LoadedIssueContext>, String> {
-    log::trace!("Listing loaded issue contexts for session {session_id}");
-
-    // Get issue refs for this session from reference tracking
-    let mut issue_keys = get_session_issue_refs(&app, &session_id)?;
-
-    // Also check worktree_id refs (create_worktree stores refs under worktree_id)
-    if let Some(ref wt_id) = worktree_id {
-        if let Ok(wt_keys) = get_session_issue_refs(&app, wt_id) {
-            for key in wt_keys {
-                if !issue_keys.contains(&key) {
-                    issue_keys.push(key);
-                }
-            }
-        }
-    }
-
-    if issue_keys.is_empty() {
-        return Ok(vec![]);
-    }
-
-    let contexts_dir = get_github_contexts_dir(&app)?;
-    let mut contexts = Vec::new();
-
-    for key in issue_keys {
-        // Parse key format: "{owner}-{repo}-{number}"
-        if let Some((owner, repo, number)) = parse_context_key(&key) {
-            let repo_key = format!("{owner}-{repo}");
-            let context_file = contexts_dir.join(format!("{repo_key}-issue-{number}.md"));
-
-            if let Ok(content) = std::fs::read_to_string(&context_file) {
-                // Parse title from first line: "# GitHub Issue #123: Title"
-                let title = content
-                    .lines()
-                    .next()
-                    .and_then(|line| {
-                        line.strip_prefix("# GitHub Issue #")
-                            .and_then(|rest| rest.split_once(": "))
-                            .map(|(_, title)| title.to_string())
-                    })
-                    .unwrap_or_else(|| format!("Issue #{number}"));
-
-                // Count comments by counting "### @" headers
-                let comment_count = content.matches("### @").count();
-
-                contexts.push(LoadedIssueContext {
-                    number,
-                    title,
-                    comment_count,
-                    repo_owner: owner,
-                    repo_name: repo,
-                });
-            }
-        }
-    }
-
-    // Sort by issue number
-    contexts.sort_by_key(|c| c.number);
-
-    log::trace!("Found {} loaded issue contexts", contexts.len());
-    Ok(contexts)
+    crate::backend_runtime::context_service(&app)?
+        .list_issues(&session_id, worktree_id.as_deref())
+        .map_err(|error| error.to_string())
 }
 
 /// Delete all context references for a session
@@ -989,29 +885,9 @@ pub async fn remove_issue_context(
     issue_number: u32,
     project_path: String,
 ) -> Result<(), String> {
-    log::trace!("Removing issue #{issue_number} context for session {session_id}");
-
-    // Get repo identifier
-    let repo_id = get_repo_identifier(&project_path)?;
-    let repo_key = repo_id.to_key();
-
-    // Remove reference
-    let is_orphaned = remove_issue_reference(&app, &repo_key, issue_number, &session_id)?;
-
-    // If orphaned, delete the shared file immediately
-    if is_orphaned {
-        let contexts_dir = get_github_contexts_dir(&app)?;
-        let context_file = contexts_dir.join(format!("{repo_key}-issue-{issue_number}.md"));
-
-        if context_file.exists() {
-            std::fs::remove_file(&context_file)
-                .map_err(|e| format!("Failed to remove issue context file: {e}"))?;
-            log::trace!("Deleted orphaned issue context file");
-        }
-    }
-
-    log::trace!("Issue context removed successfully");
-    Ok(())
+    crate::backend_runtime::context_service(&app)?
+        .remove_issue(&session_id, issue_number, &project_path)
+        .map_err(|error| error.to_string())
 }
 
 // =============================================================================
@@ -1123,18 +999,6 @@ fn current_review_comments_from_threads(threads: Vec<ReviewThread>) -> Vec<GitHu
         .flat_map(|thread| thread.comments.nodes)
         .map(GitHubReviewComment::from)
         .collect()
-}
-
-/// Loaded PR context info returned to frontend
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LoadedPullRequestContext {
-    pub number: u32,
-    pub title: String,
-    pub comment_count: usize,
-    pub review_count: usize,
-    pub repo_owner: String,
-    pub repo_name: String,
 }
 
 /// List GitHub pull requests for a repository
@@ -1335,63 +1199,14 @@ pub async fn load_pr_context(
     pr_number: u32,
     project_path: String,
 ) -> Result<LoadedPullRequestContext, String> {
-    log::trace!("Loading PR #{pr_number} context for session {session_id}");
-
-    // Get repo identifier for shared storage
-    let repo_id = get_repo_identifier(&project_path)?;
-    let repo_key = repo_id.to_key();
-
-    let gh = resolve_gh_binary(&app);
-
-    // Fetch PR data from GitHub
-    let pr = get_github_pr(app.clone(), project_path.clone(), pr_number).await?;
-
-    // Fetch the diff
-    let diff = get_pr_diff(&project_path, pr_number, &gh).ok();
-
-    // Create PR context
-    let ctx = PullRequestContext {
-        number: pr.number,
-        title: pr.title.clone(),
-        body: pr.body,
-        head_ref_name: pr.head_ref_name,
-        base_ref_name: pr.base_ref_name,
-        comments: pr.comments,
-        reviews: pr.reviews.clone(),
-        diff,
-    };
-
-    // Write to shared git-context directory
-    let contexts_dir = get_github_contexts_dir(&app)?;
-    std::fs::create_dir_all(&contexts_dir)
-        .map_err(|e| format!("Failed to create git-context directory: {e}"))?;
-
-    // File format: {repo_key}-pr-{number}.md
-    let context_file = contexts_dir.join(format!("{repo_key}-pr-{pr_number}.md"));
-    let context_content = format_pr_context_markdown(&ctx);
-
-    std::fs::write(&context_file, context_content)
-        .map_err(|e| format!("Failed to write PR context file: {e}"))?;
-
-    // Add reference tracking
-    add_pr_reference(&app, &repo_key, pr_number, &session_id)?;
-
-    log::debug!(
-        "PR context loaded successfully for PR #{} ({} comments, {} reviews, diff: {} bytes)",
-        pr_number,
-        ctx.comments.len(),
-        ctx.reviews.len(),
-        ctx.diff.as_ref().map(|d| d.len()).unwrap_or(0)
-    );
-
-    Ok(LoadedPullRequestContext {
-        number: pr.number,
-        title: pr.title,
-        comment_count: ctx.comments.len(),
-        review_count: pr.reviews.len(),
-        repo_owner: repo_id.owner,
-        repo_name: repo_id.repo,
-    })
+    crate::backend_runtime::context_service(&app)?
+        .load_pull_request(
+            &crate::backend_runtime::github_service(&app),
+            &session_id,
+            pr_number,
+            &project_path,
+        )
+        .map_err(|error| error.to_string())
 }
 
 /// List all loaded PR contexts for a session
@@ -1401,82 +1216,9 @@ pub async fn list_loaded_pr_contexts(
     session_id: String,
     worktree_id: Option<String>,
 ) -> Result<Vec<LoadedPullRequestContext>, String> {
-    log::trace!("Listing loaded PR contexts for session {session_id}");
-
-    // Get PR refs for this session from reference tracking
-    let mut pr_keys = get_session_pr_refs(&app, &session_id)?;
-
-    // Also check worktree_id refs (create_worktree stores refs under worktree_id)
-    if let Some(ref wt_id) = worktree_id {
-        if let Ok(wt_keys) = get_session_pr_refs(&app, wt_id) {
-            for key in wt_keys {
-                if !pr_keys.contains(&key) {
-                    pr_keys.push(key);
-                }
-            }
-        }
-    }
-
-    if pr_keys.is_empty() {
-        return Ok(vec![]);
-    }
-
-    let contexts_dir = get_github_contexts_dir(&app)?;
-    let mut contexts = Vec::new();
-
-    for key in pr_keys {
-        // Parse key format: "{owner}-{repo}-{number}"
-        if let Some((owner, repo, number)) = parse_context_key(&key) {
-            let repo_key = format!("{owner}-{repo}");
-            let context_file = contexts_dir.join(format!("{repo_key}-pr-{number}.md"));
-
-            if let Ok(content) = std::fs::read_to_string(&context_file) {
-                // Parse title from first line: "# GitHub Pull Request #123: Title"
-                let title = content
-                    .lines()
-                    .next()
-                    .and_then(|line| {
-                        line.strip_prefix("# GitHub Pull Request #")
-                            .and_then(|rest| rest.split_once(": "))
-                            .map(|(_, title)| title.to_string())
-                    })
-                    .unwrap_or_else(|| format!("PR #{number}"));
-
-                // Count comments by counting "### @" headers in Comments section
-                let comment_count = content
-                    .find("## Comments")
-                    .map(|start| content[start..].matches("### @").count())
-                    .unwrap_or(0);
-
-                // Count reviews by counting "### @" headers in Reviews section
-                let review_count = content
-                    .find("## Reviews")
-                    .map(|start| {
-                        let reviews_section = &content[start..];
-                        let end = reviews_section
-                            .find("## Comments")
-                            .unwrap_or(reviews_section.len());
-                        reviews_section[..end].matches("### @").count()
-                    })
-                    .unwrap_or(0);
-
-                contexts.push(LoadedPullRequestContext {
-                    number,
-                    title,
-                    comment_count,
-                    review_count,
-                    repo_owner: owner,
-                    repo_name: repo,
-                });
-            }
-        }
-    }
-
-    // Sort by PR number
-    contexts.sort_by_key(|c| c.number);
-
-    log::trace!("Found {} loaded PR contexts", contexts.len());
-    Ok(contexts)
+    crate::backend_runtime::context_service(&app)?
+        .list_pull_requests(&session_id, worktree_id.as_deref())
+        .map_err(|error| error.to_string())
 }
 
 /// Remove a loaded PR context for a session
@@ -1487,29 +1229,9 @@ pub async fn remove_pr_context(
     pr_number: u32,
     project_path: String,
 ) -> Result<(), String> {
-    log::trace!("Removing PR #{pr_number} context for session {session_id}");
-
-    // Get repo identifier
-    let repo_id = get_repo_identifier(&project_path)?;
-    let repo_key = repo_id.to_key();
-
-    // Remove reference
-    let is_orphaned = remove_pr_reference(&app, &repo_key, pr_number, &session_id)?;
-
-    // If orphaned, delete the shared file immediately
-    if is_orphaned {
-        let contexts_dir = get_github_contexts_dir(&app)?;
-        let context_file = contexts_dir.join(format!("{repo_key}-pr-{pr_number}.md"));
-
-        if context_file.exists() {
-            std::fs::remove_file(&context_file)
-                .map_err(|e| format!("Failed to remove PR context file: {e}"))?;
-            log::trace!("Deleted orphaned PR context file");
-        }
-    }
-
-    log::trace!("PR context removed successfully");
-    Ok(())
+    crate::backend_runtime::context_service(&app)?
+        .remove_pull_request(&session_id, pr_number, &project_path)
+        .map_err(|error| error.to_string())
 }
 
 /// Get the content of a loaded issue context file
@@ -1520,30 +1242,9 @@ pub async fn get_issue_context_content(
     issue_number: u32,
     project_path: String,
 ) -> Result<String, String> {
-    // Get repo identifier
-    let repo_id = get_repo_identifier(&project_path)?;
-    let repo_key = repo_id.to_key();
-
-    // Verify this session has a reference to this context
-    let refs = get_session_issue_refs(&app, &session_id)?;
-    let expected_key = format!("{repo_key}-{issue_number}");
-    if !refs.contains(&expected_key) {
-        return Err(format!(
-            "Session does not have issue #{issue_number} loaded"
-        ));
-    }
-
-    let contexts_dir = get_github_contexts_dir(&app)?;
-    let context_file = contexts_dir.join(format!("{repo_key}-issue-{issue_number}.md"));
-
-    if !context_file.exists() {
-        return Err(format!(
-            "Issue context file not found for issue #{issue_number}"
-        ));
-    }
-
-    std::fs::read_to_string(&context_file)
-        .map_err(|e| format!("Failed to read issue context file: {e}"))
+    crate::backend_runtime::context_service(&app)?
+        .issue_content(&session_id, issue_number, &project_path)
+        .map_err(|error| error.to_string())
 }
 
 /// Get the content of a loaded PR context file
@@ -1554,26 +1255,9 @@ pub async fn get_pr_context_content(
     pr_number: u32,
     project_path: String,
 ) -> Result<String, String> {
-    // Get repo identifier
-    let repo_id = get_repo_identifier(&project_path)?;
-    let repo_key = repo_id.to_key();
-
-    // Verify this session has a reference to this context
-    let refs = get_session_pr_refs(&app, &session_id)?;
-    let expected_key = format!("{repo_key}-{pr_number}");
-    if !refs.contains(&expected_key) {
-        return Err(format!("Session does not have PR #{pr_number} loaded"));
-    }
-
-    let contexts_dir = get_github_contexts_dir(&app)?;
-    let context_file = contexts_dir.join(format!("{repo_key}-pr-{pr_number}.md"));
-
-    if !context_file.exists() {
-        return Err(format!("PR context file not found for PR #{pr_number}"));
-    }
-
-    std::fs::read_to_string(&context_file)
-        .map_err(|e| format!("Failed to read PR context file: {e}"))
+    crate::backend_runtime::context_service(&app)?
+        .pull_request_content(&session_id, pr_number, &project_path)
+        .map_err(|error| error.to_string())
 }
 
 // =============================================================================

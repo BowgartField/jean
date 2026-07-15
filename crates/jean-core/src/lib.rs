@@ -32,11 +32,12 @@ pub use contexts::{
     generate_branch_name_from_security_alert, slugify_issue_title, AdvisoryContext,
     AdvisoryVulnerability, ContextRef, ContextReferences, ContextService, GitHubAuthor,
     GitHubComment, GitHubReview, IssueContext, LinearComment, LinearIssueContext, LinearUser,
-    PrDiffLoader, PullRequestContext, SecurityAlertContext, WorktreeContexts,
+    LoadedIssueContext, LoadedPullRequestContext, PrDiffLoader, PullRequestContext,
+    SecurityAlertContext, WorktreeContexts,
 };
 pub use error::{BackendError, BackendErrorCode};
 pub use events::{EventSink, ServerEventSink, WsBroadcaster, WsEvent};
-pub use git::{GitPushResponse, GitRunner, GitService};
+pub use git::{GitHubRepository, GitPushResponse, GitRunner, GitService};
 pub use git_status::{ActiveWorktreeInfo, GitBranchStatus};
 pub use github::{
     GhRunner, GitHubIssue, GitHubIssueDetail, GitHubIssueListResult, GitHubLabel,

@@ -141,19 +141,22 @@ pub fn linear_service(app: &AppHandle) -> Result<jean_core::LinearService, Strin
     Ok(jean_core::LinearService::new(context(app)?.persistence))
 }
 
-pub fn project_service(app: &AppHandle) -> Result<jean_core::ProjectService, String> {
+pub fn context_service(app: &AppHandle) -> Result<jean_core::ContextService, String> {
     let context = context(app)?;
     let app_for_diff = app.clone();
     let pr_diff_loader: jean_core::PrDiffLoader = Arc::new(move |project_path, number| {
-        let gh = crate::gh_cli::config::resolve_gh_binary(&app_for_diff);
-        crate::projects::get_pr_diff(project_path, number, &gh)
-            .map_err(|error| BackendError::new(jean_core::BackendErrorCode::Io, error))
+        github_service(&app_for_diff).pull_request_diff(project_path, number)
     });
-    let contexts = jean_core::ContextService::with_pr_diff_loader(
-        context.persistence.clone(),
+    Ok(jean_core::ContextService::with_pr_diff_loader(
+        context.persistence,
         git_service(),
         pr_diff_loader,
-    );
+    ))
+}
+
+pub fn project_service(app: &AppHandle) -> Result<jean_core::ProjectService, String> {
+    let context = context(app)?;
+    let contexts = context_service(app)?;
     let github = github_service(app);
     let app_for_checkout = app.clone();
     let pr_checkout: jean_core::PrCheckout = Arc::new(move |worktree_path, number, branch| {
