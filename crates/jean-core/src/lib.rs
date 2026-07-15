@@ -2,6 +2,7 @@ pub mod auth;
 pub mod capabilities;
 mod capabilities_generated;
 pub mod chat;
+pub mod commandcode;
 pub mod config;
 pub mod contexts;
 pub mod error;
@@ -21,6 +22,10 @@ pub mod terminal;
 
 pub use capabilities::{CapabilityClass, CommandCapability, HEADLESS_CAPABILITIES};
 pub use chat::{ChatRunManager, ChatService};
+pub use commandcode::{
+    CommandCodeContentBlock, CommandCodeInvocation, CommandCodeNativeTurn, CommandCodePlanOutput,
+    CommandCodeToolCall,
+};
 pub use config::{
     read_jean_config, JeanConfig, JeanScripts, PortEntry, RunScript, ScriptRunner, ScriptService,
 };
