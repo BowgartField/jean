@@ -161,6 +161,71 @@ impl GitService {
         self.text(Path::new(path), &["symbolic-ref", "--short", "HEAD"])
     }
 
+    pub fn head_commit(self, path: &str) -> Result<String, BackendError> {
+        self.text(Path::new(path), &["rev-parse", "--verify", "HEAD"])
+    }
+
+    pub fn copy_dirty_worktree_state(
+        self,
+        source_path: &str,
+        target_path: &str,
+    ) -> Result<(), BackendError> {
+        let source = Path::new(source_path);
+        let target = Path::new(target_path);
+        let diff = self.run(source, &["diff", "--binary", "HEAD"])?;
+        if !diff.status.success() {
+            return Err(git_failure(diff, "git diff --binary HEAD"));
+        }
+        if !diff.stdout.is_empty() {
+            let patch = std::env::temp_dir()
+                .join(format!("jean-fork-{}.patch", uuid::Uuid::new_v4().simple()));
+            std::fs::write(&patch, diff.stdout)?;
+            let patch_arg = patch.to_string_lossy();
+            let result = self.ok(
+                target,
+                &[
+                    "apply",
+                    "--binary",
+                    "--whitespace=nowarn",
+                    patch_arg.as_ref(),
+                ],
+                "git apply",
+            );
+            let _ = std::fs::remove_file(&patch);
+            result?;
+        }
+
+        let untracked = self.run(
+            source,
+            &["ls-files", "--others", "--exclude-standard", "-z"],
+        )?;
+        if !untracked.status.success() {
+            return Err(git_failure(untracked, "git ls-files"));
+        }
+        for raw_path in untracked
+            .stdout
+            .split(|byte| *byte == 0)
+            .filter(|path| !path.is_empty())
+        {
+            let relative = std::str::from_utf8(raw_path).map_err(|error| {
+                BackendError::new(
+                    BackendErrorCode::Io,
+                    format!("Git returned a non-UTF8 untracked path: {error}"),
+                )
+            })?;
+            let source_file = source.join(relative);
+            if !source_file.is_file() {
+                continue;
+            }
+            let target_file = target.join(relative);
+            if let Some(parent) = target_file.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::copy(source_file, target_file)?;
+        }
+        Ok(())
+    }
+
     pub fn repository_key(self, path: &str) -> Result<String, BackendError> {
         let remote = self.text(Path::new(path), &["remote", "get-url", "origin"])?;
         parse_github_repository_key(&remote).ok_or_else(|| {

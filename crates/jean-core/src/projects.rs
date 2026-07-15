@@ -3,7 +3,7 @@ use crate::{
     generate_branch_name_from_linear_issue, generate_branch_name_from_security_alert,
     read_jean_config, ActiveWorktreeInfo, BackendError, BackendErrorCode, ContextService,
     EventSink, GitHubService, GitService, PersistenceService, ProjectsSnapshot, ScriptService,
-    WorktreeContexts,
+    SessionService, WorktreeContexts,
 };
 use serde_json::{Map, Value};
 use std::collections::HashSet;
@@ -482,6 +482,191 @@ impl ProjectService {
         let project = self.project(project_id)?;
         let path = Path::new(string(&project, "path").ok_or_else(|| invalid("project.path"))?);
         self.git.project_branches(path.to_string_lossy().as_ref())
+    }
+
+    pub fn resolve_worktree_name(
+        &self,
+        project_id: &str,
+        requested_name: &str,
+    ) -> Result<String, BackendError> {
+        let snapshot = self.persistence.load_projects()?;
+        let project = snapshot
+            .projects
+            .iter()
+            .find(|project| string(project, "id") == Some(project_id))
+            .ok_or_else(|| not_found("Project", project_id))?;
+        let project_path = string(project, "path").ok_or_else(|| invalid("project.path"))?;
+        let project_name = string(project, "name").ok_or_else(|| invalid("project.name"))?;
+        let root = string(project, "worktrees_dir")
+            .map(Path::new)
+            .map(ToOwned::to_owned)
+            .or_else(|| dirs::home_dir().map(|home| home.join("jean")))
+            .ok_or_else(|| BackendError::new(BackendErrorCode::Io, "Home directory not found"))?
+            .join(project_name);
+        let conflicts = root.join(sanitize_folder_name(requested_name)).exists()
+            || snapshot.worktrees.iter().any(|worktree| {
+                string(worktree, "project_id") == Some(project_id)
+                    && string(worktree, "name") == Some(requested_name)
+            })
+            || self.git.branch_exists(project_path, requested_name);
+        Ok(if conflicts {
+            unique_suffix_name(
+                requested_name,
+                project_path,
+                project_id,
+                &snapshot,
+                self.git,
+            )
+        } else {
+            requested_name.to_string()
+        })
+    }
+
+    pub fn fork_session_to_worktree(
+        &self,
+        source_worktree_id: &str,
+        source_session_id: &str,
+        events: &dyn EventSink,
+    ) -> Result<Value, BackendError> {
+        let snapshot = self.persistence.load_projects()?;
+        let source = snapshot
+            .worktrees
+            .iter()
+            .find(|worktree| string(worktree, "id") == Some(source_worktree_id))
+            .cloned()
+            .ok_or_else(|| not_found("Worktree", source_worktree_id))?;
+        let project_id = string(&source, "project_id").ok_or_else(|| invalid("project_id"))?;
+        let project = snapshot
+            .projects
+            .iter()
+            .find(|project| string(project, "id") == Some(project_id))
+            .cloned()
+            .ok_or_else(|| not_found("Project", project_id))?;
+        let source_path = string(&source, "path").ok_or_else(|| invalid("worktree.path"))?;
+        if !Path::new(source_path).exists() {
+            return Err(invalid(format!(
+                "Source worktree path does not exist: {source_path}"
+            )));
+        }
+        let sessions = SessionService::new(self.persistence.clone());
+        sessions.get(source_worktree_id, source_session_id)?;
+        let source_head = self.git.head_commit(source_path)?;
+        if source_head.is_empty() {
+            return Err(invalid(
+                "Cannot fork session: source worktree has no HEAD commit",
+            ));
+        }
+        let source_name = string(&source, "name").unwrap_or("session");
+        let base_name = sanitize_folder_name(&format!("fork-{source_name}"));
+        let base_name = if base_name == "fork-" {
+            "fork-session"
+        } else {
+            &base_name
+        };
+        let project_path = string(&project, "path").ok_or_else(|| invalid("project.path"))?;
+        let name = unique_suffix_name(base_name, project_path, project_id, &snapshot, self.git);
+        let project_name = string(&project, "name").ok_or_else(|| invalid("project.name"))?;
+        let root = string(&project, "worktrees_dir")
+            .map(Path::new)
+            .map(ToOwned::to_owned)
+            .or_else(|| dirs::home_dir().map(|home| home.join("jean")))
+            .ok_or_else(|| BackendError::new(BackendErrorCode::Io, "Home directory not found"))?
+            .join(project_name);
+        let path = root
+            .join(sanitize_folder_name(&name))
+            .to_string_lossy()
+            .into_owned();
+        if Path::new(&path).exists() {
+            return Err(invalid(format!(
+                "Cannot fork session: target worktree path already exists: {path}"
+            )));
+        }
+
+        self.git
+            .create_worktree(project_path, &path, &name, &source_head)?;
+        let result = (|| {
+            self.git.copy_dirty_worktree_state(source_path, &path)?;
+            let created_at = now();
+            let worktree_id = Uuid::new_v4().to_string();
+            let session = sessions.fork_session(
+                source_worktree_id,
+                source_session_id,
+                &worktree_id,
+                created_at,
+            )?;
+            let mut worktree = source.clone();
+            let object = object_mut(&mut worktree)?;
+            object.insert("id".to_string(), Value::String(worktree_id.clone()));
+            object.insert("name".to_string(), Value::String(name.clone()));
+            object.insert("path".to_string(), Value::String(path.clone()));
+            object.insert("branch".to_string(), Value::String(name.clone()));
+            object.insert("created_at".to_string(), Value::from(created_at));
+            object.insert("setup_output".to_string(), Value::Null);
+            object.insert("setup_script".to_string(), Value::Null);
+            object.insert("setup_success".to_string(), Value::Null);
+            object.insert(
+                "session_type".to_string(),
+                Value::String("worktree".to_string()),
+            );
+            for field in [
+                "cached_pr_status",
+                "cached_check_status",
+                "cached_behind_count",
+                "cached_ahead_count",
+                "cached_status_at",
+                "cached_uncommitted_added",
+                "cached_uncommitted_removed",
+                "cached_branch_diff_added",
+                "cached_branch_diff_removed",
+                "cached_base_branch_ahead_count",
+                "cached_base_branch_behind_count",
+                "cached_worktree_ahead_count",
+                "cached_unpushed_count",
+                "archived_at",
+            ] {
+                object.insert(field.to_string(), Value::Null);
+            }
+            let order = snapshot
+                .worktrees
+                .iter()
+                .filter(|worktree| string(worktree, "project_id") == Some(project_id))
+                .filter_map(|worktree| worktree.get("order").and_then(Value::as_u64))
+                .max()
+                .unwrap_or(0)
+                + 1;
+            object.insert("order".to_string(), Value::from(order));
+            object.insert("origin".to_string(), Value::String("manual".to_string()));
+            object.insert("last_opened_at".to_string(), Value::from(created_at));
+
+            if let Err(error) = self.persistence.update_projects(|projects| {
+                projects.worktrees.push(worktree.clone());
+                Ok(())
+            }) {
+                let _ = self.persistence.delete_session_index(&worktree_id);
+                if let Some(session_id) = string(&session, "id") {
+                    let _ = self.persistence.delete_session_data(session_id);
+                }
+                return Err(error);
+            }
+            let _ = events.emit_json(
+                "worktree:created",
+                serde_json::json!({"worktree":worktree,"autoOpenInJean":false}),
+            );
+            let _ = events.emit_json(
+                "worktrees:changed",
+                serde_json::json!({"project_id":project_id}),
+            );
+            let _ = events.emit_json(
+                "cache:invalidate",
+                serde_json::json!({"keys":["sessions","projects"]}),
+            );
+            Ok(serde_json::json!({"worktree":worktree,"session":session}))
+        })();
+        if result.is_err() {
+            let _ = self.git.remove_worktree(project_path, &path);
+            let _ = self.git.delete_branch(project_path, &name);
+        }
+        result
     }
 
     pub fn prepare_checkout_pr(
@@ -2687,6 +2872,80 @@ mod tests {
         };
         assert_eq!(restored["id"], created["id"]);
         assert!(restored.get("archived_at").is_none());
+    }
+
+    #[test]
+    fn fork_session_to_worktree_copies_git_and_session_state_in_core() {
+        let temp = tempfile::tempdir().unwrap();
+        let repo = temp.path().join("repo");
+        fs::create_dir(&repo).unwrap();
+        git_init_with_commit(&repo);
+        fs::write(repo.join("README.md"), "changed\n").unwrap();
+        fs::create_dir(repo.join("notes")).unwrap();
+        fs::write(repo.join("notes/scratch.md"), "scratch\n").unwrap();
+        let service = service(&temp);
+        service
+            .persistence
+            .save_projects(&ProjectsSnapshot {
+                projects: vec![serde_json::json!({
+                    "id":"p1","name":"repo","path":repo,
+                    "default_branch":"main","worktrees_dir":temp.path().join("worktrees")
+                })],
+                worktrees: vec![serde_json::json!({
+                    "id":"w1","project_id":"p1","name":"main","path":repo,
+                    "branch":"main","base_branch":"main","session_type":"worktree",
+                    "labels":[{"name":"keep"}],"order":0
+                })],
+                extra: Map::new(),
+            })
+            .unwrap();
+        let sessions = SessionService::new(service.persistence.clone());
+        let source_session = sessions
+            .create(
+                "w1",
+                Some("Source"),
+                Some("codex"),
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        let events = RecordingEvents::default();
+
+        let response = service
+            .fork_session_to_worktree("w1", string(&source_session, "id").unwrap(), &events)
+            .unwrap();
+        let worktree = &response["worktree"];
+        let forked_path = Path::new(worktree["path"].as_str().unwrap());
+        assert!(worktree["name"].as_str().unwrap().starts_with("fork-main-"));
+        assert_eq!(worktree["origin"], "manual");
+        assert_eq!(worktree["labels"][0]["name"], "keep");
+        assert_eq!(
+            fs::read_to_string(forked_path.join("README.md")).unwrap(),
+            "changed\n"
+        );
+        assert_eq!(
+            fs::read_to_string(forked_path.join("notes/scratch.md")).unwrap(),
+            "scratch\n"
+        );
+        assert_eq!(response["session"]["name"], "Fork of Source");
+        assert_eq!(
+            response["session"]["worktree_id"],
+            response["worktree"]["id"]
+        );
+        let event_names = events
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            event_names,
+            ["worktree:created", "worktrees:changed", "cache:invalidate"]
+        );
     }
 
     #[test]

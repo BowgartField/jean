@@ -239,6 +239,38 @@ impl PersistenceService {
         self.save_json(self.session_metadata_path(session_id)?, metadata)
     }
 
+    pub fn copy_session_data_files(
+        &self,
+        source_session_id: &str,
+        target_session_id: &str,
+    ) -> Result<(), BackendError> {
+        let source_metadata = self.session_metadata_path(source_session_id)?;
+        let source = source_metadata.parent().ok_or_else(|| {
+            BackendError::new(
+                BackendErrorCode::Internal,
+                "Invalid source session data path",
+            )
+        })?;
+        if !source.exists() {
+            return Ok(());
+        }
+        let target_metadata = self.session_metadata_path(target_session_id)?;
+        let target = target_metadata.parent().ok_or_else(|| {
+            BackendError::new(
+                BackendErrorCode::Internal,
+                "Invalid target session data path",
+            )
+        })?;
+        fs::create_dir_all(target)?;
+        for entry in fs::read_dir(source)? {
+            let entry = entry?;
+            if entry.file_type()?.is_file() {
+                fs::copy(entry.path(), target.join(entry.file_name()))?;
+            }
+        }
+        Ok(())
+    }
+
     pub fn update_session_metadata<T>(
         &self,
         session_id: &str,

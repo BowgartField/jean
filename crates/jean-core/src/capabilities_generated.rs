@@ -398,11 +398,6 @@ pub const UNAVAILABLE_CAPABILITIES: &[CommandCapability] = &[
         available: false,
     },
     CommandCapability {
-        command: "fork_session_to_worktree",
-        class: CapabilityClass::AdapterBacked,
-        available: false,
-    },
-    CommandCapability {
         command: "generate_context_from_session",
         class: CapabilityClass::AdapterBacked,
         available: false,

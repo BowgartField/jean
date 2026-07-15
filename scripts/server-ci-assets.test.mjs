@@ -114,6 +114,7 @@ test('desktop project commands delegate simple business operations to jean-core'
     'get_worktree_changes',
     'get_worktree_diff',
     'create_worktree',
+    'fork_session_to_worktree',
     'create_base_session',
     'archive_worktree',
     'unarchive_worktree',
@@ -162,6 +163,12 @@ test('desktop project commands delegate simple business operations to jean-core'
   assert.match(createWorktree, /prepare_worktree/)
   assert.match(createWorktree, /run_worktree_task/)
   assert.doesNotMatch(createWorktree, /git::create_worktree|format_issue_context_markdown|save_projects_data/)
+  const forkSession = commands.slice(
+    commands.indexOf('pub async fn fork_session_to_worktree'),
+    commands.indexOf('pub async fn create_worktree_from_existing_branch')
+  )
+  assert.match(forkSession, /\.fork_session_to_worktree\(/)
+  assert.doesNotMatch(forkSession, /git::create_worktree|copy_dirty_worktree_state|save_projects_data/)
   const checkoutPr = commands.slice(
     commands.indexOf('pub async fn checkout_pr'),
     commands.indexOf('pub async fn delete_worktree')

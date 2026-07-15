@@ -273,6 +273,17 @@ impl CommandDispatcher for HeadlessDispatcher {
                 std::thread::spawn(move || service.run_worktree_task(task, events.as_ref()));
                 Ok(pending)
             }
+            "fork_session_to_worktree" => {
+                let source_worktree_id =
+                    string_field(&args, "sourceWorktreeId", "source_worktree_id")?;
+                let source_session_id =
+                    string_field(&args, "sourceSessionId", "source_session_id")?;
+                projects.fork_session_to_worktree(
+                    source_worktree_id,
+                    source_session_id,
+                    self.context.events.as_ref(),
+                )
+            }
             "create_worktree_from_existing_branch" => {
                 let project_id = string_field(&args, "projectId", "project_id")?.to_string();
                 let branch_name = string_field(&args, "branchName", "branch_name")?.to_string();
@@ -1633,6 +1644,27 @@ mod tests {
         assert_eq!(completed["issue_number"], 77);
         assert_eq!(completed["origin"], "manual");
         assert!(std::path::Path::new(completed["path"].as_str().unwrap()).exists());
+        let source_session = dispatcher
+            .dispatch(
+                "create_session",
+                serde_json::json!({
+                    "worktreeId":pending_id,"name":"Server fork","backend":"codex"
+                }),
+            )
+            .await
+            .unwrap();
+        let forked = dispatcher
+            .dispatch(
+                "fork_session_to_worktree",
+                serde_json::json!({
+                    "sourceWorktreeId":pending_id,
+                    "sourceSessionId":source_session["id"]
+                }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(forked["session"]["name"], "Fork of Server fork");
+        assert!(std::path::Path::new(forked["worktree"]["path"].as_str().unwrap()).exists());
     }
 
     #[tokio::test]

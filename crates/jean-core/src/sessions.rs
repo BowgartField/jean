@@ -14,6 +14,109 @@ impl SessionService {
         Self { persistence }
     }
 
+    pub fn fork_session(
+        &self,
+        source_worktree_id: &str,
+        source_session_id: &str,
+        target_worktree_id: &str,
+        created_at: u64,
+    ) -> Result<Value, BackendError> {
+        let source_index = self
+            .persistence
+            .load_session_index(source_worktree_id)?
+            .ok_or_else(|| not_found(source_session_id))?;
+        let source_entry = source_index
+            .get("sessions")
+            .and_then(Value::as_array)
+            .and_then(|sessions| {
+                sessions.iter().find(|entry| {
+                    entry.get("id").and_then(Value::as_str) == Some(source_session_id)
+                })
+            })
+            .cloned()
+            .ok_or_else(|| not_found(source_session_id))?;
+        let mut metadata = self
+            .persistence
+            .load_session_metadata(source_session_id)?
+            .unwrap_or(source_entry);
+        let id = Uuid::new_v4().to_string();
+        let source_name = metadata
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or("Session");
+        let name = forked_session_name(source_name);
+        let object = object_mut(&mut metadata)?;
+        object.insert("id".to_string(), Value::String(id.clone()));
+        object.insert(
+            "worktree_id".to_string(),
+            Value::String(target_worktree_id.to_string()),
+        );
+        object.insert("name".to_string(), Value::String(name.clone()));
+        object.insert("order".to_string(), Value::from(0));
+        object.insert("created_at".to_string(), Value::from(created_at));
+        object.insert("updated_at".to_string(), Value::from(created_at));
+        object.insert("last_opened_at".to_string(), Value::from(created_at));
+        object.insert("session_naming_completed".to_string(), Value::Bool(false));
+        for field in [
+            "claude_session_id",
+            "codex_thread_id",
+            "codex_goal",
+            "opencode_session_id",
+            "cursor_chat_id",
+            "pi_session_id",
+            "commandcode_session_id",
+            "grok_session_id",
+            "waiting_for_input_type",
+            "denied_message_context",
+            "scheduled_wakeup",
+            "last_run_status",
+            "last_run_execution_mode",
+            "last_run_started_at",
+            "archived_at",
+            "archived_by_base_close",
+        ] {
+            object.insert(field.to_string(), Value::Null);
+        }
+        for field in [
+            "pending_permission_denials",
+            "pending_codex_permission_requests",
+            "pending_codex_command_approval_requests",
+            "pending_codex_user_input_requests",
+            "pending_codex_mcp_elicitation_requests",
+            "pending_codex_dynamic_tool_call_requests",
+            "queued_messages",
+        ] {
+            object.insert(field.to_string(), Value::Array(Vec::new()));
+        }
+        object.insert("is_reviewing".to_string(), Value::Bool(false));
+        object.insert("waiting_for_input".to_string(), Value::Bool(false));
+
+        let persist = (|| {
+            self.persistence
+                .copy_session_data_files(source_session_id, &id)?;
+            self.persistence.save_session_metadata(&id, &metadata)?;
+            self.persistence.save_session_index(
+                target_worktree_id,
+                &serde_json::json!({
+                    "worktree_id":target_worktree_id,
+                    "active_session_id":id,
+                    "sessions":[{
+                        "id":id,
+                        "name":name,
+                        "order":0,
+                        "message_count":metadata.get("messages").and_then(Value::as_array).map_or(0, Vec::len),
+                    }]
+                }),
+            )
+        })();
+        if let Err(error) = persist {
+            let _ = self.persistence.delete_session_index(target_worktree_id);
+            let _ = self.persistence.delete_session_data(&id);
+            return Err(error);
+        }
+        Ok(session_from_metadata(metadata))
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn create(
         &self,
@@ -547,6 +650,17 @@ fn resume_id_field(backend: &str) -> &'static str {
     }
 }
 
+fn forked_session_name(source_name: &str) -> String {
+    let name = source_name.trim();
+    if name.is_empty() {
+        "Forked Session".to_string()
+    } else if name.starts_with("Fork of ") {
+        name.to_string()
+    } else {
+        format!("Fork of {name}")
+    }
+}
+
 fn insert_optional_string(object: &mut Map<String, Value>, key: &str, value: Option<&str>) {
     if let Some(value) = value {
         object.insert(key.to_string(), Value::String(value.to_string()));
@@ -622,5 +736,76 @@ mod tests {
             .is_empty());
         service.archive("w1", id, false).unwrap();
         assert_eq!(service.close("w1", id).unwrap(), None);
+    }
+
+    #[test]
+    fn fork_session_copies_history_and_clears_backend_runtime_state() {
+        let temp = tempfile::tempdir().unwrap();
+        let service = service(&temp);
+        let source = service
+            .create(
+                "w1",
+                Some("Build auth"),
+                Some("codex"),
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        let source_id = source["id"].as_str().unwrap();
+        service
+            .persistence
+            .update_session_metadata(source_id, serde_json::json!({}), |metadata| {
+                let object = object_mut(metadata)?;
+                object.insert(
+                    "codex_thread_id".to_string(),
+                    Value::String("thread-1".to_string()),
+                );
+                object.insert("waiting_for_input".to_string(), Value::Bool(true));
+                object.insert(
+                    "queued_messages".to_string(),
+                    serde_json::json!([{"message":"later"}]),
+                );
+                object.insert(
+                    "messages".to_string(),
+                    serde_json::json!([{"role":"user","content":"hello"}]),
+                );
+                Ok(())
+            })
+            .unwrap();
+        std::fs::write(
+            service
+                .persistence
+                .run_log_path(source_id, "run-1")
+                .unwrap(),
+            "{\"type\":\"result\"}\n",
+        )
+        .unwrap();
+
+        let forked = service.fork_session("w1", source_id, "w2", 1234).unwrap();
+        let forked_id = forked["id"].as_str().unwrap();
+        assert_ne!(forked_id, source_id);
+        assert_eq!(forked["name"], "Fork of Build auth");
+        assert_eq!(forked["worktree_id"], "w2");
+        assert_eq!(forked["created_at"], 1234);
+        assert!(forked["codex_thread_id"].is_null());
+        assert_eq!(forked["waiting_for_input"], false);
+        assert!(forked["queued_messages"].as_array().unwrap().is_empty());
+        assert_eq!(forked["messages"].as_array().unwrap().len(), 1);
+        assert!(service
+            .persistence
+            .run_log_path(forked_id, "run-1")
+            .unwrap()
+            .exists());
+        assert_eq!(
+            service
+                .persistence
+                .load_session_index("w2")
+                .unwrap()
+                .unwrap()["active_session_id"],
+            forked_id
+        );
     }
 }

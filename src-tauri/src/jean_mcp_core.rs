@@ -858,35 +858,16 @@ fn resolve_non_conflicting_worktree_name(
     project_id: &str,
     requested_name: &str,
 ) -> Result<String, ToolError> {
-    let data = crate::projects::storage::load_projects_data(app)
-        .map_err(|e| ToolError::internal(format!("load_projects_data: {e}")))?;
-    let project = data
-        .find_project(project_id)
-        .ok_or_else(|| ToolError::invalid_params(format!("Unknown projectId: {project_id}")))?;
-    let worktrees_dir = crate::projects::storage::get_project_worktrees_dir(
-        &project.name,
-        project.worktrees_dir.as_deref(),
-    )
-    .map_err(ToolError::internal)?;
-    let folder_name = crate::projects::sanitize_folder_name(requested_name);
-    let path_exists = worktrees_dir.join(folder_name).exists();
-    let name_exists = data.worktree_name_exists(project_id, requested_name);
-    let branch_exists = crate::projects::git::branch_exists(&project.path, requested_name);
-
-    if path_exists || name_exists || branch_exists {
-        let resolved = crate::projects::generate_unique_suffix_name(
-            requested_name,
-            &project.path,
-            project_id,
-            Some(&data),
-        );
+    let resolved = crate::backend_runtime::project_service(app)
+        .map_err(ToolError::internal)?
+        .resolve_worktree_name(project_id, requested_name)
+        .map_err(|error| ToolError::internal(error.to_string()))?;
+    if resolved != requested_name {
         log::info!(
-            "Jean MCP resolved worktree name conflict: requested={requested_name}, resolved={resolved}, path_exists={path_exists}, name_exists={name_exists}, branch_exists={branch_exists}"
+            "Jean MCP resolved worktree name conflict: requested={requested_name}, resolved={resolved}"
         );
-        Ok(resolved)
-    } else {
-        Ok(requested_name.to_string())
     }
+    Ok(resolved)
 }
 
 /// Validate the mutually-exclusive context inputs for create_worktree.
