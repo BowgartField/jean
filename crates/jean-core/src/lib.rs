@@ -39,7 +39,8 @@ pub use git_status::{ActiveWorktreeInfo, GitBranchStatus};
 pub use paths::{AppPaths, HeadlessAppPaths, ResolvedAppPaths};
 pub use persistence::{PersistenceService, ProjectsSnapshot};
 pub use projects::{
-    BaseSessionCloseMode, ExistingBranchCreationTask, ExistingBranchWorktreeInput, ProjectService,
+    BaseSessionCloseMode, ExistingBranchCreationTask, ExistingBranchWorktreeInput, PrCheckout,
+    ProjectService, WorktreeCreationInput, WorktreeCreationTask,
 };
 pub use runtime::{BackendContext, BackendState, ResourceRegistry};
 pub use sessions::SessionService;

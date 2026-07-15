@@ -133,10 +133,18 @@ pub fn project_service(app: &AppHandle) -> Result<jean_core::ProjectService, Str
         git_service(),
         pr_diff_loader,
     );
+    let app_for_checkout = app.clone();
+    let pr_checkout: jean_core::PrCheckout = Arc::new(move |worktree_path, number, branch| {
+        let gh = crate::gh_cli::config::resolve_gh_binary(&app_for_checkout);
+        crate::projects::git::gh_pr_checkout(worktree_path, number, branch, &gh)
+            .map(|_| ())
+            .map_err(|error| BackendError::new(jean_core::BackendErrorCode::Io, error))
+    });
     Ok(jean_core::ProjectService::with_services(
         context.persistence,
         git_service(),
         script_service(),
         contexts,
+        pr_checkout,
     ))
 }

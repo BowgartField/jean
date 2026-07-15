@@ -234,17 +234,44 @@ impl CommandDispatcher for HeadlessDispatcher {
             }
             "list_archived_worktrees" => Ok(Value::Array(projects.list_archived_worktrees()?)),
             "create_worktree" => {
-                let project_id = string_field(&args, "projectId", "project_id")?;
+                let project_id = string_field(&args, "projectId", "project_id")?.to_string();
                 let base_branch = optional_string_field(&args, "baseBranch", "base_branch")?;
                 let custom_name = optional_string_field(&args, "customName", "custom_name")?;
                 let origin = optional_string_field(&args, "origin", "origin")?;
-                projects.create_worktree(
-                    project_id,
-                    base_branch.as_deref(),
-                    custom_name.as_deref(),
-                    origin.as_deref(),
+                let contexts = crate::WorktreeContexts {
+                    issue: optional_typed_field(&args, "issueContext", "issue_context")?,
+                    pull_request: optional_typed_field(&args, "prContext", "pr_context")?,
+                    security: optional_typed_field(&args, "securityContext", "security_context")?,
+                    advisory: optional_typed_field(&args, "advisoryContext", "advisory_context")?,
+                    linear: optional_typed_field(&args, "linearContext", "linear_context")?,
+                };
+                let auto_open_in_jean =
+                    optional_bool_field(&args, "autoOpenInJean", "auto_open_in_jean")?
+                        .unwrap_or(true);
+                let auto_pull_base_branch = contexts.pull_request.is_none()
+                    && self
+                        .context
+                        .persistence
+                        .load_preferences()?
+                        .get("auto_pull_base_branch")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false);
+                let (pending, task) = projects.prepare_worktree(
+                    crate::WorktreeCreationInput {
+                        project_id,
+                        base_branch,
+                        contexts,
+                        custom_name,
+                        auto_open_in_jean,
+                        origin,
+                        auto_pull_base_branch,
+                    },
                     self.context.events.as_ref(),
-                )
+                )?;
+                let service = projects.clone();
+                let events = self.context.events.clone();
+                std::thread::spawn(move || service.run_worktree_task(task, events.as_ref()));
+                Ok(pending)
             }
             "create_worktree_from_existing_branch" => {
                 let project_id = string_field(&args, "projectId", "project_id")?.to_string();
@@ -1503,6 +1530,84 @@ mod tests {
             )
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn headless_dispatcher_runs_the_shared_contextual_worktree_pipeline() {
+        let context = test_context();
+        let root = tempfile::tempdir().unwrap();
+        let repo = root.path().join("repo");
+        std::fs::create_dir(&repo).unwrap();
+        for args in [
+            vec!["init", "-b", "main"],
+            vec!["config", "user.name", "Jean Server Tests"],
+            vec!["config", "user.email", "jean-server@example.test"],
+        ] {
+            assert!(std::process::Command::new("git")
+                .current_dir(&repo)
+                .args(args)
+                .output()
+                .unwrap()
+                .status
+                .success());
+        }
+        std::fs::write(repo.join("README.md"), "server").unwrap();
+        for args in [vec!["add", "README.md"], vec!["commit", "-m", "initial"]] {
+            assert!(std::process::Command::new("git")
+                .current_dir(&repo)
+                .args(args)
+                .output()
+                .unwrap()
+                .status
+                .success());
+        }
+        context
+            .persistence
+            .save_projects(&crate::ProjectsSnapshot {
+                projects: vec![serde_json::json!({
+                    "id":"p1","name":"Repo","path":repo,"default_branch":"main",
+                    "worktrees_dir":root.path().join("worktrees")
+                })],
+                worktrees: vec![],
+                extra: serde_json::Map::new(),
+            })
+            .unwrap();
+        let dispatcher = HeadlessDispatcher::new(context);
+        let pending = dispatcher
+            .dispatch(
+                "create_worktree",
+                serde_json::json!({
+                    "projectId":"p1",
+                    "baseBranch":"main",
+                    "issueContext":{
+                        "number":77,"title":"Shared server pipeline","body":null,"comments":[]
+                    },
+                    "customName":"feature/server-shared",
+                    "autoOpenInJean":false,
+                    "origin":"manual"
+                }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(pending["issue_number"], 77);
+        assert_eq!(pending["order"], 0);
+        let pending_id = pending["id"].as_str().unwrap();
+        let mut completed = None;
+        for _ in 0..100 {
+            if let Ok(worktree) = dispatcher
+                .dispatch("get_worktree", serde_json::json!({"worktreeId":pending_id}))
+                .await
+            {
+                completed = Some(worktree);
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let completed = completed.expect("shared worktree task completes");
+        assert_eq!(completed["branch"], "feature/server-shared");
+        assert_eq!(completed["issue_number"], 77);
+        assert_eq!(completed["origin"], "manual");
+        assert!(std::path::Path::new(completed["path"].as_str().unwrap()).exists());
     }
 
     #[tokio::test]

@@ -1,4 +1,6 @@
 use crate::{
+    generate_branch_name_from_advisory, generate_branch_name_from_issue,
+    generate_branch_name_from_linear_issue, generate_branch_name_from_security_alert,
     read_jean_config, ActiveWorktreeInfo, BackendError, BackendErrorCode, ContextService,
     EventSink, GitService, PersistenceService, ProjectsSnapshot, ScriptService, WorktreeContexts,
 };
@@ -15,7 +17,11 @@ pub struct ProjectService {
     git: GitService,
     scripts: ScriptService,
     contexts: ContextService,
+    pr_checkout: PrCheckout,
 }
+
+pub type PrCheckout =
+    Arc<dyn Fn(&str, u32, Option<&str>) -> Result<(), BackendError> + Send + Sync + 'static>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BaseSessionCloseMode {
@@ -46,6 +52,44 @@ pub struct ExistingBranchCreationTask {
     auto_open_in_jean: bool,
 }
 
+#[derive(Debug, Clone)]
+pub struct WorktreeCreationInput {
+    pub project_id: String,
+    pub base_branch: Option<String>,
+    pub contexts: WorktreeContexts,
+    pub custom_name: Option<String>,
+    pub auto_open_in_jean: bool,
+    pub origin: Option<String>,
+    pub auto_pull_base_branch: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct WorktreeCreationTask {
+    id: String,
+    project_id: String,
+    project_name: String,
+    project_path: String,
+    worktrees_root: String,
+    name: String,
+    path: String,
+    base_branch: String,
+    created_at: u64,
+    contexts: WorktreeContexts,
+    auto_open_in_jean: bool,
+    origin: Option<String>,
+    auto_pull_base_branch: bool,
+}
+
+impl WorktreeCreationTask {
+    pub fn project_path(&self) -> &str {
+        &self.project_path
+    }
+
+    pub fn worktrees_root(&self) -> &str {
+        &self.worktrees_root
+    }
+}
+
 impl ProjectService {
     pub fn new(persistence: Arc<PersistenceService>) -> Self {
         let git = GitService::default();
@@ -54,6 +98,7 @@ impl ProjectService {
             persistence,
             git,
             scripts: ScriptService::default(),
+            pr_checkout: Arc::new(native_pr_checkout),
         }
     }
 
@@ -63,6 +108,7 @@ impl ProjectService {
             persistence,
             git,
             scripts: ScriptService::default(),
+            pr_checkout: Arc::new(native_pr_checkout),
         }
     }
 
@@ -71,12 +117,14 @@ impl ProjectService {
         git: GitService,
         scripts: ScriptService,
         contexts: ContextService,
+        pr_checkout: PrCheckout,
     ) -> Self {
         Self {
             persistence,
             git,
             scripts,
             contexts,
+            pr_checkout,
         }
     }
 
@@ -429,147 +477,392 @@ impl ProjectService {
         origin: Option<&str>,
         events: &dyn EventSink,
     ) -> Result<Value, BackendError> {
-        let project = self.project(project_id)?;
-        let project_path = string(&project, "path").ok_or_else(|| invalid("project.path"))?;
-        let project_name = string(&project, "name").ok_or_else(|| invalid("project.name"))?;
-        let base = base_branch
+        let (_, task) = self.prepare_worktree(
+            WorktreeCreationInput {
+                project_id: project_id.to_string(),
+                base_branch: base_branch.map(ToOwned::to_owned),
+                contexts: WorktreeContexts::default(),
+                custom_name: custom_name.map(ToOwned::to_owned),
+                auto_open_in_jean: true,
+                origin: origin.map(ToOwned::to_owned),
+                auto_pull_base_branch: false,
+            },
+            events,
+        )?;
+        self.complete_worktree(task, events)
+    }
+
+    pub fn prepare_worktree(
+        &self,
+        input: WorktreeCreationInput,
+        events: &dyn EventSink,
+    ) -> Result<(Value, WorktreeCreationTask), BackendError> {
+        validate_origin(input.origin.as_deref())?;
+        let project = self.project(&input.project_id)?;
+        let project_path = string(&project, "path")
+            .ok_or_else(|| invalid("project.path"))?
+            .to_string();
+        let project_name = string(&project, "name")
+            .ok_or_else(|| invalid("project.name"))?
+            .to_string();
+        let preferred_base = input
+            .base_branch
+            .as_deref()
             .or_else(|| string(&project, "default_branch"))
             .unwrap_or("main");
-        let name = custom_name
-            .map(sanitize_branch_name)
-            .filter(|name| !name.is_empty())
-            .unwrap_or_else(|| format!("worktree-{}", &Uuid::new_v4().simple().to_string()[..8]));
-        if self
-            .persistence
-            .load_projects()?
-            .worktrees
-            .iter()
-            .any(|worktree| {
-                string(worktree, "project_id") == Some(project_id)
-                    && string(worktree, "name") == Some(name.as_str())
-            })
-        {
-            return Err(BackendError::new(
-                BackendErrorCode::InvalidArgument,
-                format!("Worktree already exists: {name}"),
-            ));
-        }
+        let base_branch = self.git.valid_base_branch(&project_path, preferred_base)?;
+        let snapshot = self.persistence.load_projects()?;
+        let name = worktree_name(&input, &snapshot, &project_path, self.git);
+        let name = if input.custom_name.is_some() {
+            name
+        } else {
+            unique_context_name(name, &input.project_id, &snapshot)
+        };
         let root = string(&project, "worktrees_dir")
             .map(Path::new)
             .map(ToOwned::to_owned)
             .or_else(|| dirs::home_dir().map(|home| home.join("jean")))
-            .ok_or_else(|| BackendError::new(BackendErrorCode::Io, "Home directory not found"))?;
-        let path = root.join(project_name).join(name.replace('/', "-"));
-        if path.exists() {
-            return Err(BackendError::new(
-                BackendErrorCode::InvalidArgument,
-                format!("Worktree path already exists: {}", path.display()),
-            ));
-        }
+            .ok_or_else(|| BackendError::new(BackendErrorCode::Io, "Home directory not found"))?
+            .join(&project_name);
+        let path = root
+            .join(sanitize_folder_name(&name))
+            .to_string_lossy()
+            .into_owned();
         let id = Uuid::new_v4().to_string();
-        let path_string = path.to_string_lossy().into_owned();
+        let created_at = now();
         events.emit_json(
             "worktree:creating",
             serde_json::json!({
-                "id": id,
-                "projectId": project_id,
-                "name": name,
-                "path": path_string,
-                "branch": name,
-                "prNumber": Value::Null,
-                "issueNumber": Value::Null,
-                "securityAlertNumber": Value::Null,
-                "advisoryGhsaId": Value::Null,
-                "origin": origin,
-                "autoOpenInJean": true,
+                "id":id,
+                "projectId":input.project_id,
+                "name":name,
+                "path":path,
+                "branch":name,
+                "prNumber":input.contexts.pull_request.as_ref().map(|context| context.number),
+                "issueNumber":input.contexts.issue.as_ref().map(|context| context.number),
+                "securityAlertNumber":input.contexts.security.as_ref().map(|context| context.number),
+                "advisoryGhsaId":input.contexts.advisory.as_ref().map(|context| context.ghsa_id.clone()),
+                "origin":input.origin,
+                "autoOpenInJean":input.auto_open_in_jean,
             }),
         )?;
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let branch_exists = self.git.branch_exists(project_path, &name);
-        if branch_exists {
-            self.git
-                .create_worktree_from_existing_branch(project_path, &path_string, &name)?;
+        let pending = new_worktree_value(
+            &id,
+            &input.project_id,
+            &name,
+            &path,
+            &name,
+            &base_branch,
+            created_at,
+            0,
+            &input.contexts,
+            input.origin.as_deref(),
+            None,
+        );
+        let task = WorktreeCreationTask {
+            id,
+            project_id: input.project_id,
+            project_name,
+            project_path,
+            worktrees_root: root.to_string_lossy().into_owned(),
+            name,
+            path,
+            base_branch,
+            created_at,
+            contexts: input.contexts,
+            auto_open_in_jean: input.auto_open_in_jean,
+            origin: input.origin,
+            auto_pull_base_branch: input.auto_pull_base_branch,
+        };
+        Ok((pending, task))
+    }
+
+    pub fn complete_worktree(
+        &self,
+        mut task: WorktreeCreationTask,
+        events: &dyn EventSink,
+    ) -> Result<Value, BackendError> {
+        let has_local_base = self
+            .git
+            .branch_exists(&task.project_path, &task.base_branch);
+        let effective_base = if task.auto_pull_base_branch {
+            match self.git.fetch(&task.project_path, &task.base_branch, None) {
+                Ok(()) => format!("origin/{}", task.base_branch),
+                Err(error) => {
+                    log::warn!("Failed to fetch base branch {}: {error}", task.base_branch);
+                    if has_local_base {
+                        task.base_branch.clone()
+                    } else {
+                        format!("origin/{}", task.base_branch)
+                    }
+                }
+            }
+        } else if has_local_base {
+            task.base_branch.clone()
         } else {
+            format!("origin/{}", task.base_branch)
+        };
+
+        if task.origin.as_deref() == Some("auto_fix") {
+            let mut resolved = false;
+            for _ in 0..10 {
+                let path_conflict = Path::new(&task.path).exists();
+                let branch_conflict = task.contexts.pull_request.is_none()
+                    && self.git.branch_exists(&task.project_path, &task.name);
+                if !path_conflict && !branch_conflict {
+                    resolved = true;
+                    break;
+                }
+                let snapshot = self.persistence.load_projects()?;
+                task.name = unique_suffix_name(
+                    &task.name,
+                    &task.project_path,
+                    &task.project_id,
+                    &snapshot,
+                    self.git,
+                );
+                task.path = Path::new(&task.worktrees_root)
+                    .join(sanitize_folder_name(&task.name))
+                    .to_string_lossy()
+                    .into_owned();
+            }
+            if !resolved {
+                return self.new_worktree_error(
+                    events,
+                    &task,
+                    "Failed to auto-resolve worktree name conflict".to_string(),
+                );
+            }
+        }
+
+        if Path::new(&task.path).exists() {
+            let snapshot = self.persistence.load_projects()?;
+            let archived = snapshot.worktrees.iter().find(|worktree| {
+                string(worktree, "path") == Some(task.path.as_str())
+                    && worktree
+                        .get("archived_at")
+                        .is_some_and(|value| !value.is_null())
+            });
+            let suggested_name = unique_suffix_name(
+                &task.name,
+                &task.project_path,
+                &task.project_id,
+                &snapshot,
+                self.git,
+            );
+            events.emit_json(
+                "worktree:path_exists",
+                serde_json::json!({
+                    "id":task.id,
+                    "project_id":task.project_id,
+                    "path":task.path,
+                    "suggested_name":suggested_name,
+                    "archived_worktree_id":archived.and_then(|worktree| string(worktree,"id")),
+                    "archived_worktree_name":archived.and_then(|worktree| string(worktree,"name")),
+                    "issue_context":task.contexts.issue,
+                    "pr_context":task.contexts.pull_request,
+                    "security_context":task.contexts.security,
+                    "advisory_context":task.contexts.advisory,
+                    "origin":task.origin,
+                }),
+            )?;
+            return self.new_worktree_error(
+                events,
+                &task,
+                format!("Directory already exists: {}", task.path),
+            );
+        }
+
+        let (branch_for_worktree, temporary_branch) =
+            if let Some(context) = &task.contexts.pull_request {
+                let temporary = format!(
+                    "pr-{}-temp-{}",
+                    context.number,
+                    &Uuid::new_v4().simple().to_string()[..8]
+                );
+                (temporary.clone(), Some(temporary))
+            } else {
+                if self.git.branch_exists(&task.project_path, &task.name) {
+                    let snapshot = self.persistence.load_projects()?;
+                    let suggested_name = unique_suffix_name(
+                        &task.name,
+                        &task.project_path,
+                        &task.project_id,
+                        &snapshot,
+                        self.git,
+                    );
+                    events.emit_json(
+                        "worktree:branch_exists",
+                        serde_json::json!({
+                            "id":task.id,
+                            "project_id":task.project_id,
+                            "branch":task.name,
+                            "suggested_name":suggested_name,
+                            "issue_context":task.contexts.issue,
+                            "pr_context":task.contexts.pull_request,
+                            "security_context":task.contexts.security,
+                            "advisory_context":task.contexts.advisory,
+                            "origin":task.origin,
+                        }),
+                    )?;
+                    return self.new_worktree_error(
+                        events,
+                        &task,
+                        format!("Branch already exists: {}", task.name),
+                    );
+                }
+                (task.name.clone(), None)
+            };
+
+        if let Err(error) = self.git.create_worktree(
+            &task.project_path,
+            &task.path,
+            &branch_for_worktree,
+            &effective_base,
+        ) {
+            return self.new_worktree_error(events, &task, error.message);
+        }
+
+        let final_branch = if let Some(context) = &task.contexts.pull_request {
+            let collision = self
+                .git
+                .branch_exists(&task.project_path, &context.head_ref_name);
+            let local_branch = if collision {
+                format!("pr-{}-{}", context.number, context.head_ref_name)
+            } else {
+                context.head_ref_name.clone()
+            };
             self.git
-                .create_worktree(project_path, &path_string, &name, base)?;
-        }
-        if !path.exists() {
-            let error = BackendError::new(
-                BackendErrorCode::Io,
-                "git worktree add did not create the requested directory",
+                .cleanup_stale_branch(&task.project_path, &local_branch);
+            let checkout = if collision {
+                self.git
+                    .fetch_pr_to_branch(&task.project_path, context.number, &local_branch)
+                    .and_then(|()| self.git.checkout_branch(&task.path, &local_branch))
+            } else {
+                (self.pr_checkout)(&task.path, context.number, Some(&local_branch))
+            };
+            if let Err(error) = checkout {
+                let _ = self.git.remove_worktree(&task.project_path, &task.path);
+                if let Some(branch) = &temporary_branch {
+                    let _ = self.git.delete_branch(&task.project_path, branch);
+                }
+                return self.new_worktree_error(events, &task, error.message);
+            }
+            if let Some(branch) = &temporary_branch {
+                let _ = self.git.delete_branch(&task.project_path, branch);
+            }
+            local_branch
+        } else {
+            task.name.clone()
+        };
+
+        if let Err(error) = self.contexts.write_worktree_contexts(
+            &task.project_path,
+            &task.project_name,
+            &task.id,
+            &task.contexts,
+        ) {
+            log::warn!(
+                "Failed to persist worktree contexts for {}: {error}",
+                task.id
             );
-            let _ = events.emit_json(
-                "worktree:error",
-                serde_json::json!({"id": id, "project_id": project_id, "error": error.message}),
-            );
-            return Err(error);
         }
-        let order = self
-            .persistence
-            .load_projects()?
-            .worktrees
-            .iter()
-            .filter(|worktree| string(worktree, "project_id") == Some(project_id))
-            .filter_map(|worktree| worktree.get("order").and_then(Value::as_u64))
-            .max()
-            .map_or(1, |value| value + 1);
-        let worktree = serde_json::json!({
-            "id": id,
-            "project_id": project_id,
-            "name": name,
-            "path": path_string,
-            "branch": name,
-            "base_branch": base,
-            "created_at": now(),
-            "session_type": "worktree",
-            "order": order,
-            "origin": origin,
-            "labels": [],
-        });
-        self.persistence.update_projects(|snapshot| {
+
+        let setup_script =
+            read_jean_config(&task.project_path).and_then(|config| config.scripts.setup);
+        let worktree = self.persistence.update_projects(|snapshot| {
+            let order = snapshot
+                .worktrees
+                .iter()
+                .filter(|worktree| string(worktree, "project_id") == Some(task.project_id.as_str()))
+                .filter_map(|worktree| worktree.get("order").and_then(Value::as_u64))
+                .max()
+                .map_or(1, |order| order + 1);
+            let worktree = new_worktree_value(
+                &task.id,
+                &task.project_id,
+                &task.name,
+                &task.path,
+                &final_branch,
+                &task.base_branch,
+                task.created_at,
+                order,
+                &task.contexts,
+                task.origin.as_deref(),
+                setup_script.as_deref(),
+            );
             snapshot.worktrees.push(worktree.clone());
-            Ok(())
+            Ok(worktree)
         })?;
         events.emit_json(
             "worktree:created",
-            serde_json::json!({"worktree": worktree, "autoOpenInJean": true}),
+            serde_json::json!({"worktree":worktree,"autoOpenInJean":task.auto_open_in_jean}),
         )?;
-        let Some(script) = read_jean_config(project_path).and_then(|config| config.scripts.setup)
-        else {
+
+        let Some(script) = setup_script else {
             return Ok(worktree);
         };
-        let setup_result = self
-            .scripts
-            .run_setup(&path_string, project_path, &name, &script);
-        let (output, success) = match setup_result {
-            Ok(output) => (output, true),
-            Err(error) => (error.to_string(), false),
-        };
+        let (output, success) =
+            match self
+                .scripts
+                .run_setup(&task.path, &task.project_path, &final_branch, &script)
+            {
+                Ok(output) => (output, true),
+                Err(error) => (error.to_string(), false),
+            };
         let updated = self.persistence.update_projects(|snapshot| {
             let stored = snapshot
                 .worktrees
                 .iter_mut()
-                .find(|candidate| string(candidate, "id") == Some(id.as_str()))
-                .ok_or_else(|| not_found("Worktree", &id))?;
+                .find(|worktree| string(worktree, "id") == Some(task.id.as_str()))
+                .ok_or_else(|| not_found("Worktree", &task.id))?;
             let object = object_mut(stored)?;
             object.insert("setup_output".to_string(), Value::String(output.clone()));
-            object.insert("setup_script".to_string(), Value::String(script.clone()));
             object.insert("setup_success".to_string(), Value::Bool(success));
             Ok(stored.clone())
         })?;
         events.emit_json(
             "worktree:setup_complete",
             serde_json::json!({
-                "id": id,
-                "project_id": project_id,
-                "setup_output": output,
-                "setup_script": script,
-                "setup_success": success,
+                "id":task.id,
+                "project_id":task.project_id,
+                "setup_output":output,
+                "setup_script":script,
+                "setup_success":success,
             }),
         )?;
         Ok(updated)
+    }
+
+    pub fn run_worktree_task(&self, task: WorktreeCreationTask, events: &dyn EventSink) {
+        let panic_task = task.clone();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.complete_worktree(task, events)
+        }));
+        match result {
+            Ok(Ok(_)) => {}
+            Ok(Err(error)) => log::warn!("Worktree creation {} failed: {error}", panic_task.id),
+            Err(_) => {
+                let _ = self.new_worktree_error(
+                    events,
+                    &panic_task,
+                    "Internal error: worktree creation failed unexpectedly".to_string(),
+                );
+            }
+        }
+    }
+
+    fn new_worktree_error(
+        &self,
+        events: &dyn EventSink,
+        task: &WorktreeCreationTask,
+        message: String,
+    ) -> Result<Value, BackendError> {
+        events.emit_json(
+            "worktree:error",
+            serde_json::json!({"id":task.id,"project_id":task.project_id,"error":message}),
+        )?;
+        Err(BackendError::new(BackendErrorCode::Io, message))
     }
 
     pub fn prepare_existing_branch_worktree(
@@ -1589,21 +1882,6 @@ fn now() -> u64 {
         .as_secs()
 }
 
-fn sanitize_branch_name(name: &str) -> String {
-    name.trim()
-        .chars()
-        .map(|character| {
-            if character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '/' | '.') {
-                character
-            } else {
-                '-'
-            }
-        })
-        .collect::<String>()
-        .trim_matches(['-', '/', '.'])
-        .to_string()
-}
-
 fn sanitize_folder_name(name: &str) -> String {
     name.chars()
         .map(|character| {
@@ -1614,6 +1892,171 @@ fn sanitize_folder_name(name: &str) -> String {
             }
         })
         .collect()
+}
+
+fn validate_origin(origin: Option<&str>) -> Result<(), BackendError> {
+    match origin {
+        None | Some("auto_fix" | "manual") => Ok(()),
+        Some(value) => Err(invalid(format!("Unsupported worktree origin: {value}"))),
+    }
+}
+
+fn worktree_name(
+    input: &WorktreeCreationInput,
+    snapshot: &ProjectsSnapshot,
+    project_path: &str,
+    git: GitService,
+) -> String {
+    if let Some(name) = &input.custom_name {
+        return name.clone();
+    }
+    if let Some(context) = &input.contexts.pull_request {
+        let head = sanitize_folder_name(&context.head_ref_name);
+        return if head.is_empty() {
+            format!("pr-{}", context.number)
+        } else {
+            format!("pr-{}-{head}", context.number)
+        };
+    }
+    if let Some(context) = &input.contexts.security {
+        return generate_branch_name_from_security_alert(
+            context.number,
+            &context.package_name,
+            &context.summary,
+        );
+    }
+    if let Some(context) = &input.contexts.advisory {
+        return generate_branch_name_from_advisory(&context.ghsa_id, &context.summary);
+    }
+    if let Some(context) = &input.contexts.linear {
+        return generate_branch_name_from_linear_issue(&context.identifier, &context.title);
+    }
+    if let Some(context) = &input.contexts.issue {
+        return generate_branch_name_from_issue(context.number, &context.title);
+    }
+    crate::names::generate_unique_workspace_name(|candidate| {
+        snapshot.worktrees.iter().any(|worktree| {
+            string(worktree, "project_id") == Some(input.project_id.as_str())
+                && string(worktree, "name") == Some(candidate)
+        }) || git.branch_exists(project_path, candidate)
+    })
+}
+
+fn unique_context_name(name: String, project_id: &str, snapshot: &ProjectsSnapshot) -> String {
+    if !snapshot.worktrees.iter().any(|worktree| {
+        string(worktree, "project_id") == Some(project_id)
+            && string(worktree, "name") == Some(name.as_str())
+    }) {
+        return name;
+    }
+    for suffix in 2.. {
+        let candidate = format!("{name}-{suffix}");
+        if !snapshot.worktrees.iter().any(|worktree| {
+            string(worktree, "project_id") == Some(project_id)
+                && string(worktree, "name") == Some(candidate.as_str())
+        }) {
+            return candidate;
+        }
+    }
+    unreachable!()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn new_worktree_value(
+    id: &str,
+    project_id: &str,
+    name: &str,
+    path: &str,
+    branch: &str,
+    base_branch: &str,
+    created_at: u64,
+    order: u64,
+    contexts: &WorktreeContexts,
+    origin: Option<&str>,
+    setup_script: Option<&str>,
+) -> Value {
+    serde_json::json!({
+        "id":id,
+        "project_id":project_id,
+        "name":name,
+        "path":path,
+        "branch":branch,
+        "base_branch":base_branch,
+        "created_at":created_at,
+        "setup_output":Value::Null,
+        "setup_script":setup_script,
+        "setup_success":Value::Null,
+        "session_type":"worktree",
+        "pr_number":contexts.pull_request.as_ref().map(|context| context.number),
+        "pr_url":Value::Null,
+        "issue_number":contexts.issue.as_ref().map(|context| context.number),
+        "linear_issue_identifier":contexts.linear.as_ref().map(|context| context.identifier.clone()),
+        "security_alert_number":contexts.security.as_ref().map(|context| context.number),
+        "security_alert_url":contexts.security.as_ref().and_then(|context| context.html_url.clone()),
+        "advisory_ghsa_id":contexts.advisory.as_ref().map(|context| context.ghsa_id.clone()),
+        "advisory_url":contexts.advisory.as_ref().and_then(|context| context.html_url.clone()),
+        "cached_pr_status":Value::Null,
+        "cached_check_status":Value::Null,
+        "cached_behind_count":Value::Null,
+        "cached_ahead_count":Value::Null,
+        "cached_status_at":Value::Null,
+        "cached_uncommitted_added":Value::Null,
+        "cached_uncommitted_removed":Value::Null,
+        "cached_branch_diff_added":Value::Null,
+        "cached_branch_diff_removed":Value::Null,
+        "cached_base_branch_ahead_count":Value::Null,
+        "cached_base_branch_behind_count":Value::Null,
+        "cached_worktree_ahead_count":Value::Null,
+        "cached_unpushed_count":Value::Null,
+        "pr_push_remote":Value::Null,
+        "pr_push_branch":Value::Null,
+        "order":order,
+        "origin":origin,
+        "archived_at":Value::Null,
+        "labels":[],
+        "label":Value::Null,
+        "last_opened_at":Value::Null,
+    })
+}
+
+fn native_pr_checkout(
+    worktree_path: &str,
+    pr_number: u32,
+    branch_name: Option<&str>,
+) -> Result<(), BackendError> {
+    let number = pr_number.to_string();
+    let mut command = silent_external_command("gh");
+    command
+        .current_dir(worktree_path)
+        .args(["pr", "checkout", &number]);
+    if let Some(branch) = branch_name {
+        command.args(["-b", branch]);
+    }
+    let output = command.output()?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(BackendError::new(
+            BackendErrorCode::Io,
+            format!(
+                "Failed to checkout PR #{pr_number}: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            ),
+        ))
+    }
+}
+
+#[cfg(windows)]
+fn silent_external_command(program: &str) -> std::process::Command {
+    use std::os::windows::process::CommandExt;
+    let mut command = std::process::Command::new(program);
+    command.creation_flags(0x08000000);
+    command
+}
+
+#[cfg(not(windows))]
+fn silent_external_command(program: &str) -> std::process::Command {
+    std::process::Command::new(program)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1697,6 +2140,7 @@ mod tests {
     use super::*;
     use crate::{ResolvedAppPaths, SessionService};
     use std::fs;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex;
 
     #[derive(Default)]
@@ -1717,6 +2161,26 @@ mod tests {
             temp.path().join("resources"),
         ))));
         ProjectService::new(persistence)
+    }
+
+    fn service_with_pr_checkout(
+        temp: &tempfile::TempDir,
+        pr_checkout: PrCheckout,
+    ) -> ProjectService {
+        let persistence = Arc::new(PersistenceService::new(Arc::new(ResolvedAppPaths::new(
+            temp.path().join("data"),
+            temp.path().join("config"),
+            temp.path().join("cache"),
+            temp.path().join("resources"),
+        ))));
+        let git = GitService::default();
+        ProjectService::with_services(
+            persistence.clone(),
+            git,
+            ScriptService::default(),
+            ContextService::new(persistence, git),
+            pr_checkout,
+        )
     }
 
     #[test]
@@ -1977,6 +2441,182 @@ mod tests {
         assert_eq!(recorded[2].1["setup_output"], "setup-complete");
         assert_eq!(recorded[2].1["setup_success"], true);
         assert_eq!(worktree["setup_success"], true);
+    }
+
+    #[test]
+    fn worktree_creation_reports_path_and_branch_conflicts_and_auto_fix_resolves_them() {
+        let temp = tempfile::tempdir().unwrap();
+        let repo = temp.path().join("repo");
+        fs::create_dir(&repo).unwrap();
+        git_init_with_commit(&repo);
+        let worktrees = temp.path().join("worktrees");
+        let project_root = worktrees.join("repo");
+        fs::create_dir_all(project_root.join("path-taken")).unwrap();
+        assert!(std::process::Command::new("git")
+            .current_dir(&repo)
+            .args(["branch", "branch-taken"])
+            .output()
+            .unwrap()
+            .status
+            .success());
+        let service = service(&temp);
+        service
+            .persistence
+            .save_projects(&ProjectsSnapshot {
+                projects: vec![serde_json::json!({
+                    "id":"p1","name":"repo","path":repo,
+                    "default_branch":"main","worktrees_dir":worktrees
+                })],
+                worktrees: vec![],
+                extra: Map::new(),
+            })
+            .unwrap();
+
+        for (name, conflict_event) in [
+            ("path-taken", "worktree:path_exists"),
+            ("branch-taken", "worktree:branch_exists"),
+        ] {
+            let events = RecordingEvents::default();
+            let (_, task) = service
+                .prepare_worktree(
+                    WorktreeCreationInput {
+                        project_id: "p1".to_string(),
+                        base_branch: Some("main".to_string()),
+                        contexts: WorktreeContexts::default(),
+                        custom_name: Some(name.to_string()),
+                        auto_open_in_jean: true,
+                        origin: Some("manual".to_string()),
+                        auto_pull_base_branch: false,
+                    },
+                    &events,
+                )
+                .unwrap();
+            assert!(service.complete_worktree(task, &events).is_err());
+            let names = events
+                .0
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|(event, _)| event.clone())
+                .collect::<Vec<_>>();
+            assert_eq!(
+                names,
+                ["worktree:creating", conflict_event, "worktree:error"]
+            );
+        }
+
+        let events = RecordingEvents::default();
+        let (_, task) = service
+            .prepare_worktree(
+                WorktreeCreationInput {
+                    project_id: "p1".to_string(),
+                    base_branch: Some("main".to_string()),
+                    contexts: WorktreeContexts::default(),
+                    custom_name: Some("branch-taken".to_string()),
+                    auto_open_in_jean: true,
+                    origin: Some("auto_fix".to_string()),
+                    auto_pull_base_branch: false,
+                },
+                &events,
+            )
+            .unwrap();
+        let created = service.complete_worktree(task, &events).unwrap();
+        assert!(created["name"]
+            .as_str()
+            .unwrap()
+            .starts_with("branch-taken-"));
+        assert!(Path::new(created["path"].as_str().unwrap()).exists());
+    }
+
+    #[test]
+    fn pull_request_worktree_uses_injected_checkout_and_shared_context_pipeline() {
+        let temp = tempfile::tempdir().unwrap();
+        let repo = temp.path().join("repo");
+        fs::create_dir(&repo).unwrap();
+        git_init_with_commit(&repo);
+        assert!(std::process::Command::new("git")
+            .current_dir(&repo)
+            .args([
+                "remote",
+                "add",
+                "origin",
+                "git@github.com:acme/pr-pipeline.git"
+            ])
+            .output()
+            .unwrap()
+            .status
+            .success());
+        let calls = Arc::new(AtomicUsize::new(0));
+        let calls_for_checkout = calls.clone();
+        let checkout: PrCheckout = Arc::new(move |path, number, branch| {
+            assert_eq!(number, 42);
+            calls_for_checkout.fetch_add(1, Ordering::SeqCst);
+            let output = std::process::Command::new("git")
+                .current_dir(path)
+                .args(["checkout", "-b", branch.unwrap()])
+                .output()?;
+            if output.status.success() {
+                Ok(())
+            } else {
+                Err(BackendError::new(
+                    BackendErrorCode::Io,
+                    String::from_utf8_lossy(&output.stderr),
+                ))
+            }
+        });
+        let service = service_with_pr_checkout(&temp, checkout);
+        service
+            .persistence
+            .save_projects(&ProjectsSnapshot {
+                projects: vec![serde_json::json!({
+                    "id":"p1","name":"repo","path":repo,
+                    "default_branch":"main","worktrees_dir":temp.path().join("worktrees")
+                })],
+                worktrees: vec![],
+                extra: Map::new(),
+            })
+            .unwrap();
+        let events = RecordingEvents::default();
+        let (pending, task) = service
+            .prepare_worktree(
+                WorktreeCreationInput {
+                    project_id: "p1".to_string(),
+                    base_branch: None,
+                    contexts: WorktreeContexts {
+                        pull_request: Some(crate::PullRequestContext {
+                            number: 42,
+                            title: "Shared PR pipeline".to_string(),
+                            body: None,
+                            head_ref_name: "feature/shared-pr".to_string(),
+                            base_ref_name: "main".to_string(),
+                            comments: vec![],
+                            reviews: vec![],
+                            diff: Some("diff --git a/a b/a".to_string()),
+                        }),
+                        ..WorktreeContexts::default()
+                    },
+                    custom_name: None,
+                    auto_open_in_jean: false,
+                    origin: None,
+                    auto_pull_base_branch: false,
+                },
+                &events,
+            )
+            .unwrap();
+        assert_eq!(pending["name"], "pr-42-feature_shared-pr");
+        let created = service.complete_worktree(task, &events).unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(created["branch"], "feature/shared-pr");
+        assert!(service
+            .persistence
+            .git_contexts_dir()
+            .unwrap()
+            .join("acme-pr-pipeline-pr-42.md")
+            .exists());
+        let recorded = events.0.lock().unwrap();
+        assert_eq!(recorded[0].0, "worktree:creating");
+        assert_eq!(recorded[1].0, "worktree:created");
+        assert_eq!(recorded[1].1["autoOpenInJean"], false);
     }
 
     #[test]

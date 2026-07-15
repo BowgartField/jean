@@ -4,7 +4,6 @@ pub mod git_status;
 pub mod github_actions;
 pub mod github_issues;
 pub mod linear_issues;
-mod names;
 pub mod pr_status;
 mod release_notes;
 pub mod saved_contexts;
