@@ -213,11 +213,6 @@ pub const UNAVAILABLE_CAPABILITIES: &[CommandCapability] = &[
         available: false,
     },
     CommandCapability {
-        command: "checkout_pr",
-        class: CapabilityClass::AdapterBacked,
-        available: false,
-    },
-    CommandCapability {
         command: "cleanup_combined_contexts",
         class: CapabilityClass::AdapterBacked,
         available: false,

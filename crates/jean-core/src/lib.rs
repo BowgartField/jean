@@ -8,6 +8,7 @@ pub mod error;
 pub mod events;
 pub mod git;
 pub mod git_status;
+pub mod github;
 pub mod names;
 pub mod paths;
 pub mod persistence;
@@ -36,11 +37,13 @@ pub use error::{BackendError, BackendErrorCode};
 pub use events::{EventSink, ServerEventSink, WsBroadcaster, WsEvent};
 pub use git::{GitPushResponse, GitRunner, GitService};
 pub use git_status::{ActiveWorktreeInfo, GitBranchStatus};
+pub use github::{GhRunner, GitHubLabel, GitHubPullRequestDetail, GitHubService};
 pub use paths::{AppPaths, HeadlessAppPaths, ResolvedAppPaths};
 pub use persistence::{PersistenceService, ProjectsSnapshot};
 pub use projects::{
-    BaseSessionCloseMode, ExistingBranchCreationTask, ExistingBranchWorktreeInput, PrCheckout,
-    ProjectService, WorktreeCreationInput, WorktreeCreationTask,
+    BaseSessionCloseMode, CheckoutPrPreparation, ExistingBranchCreationTask,
+    ExistingBranchWorktreeInput, PrCheckout, ProjectService, WorktreeCreationInput,
+    WorktreeCreationTask,
 };
 pub use runtime::{BackendContext, BackendState, ResourceRegistry};
 pub use sessions::SessionService;

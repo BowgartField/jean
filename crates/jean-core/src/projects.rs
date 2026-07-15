@@ -2,7 +2,8 @@ use crate::{
     generate_branch_name_from_advisory, generate_branch_name_from_issue,
     generate_branch_name_from_linear_issue, generate_branch_name_from_security_alert,
     read_jean_config, ActiveWorktreeInfo, BackendError, BackendErrorCode, ContextService,
-    EventSink, GitService, PersistenceService, ProjectsSnapshot, ScriptService, WorktreeContexts,
+    EventSink, GitHubService, GitService, PersistenceService, ProjectsSnapshot, ScriptService,
+    WorktreeContexts,
 };
 use serde_json::{Map, Value};
 use std::collections::HashSet;
@@ -17,11 +18,21 @@ pub struct ProjectService {
     git: GitService,
     scripts: ScriptService,
     contexts: ContextService,
+    github: GitHubService,
     pr_checkout: PrCheckout,
 }
 
 pub type PrCheckout =
     Arc<dyn Fn(&str, u32, Option<&str>) -> Result<(), BackendError> + Send + Sync + 'static>;
+
+#[derive(Debug, Clone)]
+pub enum CheckoutPrPreparation {
+    Restored(Value),
+    Create {
+        pending: Value,
+        task: Box<WorktreeCreationTask>,
+    },
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BaseSessionCloseMode {
@@ -98,6 +109,7 @@ impl ProjectService {
             persistence,
             git,
             scripts: ScriptService::default(),
+            github: GitHubService::default(),
             pr_checkout: Arc::new(native_pr_checkout),
         }
     }
@@ -108,6 +120,7 @@ impl ProjectService {
             persistence,
             git,
             scripts: ScriptService::default(),
+            github: GitHubService::default(),
             pr_checkout: Arc::new(native_pr_checkout),
         }
     }
@@ -117,6 +130,7 @@ impl ProjectService {
         git: GitService,
         scripts: ScriptService,
         contexts: ContextService,
+        github: GitHubService,
         pr_checkout: PrCheckout,
     ) -> Self {
         Self {
@@ -124,6 +138,7 @@ impl ProjectService {
             git,
             scripts,
             contexts,
+            github,
             pr_checkout,
         }
     }
@@ -467,6 +482,57 @@ impl ProjectService {
         let project = self.project(project_id)?;
         let path = Path::new(string(&project, "path").ok_or_else(|| invalid("project.path"))?);
         self.git.project_branches(path.to_string_lossy().as_ref())
+    }
+
+    pub fn prepare_checkout_pr(
+        &self,
+        project_id: &str,
+        pr_number: u32,
+        events: &dyn EventSink,
+    ) -> Result<CheckoutPrPreparation, BackendError> {
+        if let Some(worktree_id) = self
+            .persistence
+            .load_projects()?
+            .worktrees
+            .iter()
+            .find(|worktree| {
+                string(worktree, "project_id") == Some(project_id)
+                    && worktree.get("pr_number").and_then(Value::as_u64)
+                        == Some(u64::from(pr_number))
+                    && worktree
+                        .get("archived_at")
+                        .is_some_and(|value| !value.is_null())
+            })
+            .and_then(|worktree| string(worktree, "id"))
+            .map(ToOwned::to_owned)
+        {
+            return self
+                .unarchive_worktree(&worktree_id, events)
+                .map(CheckoutPrPreparation::Restored);
+        }
+
+        let project = self.project(project_id)?;
+        let project_path = string(&project, "path").ok_or_else(|| invalid("project.path"))?;
+        let context = self.github.pull_request_context(project_path, pr_number)?;
+        let (pending, task) = self.prepare_worktree(
+            WorktreeCreationInput {
+                project_id: project_id.to_string(),
+                base_branch: None,
+                contexts: WorktreeContexts {
+                    pull_request: Some(context),
+                    ..WorktreeContexts::default()
+                },
+                custom_name: None,
+                auto_open_in_jean: true,
+                origin: None,
+                auto_pull_base_branch: false,
+            },
+            events,
+        )?;
+        Ok(CheckoutPrPreparation::Create {
+            pending,
+            task: Box::new(task),
+        })
     }
 
     pub fn create_worktree(
@@ -2165,6 +2231,7 @@ mod tests {
 
     fn service_with_pr_checkout(
         temp: &tempfile::TempDir,
+        github: GitHubService,
         pr_checkout: PrCheckout,
     ) -> ProjectService {
         let persistence = Arc::new(PersistenceService::new(Arc::new(ResolvedAppPaths::new(
@@ -2179,6 +2246,7 @@ mod tests {
             git,
             ScriptService::default(),
             ContextService::new(persistence, git),
+            github,
             pr_checkout,
         )
     }
@@ -2564,7 +2632,18 @@ mod tests {
                 ))
             }
         });
-        let service = service_with_pr_checkout(&temp, checkout);
+        let github_runner: crate::GhRunner = Arc::new(|_path, args| {
+            let mut output = std::process::Command::new("git")
+                .arg("--version")
+                .output()?;
+            output.stdout = if args.get(1) == Some(&"view") {
+                br#"{"number":42,"title":"Shared PR pipeline","body":null,"state":"OPEN","headRefName":"feature/shared-pr","baseRefName":"main","isDraft":false,"createdAt":"2026-01-01","author":{"login":"octo"},"comments":[],"reviews":[]}"#.to_vec()
+            } else {
+                b"diff --git a/a b/a".to_vec()
+            };
+            Ok(output)
+        });
+        let service = service_with_pr_checkout(&temp, GitHubService::new(github_runner), checkout);
         service
             .persistence
             .save_projects(&ProjectsSnapshot {
@@ -2577,34 +2656,13 @@ mod tests {
             })
             .unwrap();
         let events = RecordingEvents::default();
-        let (pending, task) = service
-            .prepare_worktree(
-                WorktreeCreationInput {
-                    project_id: "p1".to_string(),
-                    base_branch: None,
-                    contexts: WorktreeContexts {
-                        pull_request: Some(crate::PullRequestContext {
-                            number: 42,
-                            title: "Shared PR pipeline".to_string(),
-                            body: None,
-                            head_ref_name: "feature/shared-pr".to_string(),
-                            base_ref_name: "main".to_string(),
-                            comments: vec![],
-                            reviews: vec![],
-                            diff: Some("diff --git a/a b/a".to_string()),
-                        }),
-                        ..WorktreeContexts::default()
-                    },
-                    custom_name: None,
-                    auto_open_in_jean: false,
-                    origin: None,
-                    auto_pull_base_branch: false,
-                },
-                &events,
-            )
-            .unwrap();
+        let CheckoutPrPreparation::Create { pending, task } =
+            service.prepare_checkout_pr("p1", 42, &events).unwrap()
+        else {
+            panic!("expected a new PR worktree");
+        };
         assert_eq!(pending["name"], "pr-42-feature_shared-pr");
-        let created = service.complete_worktree(task, &events).unwrap();
+        let created = service.complete_worktree(*task, &events).unwrap();
         assert_eq!(calls.load(Ordering::SeqCst), 1);
         assert_eq!(created["branch"], "feature/shared-pr");
         assert!(service
@@ -2616,7 +2674,19 @@ mod tests {
         let recorded = events.0.lock().unwrap();
         assert_eq!(recorded[0].0, "worktree:creating");
         assert_eq!(recorded[1].0, "worktree:created");
-        assert_eq!(recorded[1].1["autoOpenInJean"], false);
+        assert_eq!(recorded[1].1["autoOpenInJean"], true);
+        drop(recorded);
+
+        service
+            .archive_worktree(string(&created, "id").unwrap(), &events)
+            .unwrap();
+        let CheckoutPrPreparation::Restored(restored) =
+            service.prepare_checkout_pr("p1", 42, &events).unwrap()
+        else {
+            panic!("expected the archived PR worktree to be restored");
+        };
+        assert_eq!(restored["id"], created["id"]);
+        assert!(restored.get("archived_at").is_none());
     }
 
     #[test]

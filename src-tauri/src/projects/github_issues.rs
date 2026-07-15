@@ -8,8 +8,8 @@ use super::git::get_repo_identifier;
 use crate::gh_cli::config::resolve_gh_binary;
 
 pub use jean_core::{
-    AdvisoryContext, AdvisoryVulnerability, GitHubAuthor, GitHubComment, GitHubReview,
-    IssueContext, PullRequestContext, SecurityAlertContext,
+    AdvisoryContext, AdvisoryVulnerability, GitHubAuthor, GitHubComment, GitHubLabel,
+    GitHubPullRequestDetail, IssueContext, PullRequestContext, SecurityAlertContext,
 };
 
 fn gh_command(gh: &Path, project_path: &str) -> Command {
@@ -19,13 +19,6 @@ fn gh_command(gh: &Path, project_path: &str) -> Command {
 // =============================================================================
 // GitHub Types
 // =============================================================================
-
-/// GitHub issue label
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GitHubLabel {
-    pub name: String,
-    pub color: String,
-}
 
 pub fn parse_github_labels_response(stdout: &str) -> Result<Vec<GitHubLabel>, String> {
     serde_json::from_str(stdout).map_err(|e| format!("Failed to parse gh labels response: {e}"))
@@ -1382,29 +1375,6 @@ fn current_review_comments_from_threads(threads: Vec<ReviewThread>) -> Vec<GitHu
         .collect()
 }
 
-/// GitHub PR detail with comments and reviews
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GitHubPullRequestDetail {
-    pub number: u32,
-    pub title: String,
-    pub body: Option<String>,
-    pub state: String,
-    pub head_ref_name: String,
-    pub base_ref_name: String,
-    pub is_draft: bool,
-    pub created_at: String,
-    pub author: GitHubAuthor,
-    #[serde(default)]
-    pub url: String,
-    #[serde(default)]
-    pub labels: Vec<GitHubLabel>,
-    #[serde(default)]
-    pub comments: Vec<GitHubComment>,
-    #[serde(default)]
-    pub reviews: Vec<GitHubReview>,
-}
-
 /// Loaded PR context info returned to frontend
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1573,38 +1543,9 @@ pub async fn get_github_pr(
     project_path: String,
     pr_number: u32,
 ) -> Result<GitHubPullRequestDetail, String> {
-    log::trace!("Getting GitHub PR #{pr_number} for {project_path}");
-
-    let gh = resolve_gh_binary(&app);
-    // Run gh pr view
-    let output = gh_command(&gh, &project_path)
-        .args([
-            "pr",
-            "view",
-            &pr_number.to_string(),
-            "--json",
-            "number,title,body,state,headRefName,baseRefName,isDraft,createdAt,author,url,labels,comments,reviews",
-        ])
-        .output()
-        .map_err(|e| format!("Failed to run gh pr view: {e}"))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        if is_gh_cli_auth_error(&stderr) {
-            return Err("GitHub CLI not authenticated. Run 'gh auth login' first.".to_string());
-        }
-        if stderr.contains("Could not resolve") || stderr.contains("not found") {
-            return Err(format!("PR #{pr_number} not found"));
-        }
-        return Err(format!("gh pr view failed: {stderr}"));
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let pr: GitHubPullRequestDetail =
-        serde_json::from_str(&stdout).map_err(|e| format!("Failed to parse gh response: {e}"))?;
-
-    log::trace!("Got PR #{}: {}", pr.number, pr.title);
-    Ok(pr)
+    crate::backend_runtime::github_service(&app)
+        .pull_request_detail(&project_path, pr_number)
+        .map_err(|error| error.to_string())
 }
 
 /// Fetch inline review comments for a PR.
@@ -1717,42 +1658,21 @@ pub fn get_pr_diff(
     pr_number: u32,
     gh_binary: &std::path::Path,
 ) -> Result<String, String> {
-    log::debug!("Fetching diff for PR #{pr_number} in {project_path}");
-
-    let output = gh_command(gh_binary, project_path)
-        .args(["pr", "diff", &pr_number.to_string(), "--color", "never"])
-        .output()
-        .map_err(|e| format!("Failed to run gh pr diff: {e}"))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        log::debug!("gh pr diff failed: {stderr}");
-        // Return empty string on failure (diff might not be available)
-        return Ok(String::new());
-    }
-
-    let diff = String::from_utf8_lossy(&output.stdout).to_string();
-    log::debug!("Got diff for PR #{pr_number}: {} bytes", diff.len());
-
-    // Truncate if > 100KB
-    const MAX_DIFF_SIZE: usize = 100_000;
-    if diff.len() > MAX_DIFF_SIZE {
-        // Find a safe UTF-8 char boundary near MAX_DIFF_SIZE
-        let end = diff
-            .char_indices()
-            .take_while(|(i, _)| *i < MAX_DIFF_SIZE)
-            .last()
-            .map(|(i, c)| i + c.len_utf8())
-            .unwrap_or(MAX_DIFF_SIZE.min(diff.len()));
-        Ok(format!(
-            "{}...\n\n[Diff truncated at 100KB - {} bytes total. Run `gh pr diff {}` to see the full diff.]",
-            &diff[..end],
-            diff.len(),
-            pr_number
-        ))
-    } else {
-        Ok(diff)
-    }
+    let gh = gh_binary.to_path_buf();
+    let runner: jean_core::GhRunner = std::sync::Arc::new(move |path, args| {
+        crate::platform::resolved_cli_command(&gh, Some(std::path::Path::new(path)))
+            .args(args)
+            .output()
+            .map_err(|error| {
+                jean_core::BackendError::new(
+                    jean_core::BackendErrorCode::Io,
+                    format!("Failed to run gh: {error}"),
+                )
+            })
+    });
+    jean_core::GitHubService::new(runner)
+        .pull_request_diff(project_path, pr_number)
+        .map_err(|error| error.to_string())
 }
 
 /// Load/refresh PR context for a session by fetching data from GitHub

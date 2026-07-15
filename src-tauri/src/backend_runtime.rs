@@ -120,6 +120,23 @@ pub fn script_service() -> jean_core::ScriptService {
     jean_core::ScriptService::new(desktop_script_runner)
 }
 
+pub fn github_service(app: &AppHandle) -> jean_core::GitHubService {
+    let app = app.clone();
+    let runner: jean_core::GhRunner = Arc::new(move |project_path, args| {
+        let gh = crate::gh_cli::config::resolve_gh_binary(&app);
+        crate::platform::resolved_cli_command(&gh, Some(std::path::Path::new(project_path)))
+            .args(args)
+            .output()
+            .map_err(|error| {
+                BackendError::new(
+                    jean_core::BackendErrorCode::Io,
+                    format!("Failed to run gh: {error}"),
+                )
+            })
+    });
+    jean_core::GitHubService::new(runner)
+}
+
 pub fn project_service(app: &AppHandle) -> Result<jean_core::ProjectService, String> {
     let context = context(app)?;
     let app_for_diff = app.clone();
@@ -133,6 +150,7 @@ pub fn project_service(app: &AppHandle) -> Result<jean_core::ProjectService, Str
         git_service(),
         pr_diff_loader,
     );
+    let github = github_service(app);
     let app_for_checkout = app.clone();
     let pr_checkout: jean_core::PrCheckout = Arc::new(move |worktree_path, number, branch| {
         let gh = crate::gh_cli::config::resolve_gh_binary(&app_for_checkout);
@@ -145,6 +163,7 @@ pub fn project_service(app: &AppHandle) -> Result<jean_core::ProjectService, Str
         git_service(),
         script_service(),
         contexts,
+        github,
         pr_checkout,
     ))
 }

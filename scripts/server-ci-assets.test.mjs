@@ -121,6 +121,7 @@ test('desktop project commands delegate simple business operations to jean-core'
     'import_worktree',
     'permanently_delete_worktree',
     'create_worktree_from_existing_branch',
+    'checkout_pr',
     'rename_worktree',
     'update_worktree_labels',
     'set_worktree_last_opened',
@@ -161,4 +162,11 @@ test('desktop project commands delegate simple business operations to jean-core'
   assert.match(createWorktree, /prepare_worktree/)
   assert.match(createWorktree, /run_worktree_task/)
   assert.doesNotMatch(createWorktree, /git::create_worktree|format_issue_context_markdown|save_projects_data/)
+  const checkoutPr = commands.slice(
+    commands.indexOf('pub async fn checkout_pr'),
+    commands.indexOf('pub async fn delete_worktree')
+  )
+  assert.match(checkoutPr, /prepare_checkout_pr/)
+  assert.match(checkoutPr, /run_worktree_task/)
+  assert.doesNotMatch(checkoutPr, /gh_pr_checkout|git::create_worktree|save_projects_data/)
 })

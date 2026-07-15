@@ -302,6 +302,26 @@ impl CommandDispatcher for HeadlessDispatcher {
                 });
                 Ok(pending)
             }
+            "checkout_pr" => {
+                let project_id = string_field(&args, "projectId", "project_id")?;
+                let pr_number = optional_u32_field(&args, "prNumber", "pr_number")?
+                    .ok_or_else(|| missing_field("prNumber"))?;
+                match projects.prepare_checkout_pr(
+                    project_id,
+                    pr_number,
+                    self.context.events.as_ref(),
+                )? {
+                    crate::CheckoutPrPreparation::Restored(worktree) => Ok(worktree),
+                    crate::CheckoutPrPreparation::Create { pending, task } => {
+                        let service = projects.clone();
+                        let events = self.context.events.clone();
+                        std::thread::spawn(move || {
+                            service.run_worktree_task(*task, events.as_ref());
+                        });
+                        Ok(pending)
+                    }
+                }
+            }
             "import_worktree" => {
                 let project_id = string_field(&args, "projectId", "project_id")?;
                 let path = string_field(&args, "path", "path")?;
@@ -1493,7 +1513,8 @@ mod tests {
                     "id":"p1","name":"Repo","path":repo.path(),"default_branch":"main"
                 })],
                 worktrees: vec![serde_json::json!({
-                    "id":"w1","project_id":"p1","path":repo.path(),"session_type":"worktree"
+                    "id":"w1","project_id":"p1","path":repo.path(),"session_type":"worktree",
+                    "pr_number":42
                 })],
                 extra: serde_json::Map::new(),
             })
@@ -1519,10 +1540,14 @@ mod tests {
                 .len(),
             1
         );
-        dispatcher
-            .dispatch("unarchive_worktree", serde_json::json!({"worktreeId":"w1"}))
+        let restored = dispatcher
+            .dispatch(
+                "checkout_pr",
+                serde_json::json!({"projectId":"p1","prNumber":42}),
+            )
             .await
             .unwrap();
+        assert_eq!(restored["id"], "w1");
         dispatcher
             .dispatch(
                 "close_base_session_clean",

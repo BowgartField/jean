@@ -47,6 +47,7 @@ pub const HEADLESS_CAPABILITIES: &[CommandCapability] = core_capabilities![
     "list_archived_worktrees",
     "create_worktree",
     "create_worktree_from_existing_branch",
+    "checkout_pr",
     "import_worktree",
     "delete_worktree",
     "permanently_delete_worktree",
