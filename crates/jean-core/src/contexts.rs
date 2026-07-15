@@ -1,7 +1,11 @@
-use crate::{BackendError, BackendErrorCode, GitHubService, GitService, PersistenceService};
+use crate::{
+    BackendError, BackendErrorCode, GitHubService, GitService, LinearIssueDetail, LinearService,
+    PersistenceService,
+};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::path::Path;
+use sha2::{Digest, Sha256};
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -159,6 +163,24 @@ pub struct LoadedPullRequestContext {
     pub review_count: usize,
     pub repo_owner: String,
     pub repo_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoadedLinearIssueContext {
+    pub identifier: String,
+    pub title: String,
+    pub comment_count: usize,
+    pub project_name: String,
+    pub url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LinearIssueContextContent {
+    pub identifier: String,
+    pub title: String,
+    pub content: String,
 }
 
 pub fn slugify_issue_title(title: &str) -> String {
@@ -525,6 +547,164 @@ impl ContextService {
         self.numbered_content("prs", "pr", session_id, number, project_path)
     }
 
+    pub async fn load_linear_issue(
+        &self,
+        linear: &LinearService,
+        session_id: &str,
+        project_id: &str,
+        issue_id: &str,
+    ) -> Result<LoadedLinearIssueContext, BackendError> {
+        let config = linear.config(project_id)?;
+        let mut detail = linear.issue(project_id, issue_id).await?;
+        let identifier_lower = detail.identifier.to_lowercase();
+        let contexts_dir = self.persistence.git_contexts_dir()?;
+        cache_linear_context_images(
+            &mut detail,
+            &config.api_key,
+            &contexts_dir
+                .join("linear-context-images")
+                .join(&config.project_name)
+                .join(&identifier_lower),
+        )
+        .await;
+        std::fs::write(
+            contexts_dir.join(format!(
+                "{}-linear-{identifier_lower}.md",
+                config.project_name
+            )),
+            format_linear_issue_detail_markdown(&detail),
+        )?;
+        self.add_reference(
+            "linear",
+            format!("{}-{}", config.project_name, detail.identifier),
+            session_id,
+        )?;
+        Ok(LoadedLinearIssueContext {
+            identifier: detail.identifier,
+            title: detail.title,
+            comment_count: detail.comments.len(),
+            project_name: config.project_name,
+            url: Some(detail.url),
+        })
+    }
+
+    pub fn list_linear_issues(
+        &self,
+        linear: &LinearService,
+        session_id: &str,
+        worktree_id: Option<&str>,
+        project_id: &str,
+    ) -> Result<Vec<LoadedLinearIssueContext>, BackendError> {
+        let project_name = linear.config(project_id)?.project_name;
+        let mut contexts = Vec::new();
+        for (identifier, content) in
+            self.linear_context_files(&project_name, session_id, worktree_id)?
+        {
+            let title =
+                linear_context_title(&content).unwrap_or_else(|| format!("Issue {identifier}"));
+            let comment_count = content
+                .split("## Comments")
+                .nth(1)
+                .map(|section| {
+                    section
+                        .lines()
+                        .filter(|line| line.starts_with("### "))
+                        .count()
+                })
+                .unwrap_or(0);
+            let url = content
+                .lines()
+                .find_map(|line| line.strip_prefix("- **URL**: ").map(str::to_string));
+            contexts.push(LoadedLinearIssueContext {
+                identifier,
+                title,
+                comment_count,
+                project_name: project_name.clone(),
+                url,
+            });
+        }
+        Ok(contexts)
+    }
+
+    pub fn linear_issue_contents(
+        &self,
+        linear: &LinearService,
+        session_id: &str,
+        worktree_id: Option<&str>,
+        project_id: &str,
+    ) -> Result<Vec<LinearIssueContextContent>, BackendError> {
+        let project_name = linear.config(project_id)?.project_name;
+        Ok(self
+            .linear_context_files(&project_name, session_id, worktree_id)?
+            .into_iter()
+            .map(|(identifier, content)| LinearIssueContextContent {
+                title: linear_context_title(&content)
+                    .unwrap_or_else(|| format!("Issue {identifier}")),
+                identifier,
+                content,
+            })
+            .collect())
+    }
+
+    pub fn remove_linear_issue(
+        &self,
+        linear: &LinearService,
+        session_id: &str,
+        project_id: &str,
+        identifier: &str,
+    ) -> Result<(), BackendError> {
+        let project_name = linear.config(project_id)?.project_name;
+        let key = format!("{project_name}-{identifier}");
+        if self.remove_reference("linear", &key, session_id)? {
+            remove_file_if_exists(&self.persistence.git_contexts_dir()?.join(format!(
+                "{project_name}-linear-{}.md",
+                identifier.to_lowercase()
+            )))?;
+        }
+        Ok(())
+    }
+
+    pub fn linear_keys(&self, session_id: &str) -> Result<Vec<String>, BackendError> {
+        self.combined_keys("linear", session_id, None)
+    }
+
+    pub fn linear_identifiers(
+        &self,
+        session_id: &str,
+        project_name: &str,
+    ) -> Result<Vec<String>, BackendError> {
+        let prefix = format!("{project_name}-");
+        Ok(self
+            .linear_keys(session_id)?
+            .into_iter()
+            .filter_map(|key| key.strip_prefix(&prefix).map(str::to_string))
+            .collect())
+    }
+
+    fn linear_context_files(
+        &self,
+        project_name: &str,
+        session_id: &str,
+        worktree_id: Option<&str>,
+    ) -> Result<Vec<(String, String)>, BackendError> {
+        let prefix = format!("{project_name}-");
+        let directory = self.persistence.git_contexts_dir()?;
+        Ok(self
+            .combined_keys("linear", session_id, worktree_id)?
+            .into_iter()
+            .filter_map(|key| {
+                let identifier = key.strip_prefix(&prefix)?.to_string();
+                let path = directory.join(format!(
+                    "{project_name}-linear-{}.md",
+                    identifier.to_lowercase()
+                ));
+                std::fs::read_to_string(path)
+                    .ok()
+                    .map(|content| (identifier, content))
+            })
+            .collect())
+    }
+
     fn add_reference(
         &self,
         category: &str,
@@ -621,6 +801,15 @@ impl ContextService {
             )
         })
     }
+}
+
+fn linear_context_title(content: &str) -> Option<String> {
+    content
+        .lines()
+        .next()?
+        .strip_prefix("# Linear Issue ")?
+        .split_once(": ")
+        .map(|(_, title)| title.to_string())
 }
 
 fn reference_map<'a>(
@@ -853,6 +1042,249 @@ pub fn format_linear_context_markdown(context: &LinearIssueContext) -> String {
     content
 }
 
+pub fn format_linear_issue_detail_markdown(context: &LinearIssueDetail) -> String {
+    let mut content = format!(
+        "# Linear Issue {}: {}\n\n- **Status**: {}\n- **Priority**: {}\n",
+        context.identifier, context.title, context.state.name, context.priority_label
+    );
+    if !context.labels.is_empty() {
+        content.push_str(&format!(
+            "- **Labels**: {}\n",
+            context
+                .labels
+                .iter()
+                .map(|label| label.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    if let Some(assignee) = &context.assignee {
+        content.push_str(&format!("- **Assignee**: {}\n", assignee.display_name));
+    }
+    content.push_str(&format!(
+        "- **URL**: {}\n\n---\n\n## Description\n\n",
+        context.url
+    ));
+    content.push_str(nonempty(context.description.as_deref()));
+    content.push_str("\n\n");
+    if !context.comments.is_empty() {
+        content.push_str("## Comments\n\n");
+        for comment in &context.comments {
+            let author = comment
+                .user
+                .as_ref()
+                .map(|user| user.display_name.as_str())
+                .unwrap_or("Unknown");
+            content.push_str(&format!(
+                "### {} ({})\n\n{}\n\n---\n\n",
+                author, comment.created_at, comment.body
+            ));
+        }
+    }
+    content.push_str("---\n\n*Investigate this issue and propose a solution.*\n");
+    content
+}
+
+const MAX_LINEAR_CONTEXT_IMAGE_BYTES: usize = 15 * 1024 * 1024;
+
+fn is_trusted_linear_image_url(url: &str) -> bool {
+    let Ok(parsed) = reqwest::Url::parse(url) else {
+        return false;
+    };
+    parsed.scheme() == "https"
+        && parsed.host_str().is_some_and(|host| {
+            host == "uploads.linear.app" || host.ends_with(".uploads.linear.app")
+        })
+}
+
+fn extract_linear_image_urls(markdown: &str) -> Vec<String> {
+    let markdown_images = regex::Regex::new(r"!\[[^\]]*\]\(\s*<?([^)\s>]+)>?\s*\)").unwrap();
+    let html_images =
+        regex::Regex::new(r#"<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["'][^>]*>"#).unwrap();
+    let mut seen = HashSet::new();
+    markdown_images
+        .captures_iter(markdown)
+        .chain(html_images.captures_iter(markdown))
+        .filter_map(|captures| captures.get(1).map(|value| value.as_str().to_string()))
+        .filter(|url| is_trusted_linear_image_url(url) && seen.insert(url.clone()))
+        .collect()
+}
+
+fn rewrite_linear_image_urls(markdown: &str, replacements: &HashMap<String, PathBuf>) -> String {
+    let markdown_images = regex::Regex::new(r"!\[([^\]]*)\]\(\s*<?([^)\s>]+)>?\s*\)").unwrap();
+    let html_images =
+        regex::Regex::new(r#"(<img\b[^>]*\bsrc\s*=\s*["'])([^"']+)(["'][^>]*>)"#).unwrap();
+    let rewritten = markdown_images.replace_all(markdown, |captures: &regex::Captures<'_>| {
+        let url = captures
+            .get(2)
+            .map(|value| value.as_str())
+            .unwrap_or_default();
+        replacements.get(url).map_or_else(
+            || captures[0].to_string(),
+            |path| format!("![{}](<{}>)", &captures[1], path.to_string_lossy()),
+        )
+    });
+    html_images
+        .replace_all(&rewritten, |captures: &regex::Captures<'_>| {
+            let url = captures
+                .get(2)
+                .map(|value| value.as_str())
+                .unwrap_or_default();
+            replacements.get(url).map_or_else(
+                || captures[0].to_string(),
+                |path| format!("{}{}{}", &captures[1], path.to_string_lossy(), &captures[3]),
+            )
+        })
+        .into_owned()
+}
+
+fn linear_image_extension(url: &str, content_type: Option<&str>) -> &'static str {
+    match content_type
+        .and_then(|value| value.split(';').next())
+        .unwrap_or_default()
+    {
+        "image/png" => "png",
+        "image/jpeg" => "jpg",
+        "image/gif" => "gif",
+        "image/webp" => "webp",
+        "image/svg+xml" => "svg",
+        _ if url.to_lowercase().contains(".png") => "png",
+        _ if url.to_lowercase().contains(".jpg") || url.to_lowercase().contains(".jpeg") => "jpg",
+        _ if url.to_lowercase().contains(".gif") => "gif",
+        _ if url.to_lowercase().contains(".webp") => "webp",
+        _ if url.to_lowercase().contains(".svg") => "svg",
+        _ => "bin",
+    }
+}
+
+async fn download_linear_context_image(
+    client: &reqwest::Client,
+    api_key: &str,
+    url: &str,
+    cache_dir: &Path,
+) -> Result<PathBuf, BackendError> {
+    if !is_trusted_linear_image_url(url) {
+        return Err(BackendError::new(
+            BackendErrorCode::InvalidArgument,
+            format!("Refusing untrusted Linear image URL: {url}"),
+        ));
+    }
+    let hash = format!("{:x}", Sha256::digest(url.as_bytes()));
+    let mut response = client
+        .get(url)
+        .header("Authorization", api_key)
+        .send()
+        .await
+        .map_err(|error| {
+            BackendError::new(
+                BackendErrorCode::Io,
+                format!("Failed to download Linear image: {error}"),
+            )
+        })?;
+    if !response.status().is_success() {
+        return Err(BackendError::new(
+            BackendErrorCode::Io,
+            format!(
+                "Linear image download failed with status {}",
+                response.status()
+            ),
+        ));
+    }
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
+    if content_type
+        .as_deref()
+        .is_some_and(|value| !value.starts_with("image/"))
+    {
+        return Err(BackendError::new(
+            BackendErrorCode::InvalidArgument,
+            format!(
+                "Linear image URL returned non-image content type: {}",
+                content_type.unwrap()
+            ),
+        ));
+    }
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(|error| {
+        BackendError::new(
+            BackendErrorCode::Io,
+            format!("Failed to read Linear image bytes: {error}"),
+        )
+    })? {
+        bytes.extend_from_slice(&chunk);
+        if bytes.len() > MAX_LINEAR_CONTEXT_IMAGE_BYTES {
+            return Err(BackendError::new(
+                BackendErrorCode::InvalidArgument,
+                "Linear image is too large to cache",
+            ));
+        }
+    }
+    std::fs::create_dir_all(cache_dir)?;
+    let path = cache_dir.join(format!(
+        "{hash}.{}",
+        linear_image_extension(url, content_type.as_deref())
+    ));
+    if !path.exists() {
+        std::fs::write(&path, bytes)?;
+    }
+    Ok(path)
+}
+
+async fn cache_linear_markdown_images(
+    markdown: &str,
+    client: &reqwest::Client,
+    api_key: &str,
+    cache_dir: &Path,
+    replacements: &mut HashMap<String, PathBuf>,
+) -> String {
+    for url in extract_linear_image_urls(markdown) {
+        if replacements.contains_key(&url) {
+            continue;
+        }
+        match download_linear_context_image(client, api_key, &url, cache_dir).await {
+            Ok(path) => {
+                replacements.insert(url, path);
+            }
+            Err(error) => log::warn!("Failed to cache Linear context image: {error}"),
+        }
+    }
+    rewrite_linear_image_urls(markdown, replacements)
+}
+
+async fn cache_linear_context_images(
+    detail: &mut LinearIssueDetail,
+    api_key: &str,
+    cache_dir: &Path,
+) {
+    let client = reqwest::Client::new();
+    let mut replacements = HashMap::new();
+    if let Some(description) = &detail.description {
+        detail.description = Some(
+            cache_linear_markdown_images(
+                description,
+                &client,
+                api_key,
+                cache_dir,
+                &mut replacements,
+            )
+            .await,
+        );
+    }
+    for comment in &mut detail.comments {
+        comment.body = cache_linear_markdown_images(
+            &comment.body,
+            &client,
+            api_key,
+            cache_dir,
+            &mut replacements,
+        )
+        .await;
+    }
+}
+
 fn nonempty(value: Option<&str>) -> &str {
     value
         .filter(|value| !value.is_empty())
@@ -862,8 +1294,31 @@ fn nonempty(value: Option<&str>) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{GhRunner, ResolvedAppPaths};
+    use crate::{GhRunner, LinearTransport, ProjectsSnapshot, ResolvedAppPaths};
+    use async_trait::async_trait;
+    use serde_json::Value;
     use std::process::Output;
+
+    struct LinearIssueTransport;
+
+    #[async_trait]
+    impl LinearTransport for LinearIssueTransport {
+        async fn graphql(
+            &self,
+            _api_key: &str,
+            _query: &str,
+            _variables: Option<Value>,
+        ) -> Result<Value, BackendError> {
+            Ok(serde_json::json!({"data":{"issue":{
+                "id":"issue-id", "identifier":"ENG-42", "title":"Shared Linear",
+                "description":"body", "state":{"name":"Todo","type":"unstarted","color":"#fff"},
+                "labels":{"nodes":[{"name":"bug","color":"#f00"}]},
+                "assignee":{"name":"octo","displayName":"Octo"}, "createdAt":"2026-01-01",
+                "url":"https://linear.app/issue/ENG-42", "priority":2, "priorityLabel":"High",
+                "comments":{"nodes":[{"body":"comment","user":null,"createdAt":"2026-01-02"}]}
+            }}}))
+        }
+    }
 
     fn successful_output(stdout: &[u8]) -> Output {
         let mut output = Command::new("git").arg("--version").output().unwrap();
@@ -886,6 +1341,42 @@ mod tests {
         let value = serde_json::to_value(context).unwrap();
         assert_eq!(value["headRefName"], "feature");
         assert!(value.get("head_ref_name").is_none());
+    }
+
+    #[test]
+    fn linear_image_rewriting_only_accepts_trusted_uploads() {
+        let markdown = concat!(
+            "![one](https://uploads.linear.app/a.png)\n",
+            "<img src=\"https://uploads.linear.app/b.jpg\" />\n",
+            "![skip](https://example.com/not-linear.png)\n",
+            "![skip](http://uploads.linear.app/insecure.png)\n"
+        );
+        assert_eq!(
+            extract_linear_image_urls(markdown),
+            vec![
+                "https://uploads.linear.app/a.png".to_string(),
+                "https://uploads.linear.app/b.jpg".to_string(),
+            ]
+        );
+        let replacements = HashMap::from([
+            (
+                "https://uploads.linear.app/a.png".to_string(),
+                PathBuf::from("/tmp/linear/a.png"),
+            ),
+            (
+                "https://uploads.linear.app/b.jpg".to_string(),
+                PathBuf::from("/tmp/linear/b.jpg"),
+            ),
+        ]);
+        assert_eq!(
+            rewrite_linear_image_urls(markdown, &replacements),
+            concat!(
+                "![one](</tmp/linear/a.png>)\n",
+                "<img src=\"/tmp/linear/b.jpg\" />\n",
+                "![skip](https://example.com/not-linear.png)\n",
+                "![skip](http://uploads.linear.app/insecure.png)\n"
+            )
+        );
     }
 
     #[test]
@@ -1020,5 +1511,59 @@ mod tests {
         assert!(!directory.join("acme-widget-issue-12.md").exists());
         assert!(!directory.join("acme-widget-pr-42.md").exists());
         assert!(service.issue_content("session", 12, path).is_err());
+    }
+
+    #[tokio::test]
+    async fn linear_context_lifecycle_is_shared() {
+        let temp = tempfile::tempdir().unwrap();
+        let persistence = Arc::new(PersistenceService::new(Arc::new(ResolvedAppPaths::new(
+            temp.path().join("data"),
+            temp.path().join("config"),
+            temp.path().join("cache"),
+            temp.path().join("resources"),
+        ))));
+        persistence
+            .save_projects(&ProjectsSnapshot {
+                projects: vec![serde_json::json!({
+                    "id":"project", "name":"Jean", "linear_api_key":"key"
+                })],
+                ..Default::default()
+            })
+            .unwrap();
+        let linear =
+            LinearService::with_transport(persistence.clone(), Arc::new(LinearIssueTransport));
+        let contexts = ContextService::new(persistence.clone(), GitService::default());
+
+        let loaded = contexts
+            .load_linear_issue(&linear, "session", "project", "issue-id")
+            .await
+            .unwrap();
+        assert_eq!(loaded.identifier, "ENG-42");
+        assert_eq!(loaded.comment_count, 1);
+        assert_eq!(
+            contexts
+                .list_linear_issues(&linear, "session", None, "project")
+                .unwrap()[0]
+                .title,
+            "Shared Linear"
+        );
+        let contents = contexts
+            .linear_issue_contents(&linear, "session", None, "project")
+            .unwrap();
+        assert!(contents[0].content.contains("- **Priority**: High"));
+        assert_eq!(
+            contexts.linear_identifiers("session", "Jean").unwrap(),
+            ["ENG-42"]
+        );
+
+        contexts
+            .remove_linear_issue(&linear, "session", "project", "ENG-42")
+            .unwrap();
+        assert!(!persistence
+            .git_contexts_dir()
+            .unwrap()
+            .join("Jean-linear-eng-42.md")
+            .exists());
+        assert!(contexts.linear_keys("session").unwrap().is_empty());
     }
 }

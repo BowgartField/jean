@@ -203,6 +203,45 @@ impl CommandDispatcher for HeadlessDispatcher {
                     linear.issue_by_number(project_id, number).await?,
                 )?)
             }
+            "load_linear_issue_context" => {
+                let session_id = string_field(&args, "sessionId", "session_id")?;
+                let project_id = string_field(&args, "projectId", "project_id")?;
+                let issue_id = string_field(&args, "issueId", "issue_id")?;
+                Ok(serde_json::to_value(
+                    contexts
+                        .load_linear_issue(&linear, session_id, project_id, issue_id)
+                        .await?,
+                )?)
+            }
+            "list_loaded_linear_issue_contexts" => {
+                let session_id = string_field(&args, "sessionId", "session_id")?;
+                let worktree_id = optional_string_field(&args, "worktreeId", "worktree_id")?;
+                let project_id = string_field(&args, "projectId", "project_id")?;
+                Ok(serde_json::to_value(contexts.list_linear_issues(
+                    &linear,
+                    session_id,
+                    worktree_id.as_deref(),
+                    project_id,
+                )?)?)
+            }
+            "get_linear_issue_context_contents" => {
+                let session_id = string_field(&args, "sessionId", "session_id")?;
+                let worktree_id = optional_string_field(&args, "worktreeId", "worktree_id")?;
+                let project_id = string_field(&args, "projectId", "project_id")?;
+                Ok(serde_json::to_value(contexts.linear_issue_contents(
+                    &linear,
+                    session_id,
+                    worktree_id.as_deref(),
+                    project_id,
+                )?)?)
+            }
+            "remove_linear_issue_context" => {
+                let session_id = string_field(&args, "sessionId", "session_id")?;
+                let project_id = string_field(&args, "projectId", "project_id")?;
+                let identifier = string_field(&args, "identifier", "identifier")?;
+                contexts.remove_linear_issue(&linear, session_id, project_id, identifier)?;
+                Ok(Value::Null)
+            }
             "load_issue_context" => {
                 let session_id = string_field(&args, "sessionId", "session_id")?;
                 let number = u32_field(&args, "issueNumber", "issue_number")?;
@@ -1741,6 +1780,65 @@ mod tests {
             .await
             .unwrap();
         assert!(!directory.join("acme-widget-issue-12.md").exists());
+    }
+
+    #[tokio::test]
+    async fn headless_dispatcher_reads_and_removes_shared_linear_contexts() {
+        let context = test_context();
+        context
+            .persistence
+            .save_projects(&crate::ProjectsSnapshot {
+                projects: vec![serde_json::json!({
+                    "id":"project", "name":"Jean", "linear_api_key":"key"
+                })],
+                ..Default::default()
+            })
+            .unwrap();
+        let directory = context.persistence.git_contexts_dir().unwrap();
+        std::fs::write(
+            directory.join("Jean-linear-eng-42.md"),
+            "# Linear Issue ENG-42: Shared dispatch\n\n- **URL**: https://linear.app/ENG-42\n\n## Comments\n\n### Octo (today)\n",
+        )
+        .unwrap();
+        context
+            .persistence
+            .update_context_references(|references| {
+                references.linear.insert(
+                    "Jean-ENG-42".to_string(),
+                    crate::ContextRef {
+                        sessions: vec!["session".to_string()],
+                        orphaned_at: None,
+                    },
+                );
+                Ok(())
+            })
+            .unwrap();
+        let dispatcher = HeadlessDispatcher::new(context);
+        let args = serde_json::json!({"sessionId":"session","projectId":"project"});
+
+        let listed = dispatcher
+            .dispatch("list_loaded_linear_issue_contexts", args.clone())
+            .await
+            .unwrap();
+        assert_eq!(listed[0]["title"], "Shared dispatch");
+        let contents = dispatcher
+            .dispatch("get_linear_issue_context_contents", args)
+            .await
+            .unwrap();
+        assert!(contents[0]["content"]
+            .as_str()
+            .unwrap()
+            .contains("Shared dispatch"));
+        dispatcher
+            .dispatch(
+                "remove_linear_issue_context",
+                serde_json::json!({
+                    "sessionId":"session", "projectId":"project", "identifier":"ENG-42"
+                }),
+            )
+            .await
+            .unwrap();
+        assert!(!directory.join("Jean-linear-eng-42.md").exists());
     }
 
     #[tokio::test]

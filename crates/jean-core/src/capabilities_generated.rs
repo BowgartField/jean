@@ -523,11 +523,6 @@ pub const UNAVAILABLE_CAPABILITIES: &[CommandCapability] = &[
         available: false,
     },
     CommandCapability {
-        command: "get_linear_issue_context_contents",
-        class: CapabilityClass::AdapterBacked,
-        available: false,
-    },
-    CommandCapability {
         command: "get_local_tool_status",
         class: CapabilityClass::AdapterBacked,
         available: false,
@@ -773,11 +768,6 @@ pub const UNAVAILABLE_CAPABILITIES: &[CommandCapability] = &[
         available: false,
     },
     CommandCapability {
-        command: "list_loaded_linear_issue_contexts",
-        class: CapabilityClass::AdapterBacked,
-        available: false,
-    },
-    CommandCapability {
         command: "list_loaded_security_contexts",
         class: CapabilityClass::AdapterBacked,
         available: false,
@@ -859,11 +849,6 @@ pub const UNAVAILABLE_CAPABILITIES: &[CommandCapability] = &[
     },
     CommandCapability {
         command: "load_emergency_data",
-        class: CapabilityClass::AdapterBacked,
-        available: false,
-    },
-    CommandCapability {
-        command: "load_linear_issue_context",
         class: CapabilityClass::AdapterBacked,
         available: false,
     },
@@ -1014,11 +999,6 @@ pub const UNAVAILABLE_CAPABILITIES: &[CommandCapability] = &[
     },
     CommandCapability {
         command: "remove_advisory_context",
-        class: CapabilityClass::AdapterBacked,
-        available: false,
-    },
-    CommandCapability {
-        command: "remove_linear_issue_context",
         class: CapabilityClass::AdapterBacked,
         available: false,
     },
