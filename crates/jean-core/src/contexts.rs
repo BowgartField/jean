@@ -204,6 +204,17 @@ pub struct LinearIssueContextContent {
     pub content: String,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct OrphanedContextKeys {
+    pub issues: Vec<String>,
+    pub pull_requests: Vec<String>,
+    pub security: Vec<String>,
+    pub advisories: Vec<String>,
+    pub linear: Vec<String>,
+}
+
+pub type SessionContextNumbers = (Vec<u32>, Vec<u32>, Vec<u32>);
+
 pub fn slugify_issue_title(title: &str) -> String {
     let slug = title
         .to_lowercase()
@@ -480,6 +491,19 @@ impl ContextService {
         self.numbered_content("issues", "issue", session_id, issue_number, project_path)
     }
 
+    pub fn issue_keys(&self, session_id: &str) -> Result<Vec<String>, BackendError> {
+        self.combined_keys("issues", session_id, None)
+    }
+
+    pub fn add_issue_reference(
+        &self,
+        repository_key: &str,
+        number: u32,
+        session_id: &str,
+    ) -> Result<(), BackendError> {
+        self.add_reference("issues", format!("{repository_key}-{number}"), session_id)
+    }
+
     pub fn load_pull_request(
         &self,
         github: &GitHubService,
@@ -566,6 +590,19 @@ impl ContextService {
         project_path: &str,
     ) -> Result<String, BackendError> {
         self.numbered_content("prs", "pr", session_id, number, project_path)
+    }
+
+    pub fn pull_request_keys(&self, session_id: &str) -> Result<Vec<String>, BackendError> {
+        self.combined_keys("prs", session_id, None)
+    }
+
+    pub fn add_pull_request_reference(
+        &self,
+        repository_key: &str,
+        number: u32,
+        session_id: &str,
+    ) -> Result<(), BackendError> {
+        self.add_reference("prs", format!("{repository_key}-{number}"), session_id)
     }
 
     pub fn load_security_alert(
@@ -817,6 +854,100 @@ impl ContextService {
 
     pub fn advisory_keys(&self, session_id: &str) -> Result<Vec<String>, BackendError> {
         self.combined_keys("advisories", session_id, None)
+    }
+
+    pub fn session_context_numbers(
+        &self,
+        session_id: &str,
+    ) -> Result<SessionContextNumbers, BackendError> {
+        Ok((
+            context_numbers(self.issue_keys(session_id)?),
+            context_numbers(self.pull_request_keys(session_id)?),
+            context_numbers(self.security_keys(session_id)?),
+        ))
+    }
+
+    pub fn session_context_content(
+        &self,
+        session_id: &str,
+        project_path: &str,
+    ) -> Result<String, BackendError> {
+        let repository = self.git.github_repository(project_path)?;
+        let repository_key = repository.key();
+        let directory = self.persistence.git_contexts_dir()?;
+        let mut parts = Vec::new();
+        append_numbered_contexts(
+            &mut parts,
+            &directory,
+            &repository_key,
+            "issue",
+            "Issue",
+            self.issue_keys(session_id)?,
+        );
+        append_numbered_contexts(
+            &mut parts,
+            &directory,
+            &repository_key,
+            "pr",
+            "PR",
+            self.pull_request_keys(session_id)?,
+        );
+        append_numbered_contexts(
+            &mut parts,
+            &directory,
+            &repository_key,
+            "security",
+            "Security Alert",
+            self.security_keys(session_id)?,
+        );
+        for key in self.advisory_keys(session_id)? {
+            let Some((owner, repo, ghsa_id)) = parse_advisory_context_key(&key) else {
+                continue;
+            };
+            let path = directory.join(format!("{owner}-{repo}-advisory-{ghsa_id}.md"));
+            if let Ok(content) = std::fs::read_to_string(path) {
+                parts.push(format!("### Advisory {ghsa_id}\n\n{content}"));
+            }
+        }
+        Ok(parts.join("\n\n"))
+    }
+
+    pub fn remove_all_session_references(
+        &self,
+        session_id: &str,
+    ) -> Result<OrphanedContextKeys, BackendError> {
+        self.persistence.update_context_references(|references| {
+            let now = now_seconds();
+            Ok(OrphanedContextKeys {
+                issues: orphan_session_references(&mut references.issues, session_id, now),
+                pull_requests: orphan_session_references(&mut references.prs, session_id, now),
+                security: orphan_session_references(&mut references.security, session_id, now),
+                advisories: orphan_session_references(&mut references.advisories, session_id, now),
+                linear: orphan_session_references(&mut references.linear, session_id, now),
+            })
+        })
+    }
+
+    pub fn cleanup_orphaned(&self, retention_days: u64) -> Result<u32, BackendError> {
+        let directory = self.persistence.git_contexts_dir()?;
+        let threshold = now_seconds().saturating_sub(retention_days.saturating_mul(86_400));
+        self.persistence.update_context_references(|references| {
+            let mut deleted = 0;
+            deleted +=
+                cleanup_numbered_references(&directory, &mut references.issues, "issue", threshold);
+            deleted +=
+                cleanup_numbered_references(&directory, &mut references.prs, "pr", threshold);
+            deleted += cleanup_numbered_references(
+                &directory,
+                &mut references.security,
+                "security",
+                threshold,
+            );
+            deleted +=
+                cleanup_advisory_references(&directory, &mut references.advisories, threshold);
+            deleted += cleanup_linear_references(&directory, &mut references.linear, threshold);
+            Ok(deleted)
+        })
     }
 
     pub async fn load_linear_issue(
@@ -1110,6 +1241,127 @@ fn reference_map_mut<'a>(
         "linear" => &mut references.linear,
         _ => unreachable!("known context category"),
     }
+}
+
+fn context_numbers(keys: Vec<String>) -> Vec<u32> {
+    keys.into_iter()
+        .filter_map(|key| key.rsplit('-').next()?.parse().ok())
+        .collect()
+}
+
+fn append_numbered_contexts(
+    parts: &mut Vec<String>,
+    directory: &Path,
+    repository_key: &str,
+    file_kind: &str,
+    heading: &str,
+    keys: Vec<String>,
+) {
+    let prefix = format!("{repository_key}-");
+    for key in keys {
+        if !key.starts_with(&prefix) {
+            continue;
+        }
+        let Some(number) = key
+            .rsplit('-')
+            .next()
+            .and_then(|value| value.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        let path = directory.join(format!("{repository_key}-{file_kind}-{number}.md"));
+        if let Ok(content) = std::fs::read_to_string(path) {
+            parts.push(format!("### {heading} #{number}\n\n{content}"));
+        }
+    }
+}
+
+fn orphan_session_references(
+    entries: &mut HashMap<String, ContextRef>,
+    session_id: &str,
+    now: u64,
+) -> Vec<String> {
+    entries
+        .iter_mut()
+        .filter_map(|(key, reference)| {
+            reference.sessions.retain(|id| id != session_id);
+            if reference.sessions.is_empty() && reference.orphaned_at.is_none() {
+                reference.orphaned_at = Some(now);
+                Some(key.clone())
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn cleanup_numbered_references(
+    directory: &Path,
+    entries: &mut HashMap<String, ContextRef>,
+    file_kind: &str,
+    threshold: u64,
+) -> u32 {
+    cleanup_references(entries, threshold, |key| {
+        let (repository, number) = key.rsplit_once('-')?;
+        Some(directory.join(format!("{repository}-{file_kind}-{number}.md")))
+    })
+}
+
+fn cleanup_advisory_references(
+    directory: &Path,
+    entries: &mut HashMap<String, ContextRef>,
+    threshold: u64,
+) -> u32 {
+    cleanup_references(entries, threshold, |key| {
+        let (repository, ghsa_id) = key.split_once("::")?;
+        Some(directory.join(format!("{repository}-advisory-{ghsa_id}.md")))
+    })
+}
+
+fn cleanup_linear_references(
+    directory: &Path,
+    entries: &mut HashMap<String, ContextRef>,
+    threshold: u64,
+) -> u32 {
+    cleanup_references(entries, threshold, |key| {
+        let (prefix, number) = key.rsplit_once('-')?;
+        let (project, team) = prefix.rsplit_once('-')?;
+        Some(directory.join(format!(
+            "{project}-linear-{}-{number}.md",
+            team.to_lowercase()
+        )))
+    })
+}
+
+fn cleanup_references(
+    entries: &mut HashMap<String, ContextRef>,
+    threshold: u64,
+    path_for_key: impl Fn(&str) -> Option<PathBuf>,
+) -> u32 {
+    let expired = entries
+        .iter()
+        .filter(|(_, reference)| {
+            reference
+                .orphaned_at
+                .is_some_and(|orphaned_at| orphaned_at < threshold)
+        })
+        .map(|(key, _)| key.clone())
+        .collect::<Vec<_>>();
+    let mut deleted = 0;
+    for key in &expired {
+        if let Some(path) = path_for_key(key) {
+            if path.exists() {
+                match std::fs::remove_file(&path) {
+                    Ok(()) => deleted += 1,
+                    Err(error) => {
+                        log::warn!("Failed to remove orphaned context {:?}: {error}", path)
+                    }
+                }
+            }
+        }
+        entries.remove(key);
+    }
+    deleted
 }
 
 fn parse_numbered_context_key(key: &str) -> Option<(String, String, u32)> {
@@ -1814,6 +2066,13 @@ mod tests {
             .advisory_content("session", None, "GHSA-abcd-1234-5678", path,)
             .unwrap()
             .contains("Private advisory"));
+        assert_eq!(
+            service.session_context_numbers("session").unwrap(),
+            (vec![12], vec![42], vec![7])
+        );
+        let combined = service.session_context_content("session", path).unwrap();
+        assert!(combined.contains("### Issue #12"));
+        assert!(combined.contains("### Advisory GHSA-abcd-1234-5678"));
 
         service.remove_issue("session", 12, path).unwrap();
         service.remove_pull_request("session", 42, path).unwrap();
@@ -1829,6 +2088,85 @@ mod tests {
             .join("acme-widget-advisory-GHSA-abcd-1234-5678.md")
             .exists());
         assert!(service.issue_content("session", 12, path).is_err());
+    }
+
+    #[test]
+    fn session_reference_cleanup_covers_every_context_kind() {
+        let temp = tempfile::tempdir().unwrap();
+        let persistence = Arc::new(PersistenceService::new(Arc::new(ResolvedAppPaths::new(
+            temp.path().join("data"),
+            temp.path().join("config"),
+            temp.path().join("cache"),
+            temp.path().join("resources"),
+        ))));
+        let service = ContextService::new(persistence.clone(), GitService::default());
+        let directory = persistence.git_contexts_dir().unwrap();
+        let files = [
+            "acme-widget-issue-1.md",
+            "acme-widget-pr-2.md",
+            "acme-widget-security-3.md",
+            "acme-widget-advisory-GHSA-test.md",
+            "Jean-linear-eng-4.md",
+        ];
+        for file in files {
+            std::fs::write(directory.join(file), "context").unwrap();
+        }
+        persistence
+            .update_context_references(|references| {
+                let reference = || ContextRef {
+                    sessions: vec!["session".to_string()],
+                    orphaned_at: None,
+                };
+                references
+                    .issues
+                    .insert("acme-widget-1".to_string(), reference());
+                references
+                    .prs
+                    .insert("acme-widget-2".to_string(), reference());
+                references
+                    .security
+                    .insert("acme-widget-3".to_string(), reference());
+                references
+                    .advisories
+                    .insert("acme-widget::GHSA-test".to_string(), reference());
+                references
+                    .linear
+                    .insert("Jean-ENG-4".to_string(), reference());
+                Ok(())
+            })
+            .unwrap();
+
+        let orphaned = service.remove_all_session_references("session").unwrap();
+        assert_eq!(orphaned.issues, ["acme-widget-1"]);
+        assert_eq!(orphaned.pull_requests, ["acme-widget-2"]);
+        assert_eq!(orphaned.security, ["acme-widget-3"]);
+        assert_eq!(orphaned.advisories, ["acme-widget::GHSA-test"]);
+        assert_eq!(orphaned.linear, ["Jean-ENG-4"]);
+        persistence
+            .update_context_references(|references| {
+                for entries in [
+                    &mut references.issues,
+                    &mut references.prs,
+                    &mut references.security,
+                    &mut references.advisories,
+                    &mut references.linear,
+                ] {
+                    for reference in entries.values_mut() {
+                        reference.orphaned_at = Some(1);
+                    }
+                }
+                Ok(())
+            })
+            .unwrap();
+
+        assert_eq!(service.cleanup_orphaned(0).unwrap(), 5);
+        assert!(files.iter().all(|file| !directory.join(file).exists()));
+        let references = persistence.load_context_references().unwrap();
+        assert!(references.issues.is_empty());
+        assert!(references.prs.is_empty());
+        assert!(references.security.is_empty());
+        assert!(references.advisories.is_empty());
+        assert!(references.linear.is_empty());
     }
 
     #[tokio::test]

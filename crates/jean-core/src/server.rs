@@ -111,7 +111,8 @@ impl CommandDispatcher for HeadlessDispatcher {
             Arc::new(move |path, number| github_for_diff.pull_request_diff(path, number)),
         );
         let linear = LinearService::new(self.context.persistence.clone());
-        let sessions = SessionService::new(self.context.persistence.clone());
+        let sessions =
+            SessionService::with_contexts(self.context.persistence.clone(), contexts.clone());
         let chat = ChatService::new(self.context.clone());
         match command {
             "get_server_platform" => Ok(Value::String(std::env::consts::OS.to_string())),

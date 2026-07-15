@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager};
 
 use super::git::get_repo_identifier;
@@ -142,26 +141,6 @@ pub fn format_issue_context_markdown(ctx: &IssueContext) -> String {
 // =============================================================================
 
 /// Reference tracking for a single context file (issue or PR)
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct ContextRef {
-    #[serde(alias = "worktrees")]
-    pub sessions: Vec<String>,
-    pub orphaned_at: Option<u64>,
-}
-
-/// Tracks which sessions reference which shared context files
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct ContextReferences {
-    pub issues: std::collections::HashMap<String, ContextRef>,
-    pub prs: std::collections::HashMap<String, ContextRef>,
-    #[serde(default)]
-    pub security: std::collections::HashMap<String, ContextRef>,
-    #[serde(default)]
-    pub advisories: std::collections::HashMap<String, ContextRef>,
-    #[serde(default)]
-    pub linear: std::collections::HashMap<String, ContextRef>,
-}
-
 /// Get the directory for shared GitHub contexts
 pub fn get_github_contexts_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let app_data_dir = app
@@ -169,37 +148,6 @@ pub fn get_github_contexts_dir(app: &tauri::AppHandle) -> Result<PathBuf, String
         .app_data_dir()
         .map_err(|e| format!("Failed to get app data directory: {e}"))?;
     Ok(app_data_dir.join("git-context"))
-}
-
-/// Get the path to the references.json file
-pub fn get_references_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    Ok(get_github_contexts_dir(app)?.join("references.json"))
-}
-
-/// Load context references from disk
-pub fn load_context_references(app: &tauri::AppHandle) -> Result<ContextReferences, String> {
-    let path = get_references_path(app)?;
-    if !path.exists() {
-        return Ok(ContextReferences::default());
-    }
-    let content = std::fs::read_to_string(&path)
-        .map_err(|e| format!("Failed to read references.json: {e}"))?;
-    serde_json::from_str(&content).map_err(|e| format!("Failed to parse references.json: {e}"))
-}
-
-/// Save context references to disk
-pub fn save_context_references(
-    app: &tauri::AppHandle,
-    refs: &ContextReferences,
-) -> Result<(), String> {
-    let dir = get_github_contexts_dir(app)?;
-    std::fs::create_dir_all(&dir)
-        .map_err(|e| format!("Failed to create git-context directory: {e}"))?;
-
-    let path = dir.join("references.json");
-    let content = serde_json::to_string_pretty(refs)
-        .map_err(|e| format!("Failed to serialize references: {e}"))?;
-    std::fs::write(&path, content).map_err(|e| format!("Failed to write references.json: {e}"))
 }
 
 /// Add a session reference to an issue context
@@ -210,17 +158,9 @@ pub fn add_issue_reference(
     issue_number: u32,
     session_id: &str,
 ) -> Result<(), String> {
-    let mut refs = load_context_references(app)?;
-    let key = format!("{repo_key}-{issue_number}");
-
-    let entry = refs.issues.entry(key).or_default();
-    if !entry.sessions.contains(&session_id.to_string()) {
-        entry.sessions.push(session_id.to_string());
-    }
-    // Clear orphaned status when a reference is added
-    entry.orphaned_at = None;
-
-    save_context_references(app, &refs)
+    crate::backend_runtime::context_service(app)?
+        .add_issue_reference(repo_key, issue_number, session_id)
+        .map_err(|error| error.to_string())
 }
 
 /// Add a session reference to a PR context
@@ -231,81 +171,9 @@ pub fn add_pr_reference(
     pr_number: u32,
     session_id: &str,
 ) -> Result<(), String> {
-    let mut refs = load_context_references(app)?;
-    let key = format!("{repo_key}-{pr_number}");
-
-    let entry = refs.prs.entry(key).or_default();
-    if !entry.sessions.contains(&session_id.to_string()) {
-        entry.sessions.push(session_id.to_string());
-    }
-    // Clear orphaned status when a reference is added
-    entry.orphaned_at = None;
-
-    save_context_references(app, &refs)
-}
-
-/// Remove a session reference from an issue context
-/// Returns true if the context is now orphaned (no more references)
-pub fn remove_issue_reference(
-    app: &tauri::AppHandle,
-    repo_key: &str,
-    issue_number: u32,
-    session_id: &str,
-) -> Result<bool, String> {
-    let mut refs = load_context_references(app)?;
-    let key = format!("{repo_key}-{issue_number}");
-
-    let orphaned = if let Some(entry) = refs.issues.get_mut(&key) {
-        entry.sessions.retain(|s| s != session_id);
-        if entry.sessions.is_empty() && entry.orphaned_at.is_none() {
-            entry.orphaned_at = Some(
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs(),
-            );
-            true
-        } else {
-            false
-        }
-    } else {
-        false
-    };
-
-    save_context_references(app, &refs)?;
-    Ok(orphaned)
-}
-
-/// Remove a session reference from a PR context
-/// Returns true if the context is now orphaned (no more references)
-pub fn remove_pr_reference(
-    app: &tauri::AppHandle,
-    repo_key: &str,
-    pr_number: u32,
-    session_id: &str,
-) -> Result<bool, String> {
-    let mut refs = load_context_references(app)?;
-    let key = format!("{repo_key}-{pr_number}");
-
-    let orphaned = if let Some(entry) = refs.prs.get_mut(&key) {
-        entry.sessions.retain(|s| s != session_id);
-        if entry.sessions.is_empty() && entry.orphaned_at.is_none() {
-            entry.orphaned_at = Some(
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs(),
-            );
-            true
-        } else {
-            false
-        }
-    } else {
-        false
-    };
-
-    save_context_references(app, &refs)?;
-    Ok(orphaned)
+    crate::backend_runtime::context_service(app)?
+        .add_pull_request_reference(repo_key, pr_number, session_id)
+        .map_err(|error| error.to_string())
 }
 
 /// Get all issue keys referenced by a session
@@ -314,13 +182,9 @@ pub fn get_session_issue_refs(
     app: &tauri::AppHandle,
     session_id: &str,
 ) -> Result<Vec<String>, String> {
-    let refs = load_context_references(app)?;
-    Ok(refs
-        .issues
-        .iter()
-        .filter(|(_, entry)| entry.sessions.contains(&session_id.to_string()))
-        .map(|(key, _)| key.clone())
-        .collect())
+    crate::backend_runtime::context_service(app)?
+        .issue_keys(session_id)
+        .map_err(|error| error.to_string())
 }
 
 /// Get all PR keys referenced by a session
@@ -329,13 +193,9 @@ pub fn get_session_pr_refs(
     app: &tauri::AppHandle,
     session_id: &str,
 ) -> Result<Vec<String>, String> {
-    let refs = load_context_references(app)?;
-    Ok(refs
-        .prs
-        .iter()
-        .filter(|(_, entry)| entry.sessions.contains(&session_id.to_string()))
-        .map(|(key, _)| key.clone())
-        .collect())
+    crate::backend_runtime::context_service(app)?
+        .pull_request_keys(session_id)
+        .map_err(|error| error.to_string())
 }
 
 /// Get all security alert keys referenced by a session
@@ -379,35 +239,15 @@ fn advisory_refs_contain_expected_key(
             .unwrap_or(false)
 }
 
-/// Extract the number from a context ref key (format: "{owner}-{repo}-{number}")
-fn extract_number_from_ref_key(key: &str) -> Option<u32> {
-    key.rsplit('-').next()?.parse().ok()
-}
-
 /// Get all issue, PR, and security alert numbers referenced by a session
 /// Returns (issue_numbers, pr_numbers, security_numbers)
 pub fn get_session_context_numbers(
     app: &AppHandle,
     session_id: &str,
 ) -> Result<(Vec<u32>, Vec<u32>, Vec<u32>), String> {
-    let issue_keys = get_session_issue_refs(app, session_id)?;
-    let pr_keys = get_session_pr_refs(app, session_id)?;
-    let security_keys = get_session_security_refs(app, session_id)?;
-
-    let issue_nums: Vec<u32> = issue_keys
-        .iter()
-        .filter_map(|k| extract_number_from_ref_key(k))
-        .collect();
-    let pr_nums: Vec<u32> = pr_keys
-        .iter()
-        .filter_map(|k| extract_number_from_ref_key(k))
-        .collect();
-    let security_nums: Vec<u32> = security_keys
-        .iter()
-        .filter_map(|k| extract_number_from_ref_key(k))
-        .collect();
-
-    Ok((issue_nums, pr_nums, security_nums))
+    crate::backend_runtime::context_service(app)?
+        .session_context_numbers(session_id)
+        .map_err(|error| error.to_string())
 }
 
 /// Get all loaded context markdown content for a session
@@ -417,71 +257,9 @@ pub fn get_session_context_content(
     session_id: &str,
     project_path: &str,
 ) -> Result<String, String> {
-    let repo_id = get_repo_identifier(project_path)?;
-    let repo_key = repo_id.to_key();
-    let contexts_dir = get_github_contexts_dir(app)?;
-
-    let issue_keys = get_session_issue_refs(app, session_id)?;
-    let pr_keys = get_session_pr_refs(app, session_id)?;
-    let security_keys = get_session_security_refs(app, session_id)?;
-    let advisory_keys = get_session_advisory_refs(app, session_id)?;
-
-    if issue_keys.is_empty()
-        && pr_keys.is_empty()
-        && security_keys.is_empty()
-        && advisory_keys.is_empty()
-    {
-        return Ok(String::new());
-    }
-
-    let mut parts: Vec<String> = Vec::new();
-
-    for key in &issue_keys {
-        if let Some(number) = extract_number_from_ref_key(key) {
-            let file = contexts_dir.join(format!("{repo_key}-issue-{number}.md"));
-            if file.exists() {
-                if let Ok(content) = std::fs::read_to_string(&file) {
-                    parts.push(format!("### Issue #{number}\n\n{content}"));
-                }
-            }
-        }
-    }
-
-    for key in &pr_keys {
-        if let Some(number) = extract_number_from_ref_key(key) {
-            let file = contexts_dir.join(format!("{repo_key}-pr-{number}.md"));
-            if file.exists() {
-                if let Ok(content) = std::fs::read_to_string(&file) {
-                    parts.push(format!("### PR #{number}\n\n{content}"));
-                }
-            }
-        }
-    }
-
-    for key in &security_keys {
-        if let Some(number) = extract_number_from_ref_key(key) {
-            let file = contexts_dir.join(format!("{repo_key}-security-{number}.md"));
-            if file.exists() {
-                if let Ok(content) = std::fs::read_to_string(&file) {
-                    parts.push(format!("### Security Alert #{number}\n\n{content}"));
-                }
-            }
-        }
-    }
-
-    for key in &advisory_keys {
-        if let Some((owner, repo, ghsa_id)) = parse_advisory_context_key(key) {
-            let adv_repo_key = format!("{owner}-{repo}");
-            let file = contexts_dir.join(format!("{adv_repo_key}-advisory-{ghsa_id}.md"));
-            if file.exists() {
-                if let Ok(content) = std::fs::read_to_string(&file) {
-                    parts.push(format!("### Advisory {ghsa_id}\n\n{content}"));
-                }
-            }
-        }
-    }
-
-    Ok(parts.join("\n\n"))
+    crate::backend_runtime::context_service(app)?
+        .session_context_content(session_id, project_path)
+        .map_err(|error| error.to_string())
 }
 
 /// Remove all references for a session
@@ -490,55 +268,14 @@ pub fn remove_all_session_references(
     app: &tauri::AppHandle,
     session_id: &str,
 ) -> Result<(Vec<String>, Vec<String>, Vec<String>, Vec<String>), String> {
-    let mut refs = load_context_references(app)?;
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-
-    let mut orphaned_issues = Vec::new();
-    let mut orphaned_prs = Vec::new();
-    let mut orphaned_security = Vec::new();
-    let mut orphaned_advisories = Vec::new();
-
-    for (key, entry) in refs.issues.iter_mut() {
-        entry.sessions.retain(|s| s != session_id);
-        if entry.sessions.is_empty() && entry.orphaned_at.is_none() {
-            entry.orphaned_at = Some(now);
-            orphaned_issues.push(key.clone());
-        }
-    }
-
-    for (key, entry) in refs.prs.iter_mut() {
-        entry.sessions.retain(|s| s != session_id);
-        if entry.sessions.is_empty() && entry.orphaned_at.is_none() {
-            entry.orphaned_at = Some(now);
-            orphaned_prs.push(key.clone());
-        }
-    }
-
-    for (key, entry) in refs.security.iter_mut() {
-        entry.sessions.retain(|s| s != session_id);
-        if entry.sessions.is_empty() && entry.orphaned_at.is_none() {
-            entry.orphaned_at = Some(now);
-            orphaned_security.push(key.clone());
-        }
-    }
-
-    for (key, entry) in refs.advisories.iter_mut() {
-        entry.sessions.retain(|s| s != session_id);
-        if entry.sessions.is_empty() && entry.orphaned_at.is_none() {
-            entry.orphaned_at = Some(now);
-            orphaned_advisories.push(key.clone());
-        }
-    }
-
-    save_context_references(app, &refs)?;
+    let orphaned = crate::backend_runtime::context_service(app)?
+        .remove_all_session_references(session_id)
+        .map_err(|error| error.to_string())?;
     Ok((
-        orphaned_issues,
-        orphaned_prs,
-        orphaned_security,
-        orphaned_advisories,
+        orphaned.issues,
+        orphaned.pull_requests,
+        orphaned.security,
+        orphaned.advisories,
     ))
 }
 
@@ -561,148 +298,9 @@ pub fn cleanup_orphaned_contexts(
     app: &tauri::AppHandle,
     retention_days: u64,
 ) -> Result<u32, String> {
-    let mut refs = load_context_references(app)?;
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let retention_secs = retention_days * 24 * 60 * 60;
-
-    let contexts_dir = get_github_contexts_dir(app)?;
-    let mut deleted_count = 0u32;
-
-    // Clean up orphaned issues
-    let issues_to_remove: Vec<String> = refs
-        .issues
-        .iter()
-        .filter_map(|(key, entry)| {
-            if let Some(orphaned_at) = entry.orphaned_at {
-                if orphaned_at + retention_secs < now {
-                    return Some(key.clone());
-                }
-            }
-            None
-        })
-        .collect();
-
-    for key in &issues_to_remove {
-        // File format: {repo_key}-issue-{number}.md
-        // Key format: {repo_key}-{number}
-        // We need to transform key to filename
-        if let Some(last_dash) = key.rfind('-') {
-            let repo_key = &key[..last_dash];
-            let number = &key[last_dash + 1..];
-            let filename = format!("{repo_key}-issue-{number}.md");
-            let file_path = contexts_dir.join(&filename);
-            if file_path.exists() {
-                if let Err(e) = std::fs::remove_file(&file_path) {
-                    log::warn!("Failed to remove orphaned issue context {filename}: {e}");
-                } else {
-                    deleted_count += 1;
-                }
-            }
-        }
-        refs.issues.remove(key);
-    }
-
-    // Clean up orphaned PRs
-    let prs_to_remove: Vec<String> = refs
-        .prs
-        .iter()
-        .filter_map(|(key, entry)| {
-            if let Some(orphaned_at) = entry.orphaned_at {
-                if orphaned_at + retention_secs < now {
-                    return Some(key.clone());
-                }
-            }
-            None
-        })
-        .collect();
-
-    for key in &prs_to_remove {
-        // File format: {repo_key}-pr-{number}.md
-        // Key format: {repo_key}-{number}
-        if let Some(last_dash) = key.rfind('-') {
-            let repo_key = &key[..last_dash];
-            let number = &key[last_dash + 1..];
-            let filename = format!("{repo_key}-pr-{number}.md");
-            let file_path = contexts_dir.join(&filename);
-            if file_path.exists() {
-                if let Err(e) = std::fs::remove_file(&file_path) {
-                    log::warn!("Failed to remove orphaned PR context {filename}: {e}");
-                } else {
-                    deleted_count += 1;
-                }
-            }
-        }
-        refs.prs.remove(key);
-    }
-
-    // Clean up orphaned security alerts
-    let security_to_remove: Vec<String> = refs
-        .security
-        .iter()
-        .filter_map(|(key, entry)| {
-            if let Some(orphaned_at) = entry.orphaned_at {
-                if orphaned_at + retention_secs < now {
-                    return Some(key.clone());
-                }
-            }
-            None
-        })
-        .collect();
-
-    for key in &security_to_remove {
-        // File format: {repo_key}-security-{number}.md
-        // Key format: {repo_key}-{number}
-        if let Some(last_dash) = key.rfind('-') {
-            let repo_key = &key[..last_dash];
-            let number = &key[last_dash + 1..];
-            let filename = format!("{repo_key}-security-{number}.md");
-            let file_path = contexts_dir.join(&filename);
-            if file_path.exists() {
-                if let Err(e) = std::fs::remove_file(&file_path) {
-                    log::warn!("Failed to remove orphaned security context {filename}: {e}");
-                } else {
-                    deleted_count += 1;
-                }
-            }
-        }
-        refs.security.remove(key);
-    }
-
-    // Clean up orphaned advisories
-    let advisories_to_remove: Vec<String> = refs
-        .advisories
-        .iter()
-        .filter_map(|(key, entry)| {
-            if let Some(orphaned_at) = entry.orphaned_at {
-                if orphaned_at + retention_secs < now {
-                    return Some(key.clone());
-                }
-            }
-            None
-        })
-        .collect();
-
-    for key in &advisories_to_remove {
-        if let Some((owner, repo, ghsa_id)) = parse_advisory_context_key(key) {
-            let adv_repo_key = format!("{owner}-{repo}");
-            let filename = format!("{adv_repo_key}-advisory-{ghsa_id}.md");
-            let file_path = contexts_dir.join(&filename);
-            if file_path.exists() {
-                if let Err(e) = std::fs::remove_file(&file_path) {
-                    log::warn!("Failed to remove orphaned advisory context {filename}: {e}");
-                } else {
-                    deleted_count += 1;
-                }
-            }
-        }
-        refs.advisories.remove(key);
-    }
-
-    save_context_references(app, &refs)?;
-    Ok(deleted_count)
+    crate::backend_runtime::context_service(app)?
+        .cleanup_orphaned(retention_days)
+        .map_err(|error| error.to_string())
 }
 
 /// Load/refresh issue context for a session by fetching data from GitHub

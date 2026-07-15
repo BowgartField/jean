@@ -34,8 +34,9 @@ pub use contexts::{
     AdvisoryVulnerability, ContextRef, ContextReferences, ContextService, GitHubAuthor,
     GitHubComment, GitHubReview, IssueContext, LinearComment, LinearIssueContext,
     LinearIssueContextContent, LinearUser, LoadedAdvisoryContext, LoadedIssueContext,
-    LoadedLinearIssueContext, LoadedPullRequestContext, LoadedSecurityAlertContext, PrDiffLoader,
-    PullRequestContext, SecurityAlertContext, WorktreeContexts,
+    LoadedLinearIssueContext, LoadedPullRequestContext, LoadedSecurityAlertContext,
+    OrphanedContextKeys, PrDiffLoader, PullRequestContext, SecurityAlertContext,
+    SessionContextNumbers, WorktreeContexts,
 };
 pub use error::{BackendError, BackendErrorCode};
 pub use events::{EventSink, ServerEventSink, WsBroadcaster, WsEvent};

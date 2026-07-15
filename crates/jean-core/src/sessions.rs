@@ -1,4 +1,4 @@
-use crate::{BackendError, BackendErrorCode, PersistenceService};
+use crate::{BackendError, BackendErrorCode, ContextService, GitService, PersistenceService};
 use serde_json::{Map, Value};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -7,11 +7,22 @@ use uuid::Uuid;
 #[derive(Clone)]
 pub struct SessionService {
     persistence: Arc<PersistenceService>,
+    contexts: ContextService,
 }
 
 impl SessionService {
     pub fn new(persistence: Arc<PersistenceService>) -> Self {
-        Self { persistence }
+        Self {
+            contexts: ContextService::new(persistence.clone(), GitService::default()),
+            persistence,
+        }
+    }
+
+    pub fn with_contexts(persistence: Arc<PersistenceService>, contexts: ContextService) -> Self {
+        Self {
+            persistence,
+            contexts,
+        }
     }
 
     pub fn fork_session(
@@ -346,6 +357,10 @@ impl SessionService {
         worktree_id: &str,
         session_id: &str,
     ) -> Result<Option<String>, BackendError> {
+        self.get(worktree_id, session_id)?;
+        self.persistence.delete_session_data(session_id)?;
+        self.persistence.delete_combined_contexts(session_id)?;
+        self.contexts.remove_all_session_references(session_id)?;
         self.persistence
             .update_session_index(worktree_id, empty_index(worktree_id), |index| {
                 let object = object_mut(index)?;
@@ -736,6 +751,67 @@ mod tests {
             .is_empty());
         service.archive("w1", id, false).unwrap();
         assert_eq!(service.close("w1", id).unwrap(), None);
+    }
+
+    #[test]
+    fn close_removes_session_artifacts_and_orphans_context_references() {
+        let temp = tempfile::tempdir().unwrap();
+        let service = service(&temp);
+        let first = service
+            .create("w1", Some("First"), None, None, None, None, None, None)
+            .unwrap();
+        let second = service
+            .create("w1", Some("Second"), None, None, None, None, None, None)
+            .unwrap();
+        let first_id = first["id"].as_str().unwrap();
+        let second_id = second["id"].as_str().unwrap();
+        let combined_dir = temp.path().join("data/combined-contexts");
+        std::fs::create_dir_all(&combined_dir).unwrap();
+        let combined = combined_dir.join(format!("{second_id}-combined.md"));
+        let codex_combined = combined_dir.join(format!("{second_id}-codex-combined.md"));
+        std::fs::write(&combined, "combined").unwrap();
+        std::fs::write(&codex_combined, "codex combined").unwrap();
+        service
+            .persistence
+            .update_context_references(|references| {
+                let reference = || crate::ContextRef {
+                    sessions: vec![second_id.to_string()],
+                    orphaned_at: None,
+                };
+                references
+                    .issues
+                    .insert("acme-widget-1".to_string(), reference());
+                references
+                    .linear
+                    .insert("Jean-ENG-4".to_string(), reference());
+                Ok(())
+            })
+            .unwrap();
+
+        assert_eq!(
+            service.close("w1", second_id).unwrap().as_deref(),
+            Some(first_id)
+        );
+        assert!(service
+            .persistence
+            .load_session_metadata(second_id)
+            .unwrap()
+            .is_none());
+        assert!(!combined.exists());
+        assert!(!codex_combined.exists());
+        let references = service.persistence.load_context_references().unwrap();
+        assert!(references.issues["acme-widget-1"].sessions.is_empty());
+        assert!(references.issues["acme-widget-1"].orphaned_at.is_some());
+        assert!(references.linear["Jean-ENG-4"].sessions.is_empty());
+        assert!(references.linear["Jean-ENG-4"].orphaned_at.is_some());
+        assert_eq!(
+            service
+                .persistence
+                .load_session_index("w1")
+                .unwrap()
+                .unwrap()["active_session_id"],
+            first_id
+        );
     }
 
     #[test]
